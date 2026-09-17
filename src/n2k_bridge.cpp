@@ -48,40 +48,32 @@ uint32_t unique_device_number()
 
 void send_battery_status(const AppSettings &settings, const SmartShuntData &data, uint8_t sid)
 {
+    if (!data.voltage_valid && !data.current_valid && !data.temperature_valid) return;
     tN2kMsg message;
-    const double temperature_k = data.temperature_valid ? static_cast<double>(data.temperature_c) + 273.15 : N2kDoubleNA;
     SetN2kPGN127508(message,
                     settings.battery_instance,
-                    data.voltage_v,
-                    data.current_a,
-                    temperature_k,
+                    data.voltage_valid ? data.voltage_v : N2kDoubleNA,
+                    data.current_valid ? data.current_a : N2kDoubleNA,
+                    data.temperature_valid ? static_cast<double>(data.temperature_c) + 273.15 : N2kDoubleNA,
                     sid);
-    if (!g_nmea2000.SendMsg(message)) {
-        ESP_LOGW(TAG, "Failed to send PGN 127508");
-    }
+    if (!g_nmea2000.SendMsg(message)) ESP_LOGW(TAG, "Failed to send PGN 127508");
 }
 
 void send_dc_detailed_status(const AppSettings &settings, const SmartShuntData &data, uint8_t sid)
 {
+    if (!data.soc_valid && !data.time_to_go_valid) return;
     tN2kMsg message;
-    const uint8_t soc = static_cast<uint8_t>(std::clamp(std::lround(data.soc_pct), 0L, 100L));
-    const double time_remaining_s = data.time_to_go_min == 0xFFFFU
-                                        ? N2kDoubleNA
-                                        : static_cast<double>(data.time_to_go_min) * 60.0;
+    const uint8_t soc = data.soc_valid
+                            ? static_cast<uint8_t>(std::clamp(std::lround(data.soc_pct), 0L, 100L))
+                            : 0xFF;
+    const double time_remaining_s = data.time_to_go_valid
+                                        ? static_cast<double>(data.time_to_go_min) * 60.0
+                                        : N2kDoubleNA;
 
-    // Capacity is intentionally NA: SmartShunt Instant Readout does not broadcast configured capacity.
-    SetN2kDCStatus(message,
-                   sid,
-                   settings.battery_instance,
-                   N2kDCt_Battery,
-                   soc,
-                   0xFF,
-                   time_remaining_s,
-                   N2kDoubleNA,
-                   N2kDoubleNA);
-    if (!g_nmea2000.SendMsg(message)) {
-        ESP_LOGW(TAG, "Failed to send PGN 127506");
-    }
+    // Capacity is deliberately NA: Victron Instant Readout does not include the configured bank capacity.
+    SetN2kDCStatus(message, sid, settings.battery_instance, N2kDCt_Battery,
+                   soc, 0xFF, time_remaining_s, N2kDoubleNA, N2kDoubleNA);
+    if (!g_nmea2000.SendMsg(message)) ESP_LOGW(TAG, "Failed to send PGN 127506");
 }
 
 void n2k_task(void *)
@@ -92,7 +84,6 @@ void n2k_task(void *)
 
     for (;;) {
         g_nmea2000.ParseMessages();
-
         const AppSettings settings = settings_snapshot();
         const SmartShuntData data = smartshunt_ble_get_data();
         const uint32_t now_ms = static_cast<uint32_t>(xTaskGetTickCount() * portTICK_PERIOD_MS);
@@ -108,7 +99,6 @@ void n2k_task(void *)
                 sid = sid >= 252 ? 0 : static_cast<uint8_t>(sid + 1);
             }
         }
-
         vTaskDelay(LOOP_DELAY);
     }
 }
@@ -125,9 +115,8 @@ bool n2k_bridge_start(const AppSettings &settings)
     if (g_settings_mutex == nullptr) return false;
     g_settings = settings;
 
-    // The Waveshare board routes its onboard TJA1051 transceiver to TX GPIO6/RX GPIO0.
-    // Device function 170 / class 35 identifies a battery monitor/electrical-generation node.
-    // Manufacturer code 2046 is used for development only; production certification requires an assigned code.
+    // Waveshare ESP32-S3-Touch-LCD-4 onboard TJA1051: TX GPIO6 / RX GPIO0.
+    // Manufacturer code 2046 is a development placeholder only, not a certified NMEA manufacturer code.
     g_nmea2000.SetDeviceInformation(unique_device_number(), 170, 35, 2046);
     g_nmea2000.SetMode(tNMEA2000::N2km_ListenAndNode, 40);
     g_nmea2000.EnableForward(false);
@@ -141,7 +130,6 @@ bool n2k_bridge_start(const AppSettings &settings)
         ESP_LOGE(TAG, "Failed to create NMEA 2000 task");
         return false;
     }
-
     g_started = true;
     ESP_LOGI(TAG, "NMEA 2000 node active on TX GPIO6/RX GPIO0");
     return true;
