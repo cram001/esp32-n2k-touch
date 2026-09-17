@@ -1,5 +1,6 @@
 #include "ui.hpp"
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -7,6 +8,7 @@
 #include "bsp/display.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "instrument_data.hpp"
 #include "lvgl.h"
 #include "n2k_bridge.hpp"
 #include "smartshunt_ble.hpp"
@@ -15,117 +17,91 @@ namespace {
 constexpr const char *TAG = "ui";
 
 AppSettings g_settings;
-size_t g_active_shunt = 0;
+size_t g_active_page = 0;
+size_t g_edit_page = 0;
+size_t g_edit_field = 0;
 size_t g_edit_shunt = 0;
 
-lv_obj_t *g_depth_screen = nullptr;
-lv_obj_t *g_battery_screen = nullptr;
+lv_obj_t *g_data_screen = nullptr;
 lv_obj_t *g_settings_screen = nullptr;
-lv_obj_t *g_shunt_manager_screen = nullptr;
-lv_obj_t *g_discovery_screen = nullptr;
-lv_obj_t *g_editor_screen = nullptr;
-
-lv_obj_t *g_brightness_slider = nullptr;
-lv_obj_t *g_brightness_value = nullptr;
-lv_obj_t *g_theme_value = nullptr;
-
-lv_obj_t *g_battery_title = nullptr;
-lv_obj_t *g_soc_value = nullptr;
-lv_obj_t *g_voltage_value = nullptr;
-lv_obj_t *g_current_value = nullptr;
-lv_obj_t *g_consumed_value = nullptr;
-lv_obj_t *g_ttg_value = nullptr;
-lv_obj_t *g_battery_status = nullptr;
-
-lv_obj_t *g_manager_list = nullptr;
-lv_obj_t *g_discovery_list = nullptr;
-lv_obj_t *g_editor_title = nullptr;
-lv_obj_t *g_name_textarea = nullptr;
-lv_obj_t *g_key_textarea = nullptr;
-lv_obj_t *g_enabled_switch = nullptr;
-lv_obj_t *g_n2k_switch = nullptr;
-lv_obj_t *g_instance_value = nullptr;
-lv_obj_t *g_editor_warning = nullptr;
+lv_obj_t *g_page_setup_screen = nullptr;
+lv_obj_t *g_field_editor_screen = nullptr;
+lv_obj_t *g_units_screen = nullptr;
+lv_obj_t *g_shunts_screen = nullptr;
+lv_obj_t *g_shunt_edit_screen = nullptr;
 lv_obj_t *g_keyboard = nullptr;
+lv_timer_t *g_refresh_timer = nullptr;
 
-lv_timer_t *g_battery_timer = nullptr;
+lv_obj_t *g_page_title = nullptr;
+std::array<lv_obj_t *, MAX_DATA_FIELDS_PER_PAGE> g_tile_boxes{};
+std::array<lv_obj_t *, MAX_DATA_FIELDS_PER_PAGE> g_tile_titles{};
+std::array<lv_obj_t *, MAX_DATA_FIELDS_PER_PAGE> g_tile_values{};
+std::array<lv_obj_t *, MAX_DATA_FIELDS_PER_PAGE> g_tile_units{};
+std::array<lv_obj_t *, MAX_DATA_FIELDS_PER_PAGE> g_tile_sources{};
+
+lv_obj_t *g_page_setup_title = nullptr;
+lv_obj_t *g_page_enable_switch = nullptr;
+lv_obj_t *g_layout_button_label = nullptr;
+std::array<lv_obj_t *, MAX_DATA_FIELDS_PER_PAGE> g_field_buttons{};
+std::array<lv_obj_t *, MAX_DATA_FIELDS_PER_PAGE> g_field_button_labels{};
+
+lv_obj_t *g_field_source_label = nullptr;
+lv_obj_t *g_field_metric_label = nullptr;
+lv_obj_t *g_field_device_label = nullptr;
+lv_obj_t *g_field_device_button = nullptr;
+
+lv_obj_t *g_units_depth = nullptr;
+lv_obj_t *g_units_temp = nullptr;
+lv_obj_t *g_units_wind = nullptr;
+lv_obj_t *g_units_vessel = nullptr;
+lv_obj_t *g_units_distance = nullptr;
+lv_obj_t *g_units_short = nullptr;
+lv_obj_t *g_units_threshold = nullptr;
+
+std::array<lv_obj_t *, MAX_SMARTSHUNTS> g_shunt_slot_labels{};
+lv_obj_t *g_shunt_name = nullptr;
+lv_obj_t *g_shunt_key = nullptr;
+lv_obj_t *g_shunt_n2k = nullptr;
+lv_obj_t *g_shunt_instance = nullptr;
+
+const std::array<DataMetric, 14> NMEA_METRICS = {
+    DataMetric::None, DataMetric::Depth, DataMetric::BoatSpeed, DataMetric::SpeedOverGround,
+    DataMetric::CourseOverGround, DataMetric::Heading, DataMetric::ApparentWindSpeed,
+    DataMetric::ApparentWindAngle, DataMetric::TrueWindSpeed, DataMetric::TrueWindAngle,
+    DataMetric::WaterTemperature, DataMetric::AirTemperature, DataMetric::DistanceToWaypoint,
+    DataMetric::TripDistance
+};
+const std::array<DataMetric, 6> SHUNT_METRICS = {
+    DataMetric::BatteryVoltage, DataMetric::BatteryCurrent, DataMetric::BatterySoc,
+    DataMetric::BatteryConsumedAh, DataMetric::BatteryTimeToGo, DataMetric::BatteryTemperature
+};
 
 uint8_t active_brightness()
 {
     return g_settings.theme == DisplayTheme::Day ? g_settings.day_brightness : g_settings.night_brightness;
 }
 
-size_t configured_count()
-{
-    size_t count = 0;
-    for (const auto &s : g_settings.smartshunts) if (s.configured) ++count;
-    return count;
-}
-
-size_t first_configured()
-{
-    for (size_t i = 0; i < g_settings.smartshunts.size(); ++i) if (g_settings.smartshunts[i].configured) return i;
-    return 0;
-}
-
-size_t adjacent_configured(size_t from, int direction)
-{
-    if (configured_count() == 0) return 0;
-    for (size_t step = 1; step <= g_settings.smartshunts.size(); ++step) {
-        int candidate = static_cast<int>(from) + direction * static_cast<int>(step);
-        while (candidate < 0) candidate += static_cast<int>(g_settings.smartshunts.size());
-        candidate %= static_cast<int>(g_settings.smartshunts.size());
-        if (g_settings.smartshunts[static_cast<size_t>(candidate)].configured) return static_cast<size_t>(candidate);
-    }
-    return from;
-}
-
-uint8_t first_free_instance(size_t ignore = MAX_SMARTSHUNTS)
-{
-    for (uint16_t candidate = 0; candidate <= 252; ++candidate) {
-        bool used = false;
-        for (size_t i = 0; i < g_settings.smartshunts.size(); ++i) {
-            if (i == ignore) continue;
-            const auto &s = g_settings.smartshunts[i];
-            if (s.configured && s.n2k_enabled && s.battery_instance == candidate) { used = true; break; }
-        }
-        if (!used) return static_cast<uint8_t>(candidate);
-    }
-    return 0;
-}
-
-bool duplicate_instance(size_t index)
-{
-    if (index >= g_settings.smartshunts.size()) return false;
-    const auto &s = g_settings.smartshunts[index];
-    if (!s.configured || !s.n2k_enabled) return false;
-    for (size_t i = 0; i < g_settings.smartshunts.size(); ++i) {
-        if (i == index) continue;
-        const auto &other = g_settings.smartshunts[i];
-        if (other.configured && other.n2k_enabled && other.battery_instance == s.battery_instance) return true;
-    }
-    return false;
-}
+size_t layout_count(PageLayout layout) { return static_cast<size_t>(layout); }
 
 void apply_backlight()
 {
     const esp_err_t err = bsp_display_brightness_set(active_brightness());
-    if (err != ESP_OK) ESP_LOGW(TAG, "Unable to set display brightness: %s", esp_err_to_name(err));
+    if (err != ESP_OK) ESP_LOGW(TAG, "Unable to set brightness: %s", esp_err_to_name(err));
 }
 
-void theme_screen(lv_obj_t *screen)
+void apply_theme_to(lv_obj_t *screen)
 {
     if (!screen) return;
     const bool night = g_settings.theme == DisplayTheme::Night;
     lv_obj_set_style_bg_color(screen, night ? lv_color_hex(0x050000) : lv_color_hex(0xF5F7FA), 0);
-    lv_obj_set_style_text_color(screen, night ? lv_color_hex(0xFF5A45) : lv_color_hex(0x101418), 0);
+    lv_obj_set_style_text_color(screen, night ? lv_color_hex(0xFF6A55) : lv_color_hex(0x101418), 0);
 }
 
 void apply_theme()
 {
-    theme_screen(g_depth_screen); theme_screen(g_battery_screen); theme_screen(g_settings_screen);
-    theme_screen(g_shunt_manager_screen); theme_screen(g_discovery_screen); theme_screen(g_editor_screen);
-    apply_backlight();
+    apply_theme_to(g_data_screen); apply_theme_to(g_settings_screen); apply_theme_to(g_page_setup_screen);
+    apply_theme_to(g_field_editor_screen); apply_theme_to(g_units_screen); apply_theme_to(g_shunts_screen);
+    apply_theme_to(g_shunt_edit_screen); apply_backlight();
 }
 
 void apply_runtime_settings()
@@ -134,370 +110,122 @@ void apply_runtime_settings()
     n2k_bridge_apply_settings(g_settings);
 }
 
-void persist_and_apply()
+void persist()
 {
-    if (!settings_save(g_settings)) ESP_LOGW(TAG, "Settings changed but could not be persisted");
-    apply_runtime_settings();
-    apply_theme();
+    if (!settings_save(g_settings)) ESP_LOGW(TAG, "Could not persist settings");
+    apply_runtime_settings(); apply_theme();
 }
 
-lv_obj_t *make_button(lv_obj_t *parent, const char *text, lv_event_cb_t cb, int width = 150, int height = 52, void *user = nullptr)
+lv_obj_t *make_button(lv_obj_t *parent, const char *text, lv_event_cb_t cb, int w=120, int h=48, void *user=nullptr)
 {
-    lv_obj_t *button = lv_button_create(parent);
-    lv_obj_set_size(button, width, height);
-    lv_obj_add_event_cb(button, cb, LV_EVENT_CLICKED, user);
-    lv_obj_t *label = lv_label_create(button);
-    lv_label_set_text(label, text);
-    lv_obj_set_style_text_font(label, &lv_font_montserrat_20, 0);
-    lv_obj_center(label);
-    return button;
+    lv_obj_t *b = lv_button_create(parent); lv_obj_set_size(b,w,h); lv_obj_add_event_cb(b,cb,LV_EVENT_CLICKED,user);
+    lv_obj_t *l = lv_label_create(b); lv_label_set_text(l,text); lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0); lv_obj_center(l); return b;
 }
 
-void update_display_settings()
+lv_obj_t *button_label(lv_obj_t *button) { return lv_obj_get_child(button,0); }
+
+size_t first_enabled_page()
 {
-    if (g_theme_value) lv_label_set_text(g_theme_value, g_settings.theme == DisplayTheme::Day ? "DAY" : "NIGHT");
-    if (g_brightness_slider) lv_slider_set_value(g_brightness_slider, active_brightness(), LV_ANIM_OFF);
-    if (g_brightness_value) {
-        char b[8]; std::snprintf(b, sizeof(b), "%u%%", active_brightness()); lv_label_set_text(g_brightness_value, b);
+    for(size_t i=0;i<g_settings.pages.size();++i) if(g_settings.pages[i].enabled) return i; return 0;
+}
+
+size_t next_enabled_page(size_t from,int direction)
+{
+    for(size_t step=1;step<=MAX_DATA_PAGES;++step){
+        const int raw=static_cast<int>(from)+direction*static_cast<int>(step);
+        const size_t idx=static_cast<size_t>((raw%static_cast<int>(MAX_DATA_PAGES)+static_cast<int>(MAX_DATA_PAGES))%static_cast<int>(MAX_DATA_PAGES));
+        if(g_settings.pages[idx].enabled) return idx;
+    }
+    return from;
+}
+
+void position_tile(size_t index, PageLayout layout)
+{
+    lv_obj_t *box=g_tile_boxes[index]; if(!box) return;
+    int x=10,y=45,w=460,h=330; const size_t count=layout_count(layout);
+    if(count==2){x=10;w=460;h=158;y=45+static_cast<int>(index)*164;}
+    else if(count==4){w=226;h=158;x=10+static_cast<int>(index%2)*234;y=45+static_cast<int>(index/2)*164;}
+    else if(count==6){w=226;h=102;x=10+static_cast<int>(index%2)*234;y=45+static_cast<int>(index/2)*108;}
+    lv_obj_set_pos(box,x,y);lv_obj_set_size(box,w,h);lv_obj_set_style_pad_all(box,6,0);
+    const lv_font_t *vf=count==1?&lv_font_montserrat_48:(count<=4?&lv_font_montserrat_32:&lv_font_montserrat_24);
+    lv_obj_set_style_text_font(g_tile_values[index],vf,0);
+    lv_obj_align(g_tile_titles[index],LV_ALIGN_TOP_LEFT,2,0);
+    lv_obj_align(g_tile_values[index],LV_ALIGN_CENTER,-12,count==6?0:4);
+    lv_obj_align_to(g_tile_units[index],g_tile_values[index],LV_ALIGN_OUT_RIGHT_MID,6,0);
+    lv_obj_align(g_tile_sources[index],LV_ALIGN_BOTTOM_RIGHT,-2,0);
+}
+
+void render_active_page()
+{
+    if(!g_settings.pages[g_active_page].enabled) g_active_page=first_enabled_page();
+    auto &active=g_settings.pages[g_active_page];
+    char title[40];std::snprintf(title,sizeof(title),"%s   %u/%u",active.name.data(),static_cast<unsigned>(g_active_page+1),static_cast<unsigned>(MAX_DATA_PAGES));
+    lv_label_set_text(g_page_title,title);const size_t count=layout_count(active.layout);
+    for(size_t i=0;i<MAX_DATA_FIELDS_PER_PAGE;++i){
+        if(i>=count){lv_obj_add_flag(g_tile_boxes[i],LV_OBJ_FLAG_HIDDEN);continue;}
+        lv_obj_remove_flag(g_tile_boxes[i],LV_OBJ_FLAG_HIDDEN);position_tile(i,active.layout);
+        const auto &sel=active.fields[i];lv_label_set_text(g_tile_titles[i],instrument_metric_name(sel.metric));lv_label_set_text(g_tile_sources[i],instrument_source_name(sel,g_settings));
+        const InstrumentValue v=instrument_data_get(sel);char value[32],unit[12];instrument_format_value(sel,g_settings.units,v,value,sizeof(value),unit,sizeof(unit));
+        lv_label_set_text(g_tile_values[i],value);lv_label_set_text(g_tile_units[i],unit);
     }
 }
 
-void depth_button_cb(lv_event_t *) { lv_screen_load(g_depth_screen); }
-void settings_button_cb(lv_event_t *) { update_display_settings(); lv_screen_load(g_settings_screen); }
+void refresh_cb(lv_timer_t *){render_active_page();}
+void previous_page_cb(lv_event_t *){g_active_page=next_enabled_page(g_active_page,-1);render_active_page();}
+void next_page_cb(lv_event_t *){g_active_page=next_enabled_page(g_active_page,+1);render_active_page();}
+void data_screen_cb(lv_event_t *){render_active_page();lv_screen_load(g_data_screen);}
+void settings_screen_cb(lv_event_t *){lv_screen_load(g_settings_screen);}
+void theme_toggle_cb(lv_event_t *){g_settings.theme=g_settings.theme==DisplayTheme::Day?DisplayTheme::Night:DisplayTheme::Day;persist();}
+void brightness_down_cb(lv_event_t *){uint8_t &v=g_settings.theme==DisplayTheme::Day?g_settings.day_brightness:g_settings.night_brightness;v=v>10?static_cast<uint8_t>(v-10):1;persist();}
+void brightness_up_cb(lv_event_t *){uint8_t &v=g_settings.theme==DisplayTheme::Day?g_settings.day_brightness:g_settings.night_brightness;v=v<91?static_cast<uint8_t>(v+10):100;persist();}
 
-void blank_battery()
+void update_page_setup()
 {
-    lv_label_set_text(g_soc_value, "--.- %");
-    lv_label_set_text(g_voltage_value, "--.-- V");
-    lv_label_set_text(g_current_value, "--.-- A");
-    lv_label_set_text(g_consumed_value, "Used: --.- Ah");
-    lv_label_set_text(g_ttg_value, "TTG: --");
+    auto &p=g_settings.pages[g_edit_page];char b[48];std::snprintf(b,sizeof(b),"PAGE %u - %s",static_cast<unsigned>(g_edit_page+1),p.name.data());lv_label_set_text(g_page_setup_title,b);
+    if(p.enabled)lv_obj_add_state(g_page_enable_switch,LV_STATE_CHECKED);else lv_obj_remove_state(g_page_enable_switch,LV_STATE_CHECKED);
+    std::snprintf(b,sizeof(b),"LAYOUT: %u",static_cast<unsigned>(layout_count(p.layout)));lv_label_set_text(g_layout_button_label,b);
+    const size_t count=layout_count(p.layout);
+    for(size_t i=0;i<MAX_DATA_FIELDS_PER_PAGE;++i){if(i>=count){lv_obj_add_flag(g_field_buttons[i],LV_OBJ_FLAG_HIDDEN);continue;}lv_obj_remove_flag(g_field_buttons[i],LV_OBJ_FLAG_HIDDEN);const auto &f=p.fields[i];std::snprintf(b,sizeof(b),"%u. %s\n%s",static_cast<unsigned>(i+1),instrument_metric_name(f.metric),instrument_source_name(f,g_settings));lv_label_set_text(g_field_button_labels[i],b);}
 }
+void page_setup_screen_cb(lv_event_t *){update_page_setup();lv_screen_load(g_page_setup_screen);}
+void edit_prev_page_cb(lv_event_t *){g_edit_page=(g_edit_page+MAX_DATA_PAGES-1)%MAX_DATA_PAGES;update_page_setup();}
+void edit_next_page_cb(lv_event_t *){g_edit_page=(g_edit_page+1)%MAX_DATA_PAGES;update_page_setup();}
+void page_enabled_cb(lv_event_t *e){g_settings.pages[g_edit_page].enabled=lv_obj_has_state(lv_event_get_target_obj(e),LV_STATE_CHECKED);bool any=false;for(const auto&p:g_settings.pages)any|=p.enabled;if(!any){g_settings.pages[g_edit_page].enabled=true;lv_obj_add_state(g_page_enable_switch,LV_STATE_CHECKED);}persist();update_page_setup();}
+void layout_cb(lv_event_t *){auto &l=g_settings.pages[g_edit_page].layout;if(l==PageLayout::One)l=PageLayout::Two;else if(l==PageLayout::Two)l=PageLayout::Four;else if(l==PageLayout::Four)l=PageLayout::Six;else l=PageLayout::One;persist();update_page_setup();}
 
-void update_battery_labels(lv_timer_t *)
+void update_field_editor()
 {
-    if (!g_battery_title) return;
-    if (configured_count() == 0) {
-        lv_label_set_text(g_battery_title, "NO SMARTSHUNT");
-        blank_battery();
-        lv_label_set_text(g_battery_status, "Settings > SmartShunts > Add SmartShunt");
-        return;
-    }
-    if (!g_settings.smartshunts[g_active_shunt].configured) g_active_shunt = first_configured();
-    const auto &cfg = g_settings.smartshunts[g_active_shunt];
-    lv_label_set_text(g_battery_title, cfg.name[0] ? cfg.name.data() : "SMARTSHUNT");
-
-    if (!cfg.enabled) {
-        blank_battery();
-        lv_label_set_text(g_battery_status, "Reading disabled for this SmartShunt");
-        return;
-    }
-
-    const SmartShuntData d = smartshunt_ble_get_data(g_active_shunt);
-    if (!d.valid) {
-        blank_battery();
-        lv_label_set_text(g_battery_status, d.key_valid ? "Waiting for SmartShunt..." : "SmartShunt found - check Instant Readout key");
-        return;
-    }
-
-    char b[80];
-    if (d.soc_valid) { std::snprintf(b, sizeof(b), "%.1f %%", d.soc_pct); lv_label_set_text(g_soc_value, b); } else lv_label_set_text(g_soc_value, "--.- %");
-    if (d.voltage_valid) { std::snprintf(b, sizeof(b), "%.2f V", d.voltage_v); lv_label_set_text(g_voltage_value, b); } else lv_label_set_text(g_voltage_value, "--.-- V");
-    if (d.current_valid) { std::snprintf(b, sizeof(b), "%+.2f A", d.current_a); lv_label_set_text(g_current_value, b); } else lv_label_set_text(g_current_value, "--.-- A");
-    if (d.consumed_ah_valid) { std::snprintf(b, sizeof(b), "Used: %.1f Ah", d.consumed_ah); lv_label_set_text(g_consumed_value, b); } else lv_label_set_text(g_consumed_value, "Used: --.- Ah");
-    if (d.time_to_go_valid) { std::snprintf(b, sizeof(b), "TTG: %uh %02um", d.time_to_go_min / 60U, d.time_to_go_min % 60U); lv_label_set_text(g_ttg_value, b); } else lv_label_set_text(g_ttg_value, "TTG: --");
-
-    if (d.stale) std::snprintf(b, sizeof(b), "BLE stale | %lu ms", static_cast<unsigned long>(d.age_ms));
-    else if (duplicate_instance(g_active_shunt)) std::snprintf(b, sizeof(b), "BLE %d dBm | N2K instance conflict", d.rssi);
-    else if (cfg.n2k_enabled) std::snprintf(b, sizeof(b), "BLE %d dBm | N2K battery %u", d.rssi, cfg.battery_instance);
-    else std::snprintf(b, sizeof(b), "BLE %d dBm | N2K bridge off", d.rssi);
-    lv_label_set_text(g_battery_status, b);
+    auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];lv_label_set_text(g_field_source_label,f.source==DataSourceType::Nmea2000?"NMEA 2000":"SMARTSHUNT");lv_label_set_text(g_field_metric_label,instrument_metric_name(f.metric));
+    if(f.source==DataSourceType::SmartShunt){lv_obj_remove_flag(g_field_device_button,LV_OBJ_FLAG_HIDDEN);lv_label_set_text(g_field_device_label,instrument_source_name(f,g_settings));}else lv_obj_add_flag(g_field_device_button,LV_OBJ_FLAG_HIDDEN);
 }
+void open_field_editor_cb(lv_event_t *e){g_edit_field=static_cast<size_t>(reinterpret_cast<uintptr_t>(lv_event_get_user_data(e)));update_field_editor();lv_screen_load(g_field_editor_screen);}
+void field_source_cb(lv_event_t *){auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];f.source=f.source==DataSourceType::Nmea2000?DataSourceType::SmartShunt:DataSourceType::Nmea2000;f.metric=f.source==DataSourceType::Nmea2000?DataMetric::Depth:DataMetric::BatteryVoltage;persist();update_field_editor();}
+void field_metric_step(int direction){auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];if(f.source==DataSourceType::Nmea2000){size_t pos=0;for(size_t i=0;i<NMEA_METRICS.size();++i)if(NMEA_METRICS[i]==f.metric){pos=i;break;}pos=(pos+NMEA_METRICS.size()+direction)%NMEA_METRICS.size();f.metric=NMEA_METRICS[pos];}else{size_t pos=0;for(size_t i=0;i<SHUNT_METRICS.size();++i)if(SHUNT_METRICS[i]==f.metric){pos=i;break;}pos=(pos+SHUNT_METRICS.size()+direction)%SHUNT_METRICS.size();f.metric=SHUNT_METRICS[pos];}persist();update_field_editor();}
+void field_metric_prev_cb(lv_event_t *){field_metric_step(-1);}void field_metric_next_cb(lv_event_t *){field_metric_step(1);}
+void field_device_cb(lv_event_t *){auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];for(size_t step=1;step<=MAX_SMARTSHUNTS;++step){size_t idx=(f.source_index+step)%MAX_SMARTSHUNTS;if(g_settings.smartshunts[idx].configured){f.source_index=idx;break;}}persist();update_field_editor();}
+void field_done_cb(lv_event_t *){update_page_setup();lv_screen_load(g_page_setup_screen);}
 
-void battery_button_cb(lv_event_t *)
-{
-    if (configured_count() && !g_settings.smartshunts[g_active_shunt].configured) g_active_shunt = first_configured();
-    update_battery_labels(nullptr);
-    lv_screen_load(g_battery_screen);
-}
+const char *depth_name(){return g_settings.units.depth==DepthUnit::Metres?"METRES":"FEET";}const char *temp_name(){return g_settings.units.temperature==TemperatureUnit::Celsius?"CELSIUS":"FAHRENHEIT";}const char *speed_name(SpeedUnit u){return u==SpeedUnit::Knots?"KNOTS":(u==SpeedUnit::KilometresPerHour?"KM/H":"M/S");}const char *distance_name(){return g_settings.units.distance==DistanceUnit::NauticalMiles?"NM":"KM";}const char *short_name(){return g_settings.units.short_distance==ShortDistanceUnit::Metres?"METRES":(g_settings.units.short_distance==ShortDistanceUnit::Feet?"FEET":"YARDS");}
+void update_units(){lv_label_set_text(g_units_depth,depth_name());lv_label_set_text(g_units_temp,temp_name());lv_label_set_text(g_units_wind,speed_name(g_settings.units.wind_speed));lv_label_set_text(g_units_vessel,speed_name(g_settings.units.vessel_speed));lv_label_set_text(g_units_distance,distance_name());lv_label_set_text(g_units_short,short_name());char b[24];std::snprintf(b,sizeof(b),"< %.2f NM",g_settings.units.short_distance_threshold_nm);lv_label_set_text(g_units_threshold,b);}
+void units_screen_cb(lv_event_t *){update_units();lv_screen_load(g_units_screen);}void unit_depth_cb(lv_event_t *){g_settings.units.depth=g_settings.units.depth==DepthUnit::Metres?DepthUnit::Feet:DepthUnit::Metres;persist();update_units();}void unit_temp_cb(lv_event_t *){g_settings.units.temperature=g_settings.units.temperature==TemperatureUnit::Celsius?TemperatureUnit::Fahrenheit:TemperatureUnit::Celsius;persist();update_units();}
+SpeedUnit next_speed(SpeedUnit u){return u==SpeedUnit::Knots?SpeedUnit::KilometresPerHour:(u==SpeedUnit::KilometresPerHour?SpeedUnit::MetresPerSecond:SpeedUnit::Knots);}void unit_wind_cb(lv_event_t *){g_settings.units.wind_speed=next_speed(g_settings.units.wind_speed);persist();update_units();}void unit_vessel_cb(lv_event_t *){g_settings.units.vessel_speed=next_speed(g_settings.units.vessel_speed);persist();update_units();}void unit_distance_cb(lv_event_t *){g_settings.units.distance=g_settings.units.distance==DistanceUnit::NauticalMiles?DistanceUnit::Kilometres:DistanceUnit::NauticalMiles;persist();update_units();}void unit_short_cb(lv_event_t *){auto&u=g_settings.units.short_distance;u=u==ShortDistanceUnit::Metres?ShortDistanceUnit::Feet:(u==ShortDistanceUnit::Feet?ShortDistanceUnit::Yards:ShortDistanceUnit::Metres);persist();update_units();}void unit_threshold_down_cb(lv_event_t *){auto&t=g_settings.units.short_distance_threshold_nm;if(t>0.05f)t-=0.05f;persist();update_units();}void unit_threshold_up_cb(lv_event_t *){auto&t=g_settings.units.short_distance_threshold_nm;if(t<1.0f)t+=0.05f;persist();update_units();}
 
-void previous_battery_cb(lv_event_t *)
-{
-    g_active_shunt = adjacent_configured(g_active_shunt, -1);
-    update_battery_labels(nullptr);
-}
+void update_shunts_list(){for(size_t i=0;i<MAX_SMARTSHUNTS;++i){char b[48];const auto&c=g_settings.smartshunts[i];std::snprintf(b,sizeof(b),"%u. %s",static_cast<unsigned>(i+1),c.configured?(c.name[0]?c.name.data():"SmartShunt"):"ADD SMARTSHUNT");lv_label_set_text(g_shunt_slot_labels[i],b);}}
+void shunts_screen_cb(lv_event_t *){update_shunts_list();lv_screen_load(g_shunts_screen);}void shunt_slot_cb(lv_event_t *e){g_edit_shunt=static_cast<size_t>(reinterpret_cast<uintptr_t>(lv_event_get_user_data(e)));auto &c=g_settings.smartshunts[g_edit_shunt];lv_textarea_set_text(g_shunt_name,c.name.data());lv_textarea_set_text(g_shunt_key,c.bindkey.data());if(c.n2k_enabled)lv_obj_add_state(g_shunt_n2k,LV_STATE_CHECKED);else lv_obj_remove_state(g_shunt_n2k,LV_STATE_CHECKED);char b[12];std::snprintf(b,sizeof(b),"%u",c.battery_instance);lv_label_set_text(g_shunt_instance,b);lv_screen_load(g_shunt_edit_screen);}
+void choose_nearby_cb(lv_event_t *){std::array<DiscoveredSmartShunt,MAX_DISCOVERED_SMARTSHUNTS> found{};const size_t n=smartshunt_ble_get_discovered(found);if(n==0)return;auto&c=g_settings.smartshunts[g_edit_shunt];size_t pick=0;if(c.configured){for(size_t i=0;i<n;++i)if(std::strcmp(found[i].mac.data(),c.mac.data())==0){pick=(i+1)%n;break;}}c.configured=true;c.enabled=true;std::snprintf(c.mac.data(),c.mac.size(),"%s",found[pick].mac.data());std::snprintf(c.name.data(),c.name.size(),"%s",found[pick].name.data());lv_textarea_set_text(g_shunt_name,c.name.data());persist();}
+void shunt_instance_down_cb(lv_event_t *){auto&c=g_settings.smartshunts[g_edit_shunt];if(c.battery_instance>0)--c.battery_instance;char b[12];std::snprintf(b,sizeof(b),"%u",c.battery_instance);lv_label_set_text(g_shunt_instance,b);persist();}void shunt_instance_up_cb(lv_event_t *){auto&c=g_settings.smartshunts[g_edit_shunt];if(c.battery_instance<252)++c.battery_instance;char b[12];std::snprintf(b,sizeof(b),"%u",c.battery_instance);lv_label_set_text(g_shunt_instance,b);persist();}
+void shunt_save_cb(lv_event_t *){auto&c=g_settings.smartshunts[g_edit_shunt];std::snprintf(c.name.data(),c.name.size(),"%s",lv_textarea_get_text(g_shunt_name));std::snprintf(c.bindkey.data(),c.bindkey.size(),"%s",lv_textarea_get_text(g_shunt_key));c.n2k_enabled=lv_obj_has_state(g_shunt_n2k,LV_STATE_CHECKED);persist();update_shunts_list();lv_screen_load(g_shunts_screen);}void keyboard_cb(lv_event_t *e){const auto code=lv_event_get_code(e);if(code==LV_EVENT_READY||code==LV_EVENT_CANCEL){lv_obj_add_flag(g_keyboard,LV_OBJ_FLAG_HIDDEN);lv_keyboard_set_textarea(g_keyboard,nullptr);}}void textarea_focus_cb(lv_event_t *e){lv_keyboard_set_textarea(g_keyboard,lv_event_get_target_obj(e));lv_obj_remove_flag(g_keyboard,LV_OBJ_FLAG_HIDDEN);lv_obj_move_foreground(g_keyboard);}
 
-void next_battery_cb(lv_event_t *)
-{
-    g_active_shunt = adjacent_configured(g_active_shunt, 1);
-    update_battery_labels(nullptr);
-}
-
-void day_cb(lv_event_t *) { g_settings.theme = DisplayTheme::Day; update_display_settings(); persist_and_apply(); }
-void night_cb(lv_event_t *) { g_settings.theme = DisplayTheme::Night; update_display_settings(); persist_and_apply(); }
-void brightness_cb(lv_event_t *e)
-{
-    int32_t v = lv_slider_get_value(lv_event_get_target_obj(e));
-    const uint8_t value = static_cast<uint8_t>(v < 1 ? 1 : (v > 100 ? 100 : v));
-    if (g_settings.theme == DisplayTheme::Day) g_settings.day_brightness = value; else g_settings.night_brightness = value;
-    update_display_settings(); persist_and_apply();
-}
-
-void editor_refresh()
-{
-    if (g_edit_shunt >= g_settings.smartshunts.size()) return;
-    const auto &s = g_settings.smartshunts[g_edit_shunt];
-    lv_label_set_text(g_editor_title, s.name[0] ? s.name.data() : "SMARTSHUNT");
-    lv_textarea_set_text(g_name_textarea, s.name.data());
-    lv_textarea_set_text(g_key_textarea, s.bindkey.data());
-    if (s.enabled) lv_obj_add_state(g_enabled_switch, LV_STATE_CHECKED); else lv_obj_remove_state(g_enabled_switch, LV_STATE_CHECKED);
-    if (s.n2k_enabled) lv_obj_add_state(g_n2k_switch, LV_STATE_CHECKED); else lv_obj_remove_state(g_n2k_switch, LV_STATE_CHECKED);
-    char b[8]; std::snprintf(b, sizeof(b), "%u", s.battery_instance); lv_label_set_text(g_instance_value, b);
-    lv_label_set_text(g_editor_warning, duplicate_instance(g_edit_shunt) ? "NMEA instance already used by another SmartShunt" : "");
-}
-
-void keyboard_cb(lv_event_t *e)
-{
-    const auto code = lv_event_get_code(e);
-    if (code == LV_EVENT_READY || code == LV_EVENT_CANCEL) {
-        lv_obj_add_flag(g_keyboard, LV_OBJ_FLAG_HIDDEN);
-        lv_keyboard_set_textarea(g_keyboard, nullptr);
-    }
-}
-
-void textarea_focus_cb(lv_event_t *e)
-{
-    lv_keyboard_set_textarea(g_keyboard, lv_event_get_target_obj(e));
-    lv_obj_remove_flag(g_keyboard, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(g_keyboard);
-}
-
-void instance_minus_cb(lv_event_t *)
-{
-    auto &s = g_settings.smartshunts[g_edit_shunt];
-    if (s.battery_instance > 0) --s.battery_instance;
-    editor_refresh();
-}
-
-void instance_plus_cb(lv_event_t *)
-{
-    auto &s = g_settings.smartshunts[g_edit_shunt];
-    if (s.battery_instance < 252) ++s.battery_instance;
-    editor_refresh();
-}
-
-void save_editor_cb(lv_event_t *)
-{
-    auto &s = g_settings.smartshunts[g_edit_shunt];
-    std::snprintf(s.name.data(), s.name.size(), "%s", lv_textarea_get_text(g_name_textarea));
-    std::snprintf(s.bindkey.data(), s.bindkey.size(), "%s", lv_textarea_get_text(g_key_textarea));
-    s.enabled = lv_obj_has_state(g_enabled_switch, LV_STATE_CHECKED);
-    s.n2k_enabled = lv_obj_has_state(g_n2k_switch, LV_STATE_CHECKED);
-    if (!s.enabled) s.n2k_enabled = false;
-    persist_and_apply();
-    editor_refresh();
-}
-
-void delete_editor_cb(lv_event_t *)
-{
-    g_settings.smartshunts[g_edit_shunt] = {};
-    if (g_active_shunt == g_edit_shunt) g_active_shunt = first_configured();
-    persist_and_apply();
-    lv_screen_load(g_shunt_manager_screen);
-}
-
-void open_editor(size_t index)
-{
-    g_edit_shunt = index;
-    editor_refresh();
-    lv_screen_load(g_editor_screen);
-}
-
-void manager_device_cb(lv_event_t *e)
-{
-    const size_t index = reinterpret_cast<uintptr_t>(lv_event_get_user_data(e)) - 1U;
-    if (index < g_settings.smartshunts.size()) open_editor(index);
-}
-
-void rebuild_manager_list()
-{
-    lv_obj_clean(g_manager_list);
-    size_t row = 0;
-    for (size_t i = 0; i < g_settings.smartshunts.size(); ++i) {
-        const auto &s = g_settings.smartshunts[i];
-        if (!s.configured) continue;
-        char label[48];
-        std::snprintf(label, sizeof(label), "%s%s", s.name[0] ? s.name.data() : "SmartShunt", s.enabled ? "" : " (off)");
-        lv_obj_t *button = make_button(g_manager_list, label, manager_device_cb, 380, 48, reinterpret_cast<void *>(i + 1U));
-        lv_obj_align(button, LV_ALIGN_TOP_MID, 0, static_cast<int>(row * 55));
-        ++row;
-    }
-    if (row == 0) {
-        lv_obj_t *empty = lv_label_create(g_manager_list);
-        lv_label_set_text(empty, "No SmartShunts configured");
-        lv_obj_align(empty, LV_ALIGN_TOP_MID, 0, 12);
-    }
-}
-
-void manager_button_cb(lv_event_t *)
-{
-    rebuild_manager_list();
-    lv_screen_load(g_shunt_manager_screen);
-}
-
-void discovery_select_cb(lv_event_t *e)
-{
-    const size_t discovered_index = reinterpret_cast<uintptr_t>(lv_event_get_user_data(e)) - 1U;
-    std::array<DiscoveredSmartShunt, MAX_DISCOVERED_SMARTSHUNTS> devices{};
-    const size_t count = smartshunt_ble_get_discovered(devices);
-    if (discovered_index >= count) return;
-
-    size_t slot = MAX_SMARTSHUNTS;
-    for (size_t i = 0; i < g_settings.smartshunts.size(); ++i) {
-        if (g_settings.smartshunts[i].configured && std::strcmp(g_settings.smartshunts[i].mac.data(), devices[discovered_index].mac.data()) == 0) {
-            slot = i;
-            break;
-        }
-        if (!g_settings.smartshunts[i].configured && slot == MAX_SMARTSHUNTS) slot = i;
-    }
-    if (slot >= MAX_SMARTSHUNTS) return;
-
-    auto &cfg = g_settings.smartshunts[slot];
-    if (!cfg.configured) {
-        cfg = {};
-        cfg.configured = true;
-        cfg.enabled = true;
-        cfg.battery_instance = first_free_instance(slot);
-        std::snprintf(cfg.name.data(), cfg.name.size(), "%s", devices[discovered_index].name.data());
-        std::snprintf(cfg.mac.data(), cfg.mac.size(), "%s", devices[discovered_index].mac.data());
-    }
-    persist_and_apply();
-    open_editor(slot);
-}
-
-void rebuild_discovery_list()
-{
-    lv_obj_clean(g_discovery_list);
-    std::array<DiscoveredSmartShunt, MAX_DISCOVERED_SMARTSHUNTS> devices{};
-    const size_t count = smartshunt_ble_get_discovered(devices);
-    if (count == 0) {
-        lv_obj_t *empty = lv_label_create(g_discovery_list);
-        lv_label_set_text(empty, "Scanning for nearby SmartShunts...");
-        lv_obj_align(empty, LV_ALIGN_TOP_MID, 0, 12);
-        return;
-    }
-    for (size_t i = 0; i < count; ++i) {
-        char label[42];
-        std::snprintf(label, sizeof(label), "%s  (%d dBm)", devices[i].name.data(), devices[i].rssi);
-        lv_obj_t *button = make_button(g_discovery_list, label, discovery_select_cb, 390, 48, reinterpret_cast<void *>(i + 1U));
-        lv_obj_align(button, LV_ALIGN_TOP_MID, 0, static_cast<int>(i * 55));
-    }
-}
-
-void add_shunt_cb(lv_event_t *)
-{
-    rebuild_discovery_list();
-    lv_screen_load(g_discovery_screen);
-}
-
-void refresh_discovery_cb(lv_event_t *) { rebuild_discovery_list(); }
-
-void create_depth_screen()
-{
-    g_depth_screen = lv_obj_create(nullptr); lv_obj_remove_flag(g_depth_screen, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *title = lv_label_create(g_depth_screen); lv_label_set_text(title, "DEPTH"); lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0); lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 42);
-    lv_obj_t *depth = lv_label_create(g_depth_screen); lv_label_set_text(depth, "--.- m"); lv_obj_set_style_text_font(depth, &lv_font_montserrat_48, 0); lv_obj_align(depth, LV_ALIGN_CENTER, 0, -40);
-    lv_obj_t *status = lv_label_create(g_depth_screen); lv_label_set_text(status, "NMEA 2000 depth not connected"); lv_obj_align(status, LV_ALIGN_CENTER, 0, 24);
-    lv_obj_align(make_button(g_depth_screen, "BATTERY", battery_button_cb, 160, 56), LV_ALIGN_BOTTOM_LEFT, 45, -34);
-    lv_obj_align(make_button(g_depth_screen, "SETTINGS", settings_button_cb, 160, 56), LV_ALIGN_BOTTOM_RIGHT, -45, -34);
-}
-
-void create_battery_screen()
-{
-    g_battery_screen = lv_obj_create(nullptr); lv_obj_remove_flag(g_battery_screen, LV_OBJ_FLAG_SCROLLABLE);
-    g_battery_title = lv_label_create(g_battery_screen); lv_obj_set_style_text_font(g_battery_title, &lv_font_montserrat_24, 0); lv_obj_align(g_battery_title, LV_ALIGN_TOP_MID, 0, 20);
-    g_soc_value = lv_label_create(g_battery_screen); lv_obj_set_style_text_font(g_soc_value, &lv_font_montserrat_48, 0); lv_obj_align(g_soc_value, LV_ALIGN_TOP_MID, 0, 62);
-    g_voltage_value = lv_label_create(g_battery_screen); lv_obj_set_style_text_font(g_voltage_value, &lv_font_montserrat_32, 0); lv_obj_align(g_voltage_value, LV_ALIGN_TOP_LEFT, 55, 140);
-    g_current_value = lv_label_create(g_battery_screen); lv_obj_set_style_text_font(g_current_value, &lv_font_montserrat_32, 0); lv_obj_align(g_current_value, LV_ALIGN_TOP_RIGHT, -55, 140);
-    g_consumed_value = lv_label_create(g_battery_screen); lv_obj_set_style_text_font(g_consumed_value, &lv_font_montserrat_20, 0); lv_obj_align(g_consumed_value, LV_ALIGN_TOP_LEFT, 55, 205);
-    g_ttg_value = lv_label_create(g_battery_screen); lv_obj_set_style_text_font(g_ttg_value, &lv_font_montserrat_20, 0); lv_obj_align(g_ttg_value, LV_ALIGN_TOP_RIGHT, -55, 205);
-    g_battery_status = lv_label_create(g_battery_screen); lv_obj_align(g_battery_status, LV_ALIGN_TOP_MID, 0, 265);
-    lv_obj_align(make_button(g_battery_screen, "<", previous_battery_cb, 70, 48), LV_ALIGN_BOTTOM_LEFT, 20, -30);
-    lv_obj_align(make_button(g_battery_screen, "DEPTH", depth_button_cb, 120, 48), LV_ALIGN_BOTTOM_MID, -65, -30);
-    lv_obj_align(make_button(g_battery_screen, "SETTINGS", settings_button_cb, 140, 48), LV_ALIGN_BOTTOM_MID, 75, -30);
-    lv_obj_align(make_button(g_battery_screen, ">", next_battery_cb, 70, 48), LV_ALIGN_BOTTOM_RIGHT, -20, -30);
-}
-
-void create_settings_screen()
-{
-    g_settings_screen = lv_obj_create(nullptr); lv_obj_remove_flag(g_settings_screen, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *title = lv_label_create(g_settings_screen); lv_label_set_text(title, "SETTINGS"); lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0); lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 22);
-    lv_obj_t *theme = lv_label_create(g_settings_screen); lv_label_set_text(theme, "Theme"); lv_obj_align(theme, LV_ALIGN_TOP_LEFT, 38, 72);
-    g_theme_value = lv_label_create(g_settings_screen); lv_obj_align(g_theme_value, LV_ALIGN_TOP_RIGHT, -38, 72);
-    lv_obj_align(make_button(g_settings_screen, "DAY", day_cb, 145, 50), LV_ALIGN_TOP_LEFT, 60, 105);
-    lv_obj_align(make_button(g_settings_screen, "NIGHT", night_cb, 145, 50), LV_ALIGN_TOP_RIGHT, -60, 105);
-    lv_obj_t *br = lv_label_create(g_settings_screen); lv_label_set_text(br, "Brightness"); lv_obj_align(br, LV_ALIGN_TOP_LEFT, 38, 178);
-    g_brightness_value = lv_label_create(g_settings_screen); lv_obj_align(g_brightness_value, LV_ALIGN_TOP_RIGHT, -38, 178);
-    g_brightness_slider = lv_slider_create(g_settings_screen); lv_obj_set_size(g_brightness_slider, 380, 26); lv_slider_set_range(g_brightness_slider, 1, 100); lv_obj_align(g_brightness_slider, LV_ALIGN_TOP_MID, 0, 216); lv_obj_add_event_cb(g_brightness_slider, brightness_cb, LV_EVENT_VALUE_CHANGED, nullptr);
-    lv_obj_align(make_button(g_settings_screen, "SMARTSHUNTS", manager_button_cb, 220, 56), LV_ALIGN_TOP_MID, 0, 280);
-    lv_obj_align(make_button(g_settings_screen, "BACK", depth_button_cb, 150, 52), LV_ALIGN_BOTTOM_MID, 0, -24);
-}
-
-void create_manager_screen()
-{
-    g_shunt_manager_screen = lv_obj_create(nullptr); lv_obj_remove_flag(g_shunt_manager_screen, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *title = lv_label_create(g_shunt_manager_screen); lv_label_set_text(title, "SMARTSHUNTS"); lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0); lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 16);
-    g_manager_list = lv_obj_create(g_shunt_manager_screen); lv_obj_set_size(g_manager_list, 420, 265); lv_obj_align(g_manager_list, LV_ALIGN_TOP_MID, 0, 55); lv_obj_set_scroll_dir(g_manager_list, LV_DIR_VER);
-    lv_obj_align(make_button(g_shunt_manager_screen, "ADD SMARTSHUNT", add_shunt_cb, 210, 48), LV_ALIGN_BOTTOM_LEFT, 25, -18);
-    lv_obj_align(make_button(g_shunt_manager_screen, "BACK", settings_button_cb, 120, 48), LV_ALIGN_BOTTOM_RIGHT, -25, -18);
-}
-
-void create_discovery_screen()
-{
-    g_discovery_screen = lv_obj_create(nullptr); lv_obj_remove_flag(g_discovery_screen, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *title = lv_label_create(g_discovery_screen); lv_label_set_text(title, "NEARBY SMARTSHUNTS"); lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0); lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 16);
-    g_discovery_list = lv_obj_create(g_discovery_screen); lv_obj_set_size(g_discovery_list, 425, 300); lv_obj_align(g_discovery_list, LV_ALIGN_TOP_MID, 0, 55); lv_obj_set_scroll_dir(g_discovery_list, LV_DIR_VER);
-    lv_obj_align(make_button(g_discovery_screen, "REFRESH", refresh_discovery_cb, 140, 48), LV_ALIGN_BOTTOM_LEFT, 28, -18);
-    lv_obj_align(make_button(g_discovery_screen, "BACK", manager_button_cb, 120, 48), LV_ALIGN_BOTTOM_RIGHT, -28, -18);
-}
-
-void create_editor_screen()
-{
-    g_editor_screen = lv_obj_create(nullptr); lv_obj_remove_flag(g_editor_screen, LV_OBJ_FLAG_SCROLLABLE);
-    g_editor_title = lv_label_create(g_editor_screen); lv_obj_set_style_text_font(g_editor_title, &lv_font_montserrat_24, 0); lv_obj_align(g_editor_title, LV_ALIGN_TOP_MID, 0, 12);
-
-    lv_obj_t *name_label = lv_label_create(g_editor_screen); lv_label_set_text(name_label, "Name"); lv_obj_align(name_label, LV_ALIGN_TOP_LEFT, 28, 52);
-    g_name_textarea = lv_textarea_create(g_editor_screen); lv_obj_set_size(g_name_textarea, 300, 42); lv_textarea_set_one_line(g_name_textarea, true); lv_textarea_set_max_length(g_name_textarea, 24); lv_obj_align(g_name_textarea, LV_ALIGN_TOP_RIGHT, -28, 43); lv_obj_add_event_cb(g_name_textarea, textarea_focus_cb, LV_EVENT_FOCUSED, nullptr);
-
-    lv_obj_t *read_label = lv_label_create(g_editor_screen); lv_label_set_text(read_label, "Read this SmartShunt"); lv_obj_align(read_label, LV_ALIGN_TOP_LEFT, 28, 101);
-    g_enabled_switch = lv_switch_create(g_editor_screen); lv_obj_align(g_enabled_switch, LV_ALIGN_TOP_RIGHT, -30, 91);
-
-    lv_obj_t *n2k_label = lv_label_create(g_editor_screen); lv_label_set_text(n2k_label, "Send to NMEA 2000"); lv_obj_align(n2k_label, LV_ALIGN_TOP_LEFT, 28, 145);
-    g_n2k_switch = lv_switch_create(g_editor_screen); lv_obj_align(g_n2k_switch, LV_ALIGN_TOP_RIGHT, -30, 135);
-
-    lv_obj_t *inst_label = lv_label_create(g_editor_screen); lv_label_set_text(inst_label, "Battery instance"); lv_obj_align(inst_label, LV_ALIGN_TOP_LEFT, 28, 190);
-    lv_obj_align(make_button(g_editor_screen, "-", instance_minus_cb, 52, 38), LV_ALIGN_TOP_RIGHT, -132, 174);
-    g_instance_value = lv_label_create(g_editor_screen); lv_obj_set_style_text_font(g_instance_value, &lv_font_montserrat_20, 0); lv_obj_align(g_instance_value, LV_ALIGN_TOP_RIGHT, -92, 184);
-    lv_obj_align(make_button(g_editor_screen, "+", instance_plus_cb, 52, 38), LV_ALIGN_TOP_RIGHT, -28, 174);
-
-    lv_obj_t *key_label = lv_label_create(g_editor_screen); lv_label_set_text(key_label, "Instant Readout key"); lv_obj_align(key_label, LV_ALIGN_TOP_LEFT, 28, 235);
-    g_key_textarea = lv_textarea_create(g_editor_screen); lv_obj_set_size(g_key_textarea, 424, 42); lv_textarea_set_one_line(g_key_textarea, true); lv_textarea_set_max_length(g_key_textarea, 32); lv_textarea_set_password_mode(g_key_textarea, true); lv_obj_align(g_key_textarea, LV_ALIGN_TOP_MID, 0, 257); lv_obj_add_event_cb(g_key_textarea, textarea_focus_cb, LV_EVENT_FOCUSED, nullptr);
-
-    g_editor_warning = lv_label_create(g_editor_screen); lv_obj_set_style_text_font(g_editor_warning, &lv_font_montserrat_14, 0); lv_obj_align(g_editor_warning, LV_ALIGN_TOP_MID, 0, 308);
-
-    lv_obj_align(make_button(g_editor_screen, "SAVE", save_editor_cb, 105, 46), LV_ALIGN_BOTTOM_LEFT, 20, -18);
-    lv_obj_align(make_button(g_editor_screen, "DELETE", delete_editor_cb, 105, 46), LV_ALIGN_BOTTOM_MID, 0, -18);
-    lv_obj_align(make_button(g_editor_screen, "BACK", manager_button_cb, 105, 46), LV_ALIGN_BOTTOM_RIGHT, -20, -18);
-
-    g_keyboard = lv_keyboard_create(g_editor_screen); lv_obj_set_size(g_keyboard, 460, 205); lv_obj_align(g_keyboard, LV_ALIGN_BOTTOM_MID, 0, 0); lv_obj_add_event_cb(g_keyboard, keyboard_cb, LV_EVENT_ALL, nullptr); lv_obj_add_flag(g_keyboard, LV_OBJ_FLAG_HIDDEN);
-}
+void create_data_screen(){g_data_screen=lv_obj_create(nullptr);lv_obj_remove_flag(g_data_screen,LV_OBJ_FLAG_SCROLLABLE);g_page_title=lv_label_create(g_data_screen);lv_obj_set_style_text_font(g_page_title,&lv_font_montserrat_20,0);lv_obj_align(g_page_title,LV_ALIGN_TOP_MID,0,10);for(size_t i=0;i<MAX_DATA_FIELDS_PER_PAGE;++i){g_tile_boxes[i]=lv_obj_create(g_data_screen);lv_obj_remove_flag(g_tile_boxes[i],LV_OBJ_FLAG_SCROLLABLE);g_tile_titles[i]=lv_label_create(g_tile_boxes[i]);lv_obj_set_style_text_font(g_tile_titles[i],&lv_font_montserrat_14,0);g_tile_values[i]=lv_label_create(g_tile_boxes[i]);g_tile_units[i]=lv_label_create(g_tile_boxes[i]);lv_obj_set_style_text_font(g_tile_units[i],&lv_font_montserrat_14,0);g_tile_sources[i]=lv_label_create(g_tile_boxes[i]);lv_obj_set_style_text_font(g_tile_sources[i],&lv_font_montserrat_14,0);}lv_obj_t*b=make_button(g_data_screen,"<",previous_page_cb,70,44);lv_obj_align(b,LV_ALIGN_BOTTOM_LEFT,12,-8);b=make_button(g_data_screen,"SETUP",settings_screen_cb,120,44);lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-8);b=make_button(g_data_screen,">",next_page_cb,70,44);lv_obj_align(b,LV_ALIGN_BOTTOM_RIGHT,-12,-8);}
+void create_settings_screen(){g_settings_screen=lv_obj_create(nullptr);lv_obj_remove_flag(g_settings_screen,LV_OBJ_FLAG_SCROLLABLE);lv_obj_t*l=lv_label_create(g_settings_screen);lv_label_set_text(l,"SETUP");lv_obj_set_style_text_font(l,&lv_font_montserrat_24,0);lv_obj_align(l,LV_ALIGN_TOP_MID,0,24);lv_obj_t*b=make_button(g_settings_screen,"DATA PAGES",page_setup_screen_cb,260,58);lv_obj_align(b,LV_ALIGN_TOP_MID,0,90);b=make_button(g_settings_screen,"UNITS",units_screen_cb,260,58);lv_obj_align(b,LV_ALIGN_TOP_MID,0,160);b=make_button(g_settings_screen,"SMARTSHUNTS",shunts_screen_cb,260,58);lv_obj_align(b,LV_ALIGN_TOP_MID,0,230);b=make_button(g_settings_screen,"DAY / NIGHT",theme_toggle_cb,160,52);lv_obj_align(b,LV_ALIGN_TOP_LEFT,45,310);b=make_button(g_settings_screen,"BR -",brightness_down_cb,90,52);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-145,310);b=make_button(g_settings_screen,"BR +",brightness_up_cb,90,52);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-45,310);b=make_button(g_settings_screen,"BACK",data_screen_cb,140,52);lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-24);}
+void create_page_setup_screen(){g_page_setup_screen=lv_obj_create(nullptr);lv_obj_remove_flag(g_page_setup_screen,LV_OBJ_FLAG_SCROLLABLE);g_page_setup_title=lv_label_create(g_page_setup_screen);lv_obj_set_style_text_font(g_page_setup_title,&lv_font_montserrat_20,0);lv_obj_align(g_page_setup_title,LV_ALIGN_TOP_MID,0,18);lv_obj_t*b=make_button(g_page_setup_screen,"< PAGE",edit_prev_page_cb,90,42);lv_obj_align(b,LV_ALIGN_TOP_LEFT,20,52);b=make_button(g_page_setup_screen,"PAGE >",edit_next_page_cb,90,42);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-20,52);lv_obj_t*l=lv_label_create(g_page_setup_screen);lv_label_set_text(l,"Enabled");lv_obj_align(l,LV_ALIGN_TOP_LEFT,140,64);g_page_enable_switch=lv_switch_create(g_page_setup_screen);lv_obj_align(g_page_enable_switch,LV_ALIGN_TOP_RIGHT,-120,54);lv_obj_add_event_cb(g_page_enable_switch,page_enabled_cb,LV_EVENT_VALUE_CHANGED,nullptr);b=make_button(g_page_setup_screen,"",layout_cb,180,44);g_layout_button_label=button_label(b);lv_obj_align(b,LV_ALIGN_TOP_MID,0,106);for(size_t i=0;i<MAX_DATA_FIELDS_PER_PAGE;++i){b=make_button(g_page_setup_screen,"",open_field_editor_cb,216,74,nullptr);g_field_buttons[i]=b;g_field_button_labels[i]=button_label(b);lv_label_set_long_mode(g_field_button_labels[i],LV_LABEL_LONG_WRAP);lv_obj_set_width(g_field_button_labels[i],196);lv_obj_set_style_text_align(g_field_button_labels[i],LV_TEXT_ALIGN_CENTER,0);lv_obj_set_pos(b,16+static_cast<int>(i%2)*232,164+static_cast<int>(i/2)*82);lv_obj_remove_event_cb(b,open_field_editor_cb);lv_obj_add_event_cb(b,open_field_editor_cb,LV_EVENT_CLICKED,reinterpret_cast<void*>(i));}b=make_button(g_page_setup_screen,"BACK",settings_screen_cb,120,46);lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-12);}
+void create_field_editor_screen(){g_field_editor_screen=lv_obj_create(nullptr);lv_obj_remove_flag(g_field_editor_screen,LV_OBJ_FLAG_SCROLLABLE);lv_obj_t*l=lv_label_create(g_field_editor_screen);lv_label_set_text(l,"DATA FIELD");lv_obj_set_style_text_font(l,&lv_font_montserrat_24,0);lv_obj_align(l,LV_ALIGN_TOP_MID,0,24);l=lv_label_create(g_field_editor_screen);lv_label_set_text(l,"Source");lv_obj_align(l,LV_ALIGN_TOP_LEFT,40,95);lv_obj_t*b=make_button(g_field_editor_screen,"SOURCE",field_source_cb,190,52);g_field_source_label=button_label(b);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-40,80);l=lv_label_create(g_field_editor_screen);lv_label_set_text(l,"Data");lv_obj_align(l,LV_ALIGN_TOP_LEFT,40,175);b=make_button(g_field_editor_screen,"<",field_metric_prev_cb,55,50);lv_obj_align(b,LV_ALIGN_TOP_LEFT,130,157);b=make_button(g_field_editor_screen,"",field_metric_next_cb,190,50);g_field_metric_label=button_label(b);lv_obj_align(b,LV_ALIGN_TOP_MID,55,157);b=make_button(g_field_editor_screen,">",field_metric_next_cb,55,50);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-25,157);l=lv_label_create(g_field_editor_screen);lv_label_set_text(l,"Device");lv_obj_align(l,LV_ALIGN_TOP_LEFT,40,250);g_field_device_button=make_button(g_field_editor_screen,"",field_device_cb,250,52);g_field_device_label=button_label(g_field_device_button);lv_obj_align(g_field_device_button,LV_ALIGN_TOP_RIGHT,-40,232);b=make_button(g_field_editor_screen,"DONE",field_done_cb,150,54);lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-40);}
+void create_units_screen(){g_units_screen=lv_obj_create(nullptr);lv_obj_remove_flag(g_units_screen,LV_OBJ_FLAG_SCROLLABLE);lv_obj_t*l=lv_label_create(g_units_screen);lv_label_set_text(l,"UNITS");lv_obj_set_style_text_font(l,&lv_font_montserrat_24,0);lv_obj_align(l,LV_ALIGN_TOP_MID,0,18);const char*names[]={"Depth","Temperature","Wind speed","Boat speed","Distance","Short distance"};lv_obj_t**vals[]={&g_units_depth,&g_units_temp,&g_units_wind,&g_units_vessel,&g_units_distance,&g_units_short};lv_event_cb_t cbs[]={unit_depth_cb,unit_temp_cb,unit_wind_cb,unit_vessel_cb,unit_distance_cb,unit_short_cb};for(int i=0;i<6;++i){l=lv_label_create(g_units_screen);lv_label_set_text(l,names[i]);lv_obj_align(l,LV_ALIGN_TOP_LEFT,32,64+i*48);lv_obj_t*b=make_button(g_units_screen,"",cbs[i],170,40);*vals[i]=button_label(b);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-32,54+i*48);}l=lv_label_create(g_units_screen);lv_label_set_text(l,"Short if");lv_obj_align(l,LV_ALIGN_TOP_LEFT,32,355);lv_obj_t*b=make_button(g_units_screen,"-",unit_threshold_down_cb,48,38);lv_obj_align(b,LV_ALIGN_TOP_LEFT,145,344);b=make_button(g_units_screen,"",unit_threshold_up_cb,125,38);g_units_threshold=button_label(b);lv_obj_align(b,LV_ALIGN_TOP_MID,60,344);b=make_button(g_units_screen,"+",unit_threshold_up_cb,48,38);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-32,344);b=make_button(g_units_screen,"BACK",settings_screen_cb,120,46);lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-12);}
+void create_shunts_screen(){g_shunts_screen=lv_obj_create(nullptr);lv_obj_remove_flag(g_shunts_screen,LV_OBJ_FLAG_SCROLLABLE);lv_obj_t*l=lv_label_create(g_shunts_screen);lv_label_set_text(l,"SMARTSHUNTS");lv_obj_set_style_text_font(l,&lv_font_montserrat_24,0);lv_obj_align(l,LV_ALIGN_TOP_MID,0,22);for(size_t i=0;i<MAX_SMARTSHUNTS;++i){lv_obj_t*b=make_button(g_shunts_screen,"",shunt_slot_cb,360,62,nullptr);g_shunt_slot_labels[i]=button_label(b);lv_obj_align(b,LV_ALIGN_TOP_MID,0,78+static_cast<int>(i)*72);lv_obj_remove_event_cb(b,shunt_slot_cb);lv_obj_add_event_cb(b,shunt_slot_cb,LV_EVENT_CLICKED,reinterpret_cast<void*>(i));}lv_obj_t*b=make_button(g_shunts_screen,"BACK",settings_screen_cb,120,46);lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-12);}
+void create_shunt_edit_screen(){g_shunt_edit_screen=lv_obj_create(nullptr);lv_obj_remove_flag(g_shunt_edit_screen,LV_OBJ_FLAG_SCROLLABLE);lv_obj_t*l=lv_label_create(g_shunt_edit_screen);lv_label_set_text(l,"SMARTSHUNT");lv_obj_set_style_text_font(l,&lv_font_montserrat_24,0);lv_obj_align(l,LV_ALIGN_TOP_MID,0,14);lv_obj_t*b=make_button(g_shunt_edit_screen,"SELECT NEARBY",choose_nearby_cb,200,44);lv_obj_align(b,LV_ALIGN_TOP_MID,0,52);l=lv_label_create(g_shunt_edit_screen);lv_label_set_text(l,"Name");lv_obj_align(l,LV_ALIGN_TOP_LEFT,30,112);g_shunt_name=lv_textarea_create(g_shunt_edit_screen);lv_obj_set_size(g_shunt_name,300,42);lv_textarea_set_one_line(g_shunt_name,true);lv_textarea_set_max_length(g_shunt_name,24);lv_obj_align(g_shunt_name,LV_ALIGN_TOP_RIGHT,-30,100);lv_obj_add_event_cb(g_shunt_name,textarea_focus_cb,LV_EVENT_FOCUSED,nullptr);l=lv_label_create(g_shunt_edit_screen);lv_label_set_text(l,"Key");lv_obj_align(l,LV_ALIGN_TOP_LEFT,30,167);g_shunt_key=lv_textarea_create(g_shunt_edit_screen);lv_obj_set_size(g_shunt_key,300,42);lv_textarea_set_one_line(g_shunt_key,true);lv_textarea_set_password_mode(g_shunt_key,true);lv_textarea_set_max_length(g_shunt_key,32);lv_obj_align(g_shunt_key,LV_ALIGN_TOP_RIGHT,-30,155);lv_obj_add_event_cb(g_shunt_key,textarea_focus_cb,LV_EVENT_FOCUSED,nullptr);l=lv_label_create(g_shunt_edit_screen);lv_label_set_text(l,"Send to N2K");lv_obj_align(l,LV_ALIGN_TOP_LEFT,30,220);g_shunt_n2k=lv_switch_create(g_shunt_edit_screen);lv_obj_align(g_shunt_n2k,LV_ALIGN_TOP_RIGHT,-45,207);l=lv_label_create(g_shunt_edit_screen);lv_label_set_text(l,"Battery instance");lv_obj_align(l,LV_ALIGN_TOP_LEFT,30,272);b=make_button(g_shunt_edit_screen,"-",shunt_instance_down_cb,48,38);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-180,258);g_shunt_instance=lv_label_create(g_shunt_edit_screen);lv_obj_set_style_text_font(g_shunt_instance,&lv_font_montserrat_20,0);lv_obj_align(g_shunt_instance,LV_ALIGN_TOP_RIGHT,-112,267);b=make_button(g_shunt_edit_screen,"+",shunt_instance_up_cb,48,38);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-40,258);b=make_button(g_shunt_edit_screen,"SAVE",shunt_save_cb,120,46);lv_obj_align(b,LV_ALIGN_BOTTOM_LEFT,45,-18);b=make_button(g_shunt_edit_screen,"BACK",shunts_screen_cb,120,46);lv_obj_align(b,LV_ALIGN_BOTTOM_RIGHT,-45,-18);g_keyboard=lv_keyboard_create(g_shunt_edit_screen);lv_obj_set_size(g_keyboard,460,205);lv_obj_align(g_keyboard,LV_ALIGN_BOTTOM_MID,0,0);lv_obj_add_event_cb(g_keyboard,keyboard_cb,LV_EVENT_ALL,nullptr);lv_obj_add_flag(g_keyboard,LV_OBJ_FLAG_HIDDEN);}
 }
 
 void ui_start(AppSettings initial_settings)
 {
-    g_settings = initial_settings;
-    g_active_shunt = first_configured();
-    create_depth_screen(); create_battery_screen(); create_settings_screen(); create_manager_screen(); create_discovery_screen(); create_editor_screen();
-    update_display_settings(); apply_theme(); rebuild_manager_list(); update_battery_labels(nullptr); lv_screen_load(g_depth_screen);
-    g_battery_timer = lv_timer_create(update_battery_labels, 500, nullptr);
+    g_settings=initial_settings;g_active_page=first_enabled_page();create_data_screen();create_settings_screen();create_page_setup_screen();create_field_editor_screen();create_units_screen();create_shunts_screen();create_shunt_edit_screen();apply_theme();render_active_page();update_units();update_page_setup();update_shunts_list();lv_screen_load(g_data_screen);g_refresh_timer=lv_timer_create(refresh_cb,500,nullptr);
 }
