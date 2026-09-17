@@ -3,6 +3,7 @@ idf_component_register(
         "main.cpp"
         "app_settings.cpp"
         "smartshunt_ble.cpp"
+        "instrument_data.cpp"
         "n2k_bridge.cpp"
         "ui.cpp"
     INCLUDE_DIRS "."
