@@ -3,7 +3,7 @@
 #include "smartshunt_ble.hpp"
 #include "ui.hpp"
 
-#include "bsp/display.h"
+#include "bsp/esp-bsp.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_rom_sys.h"
@@ -64,7 +64,10 @@ extern "C" void app_main(void)
     const AppSettings settings = settings_load();
 
     board_i2c_recover();
-    bsp_display_start();
+    if (bsp_display_start() == nullptr) {
+        ESP_LOGE(TAG, "Display initialization failed");
+        return;
+    }
     bsp_display_lock(0);
     ui_start(settings);
     bsp_display_unlock();
