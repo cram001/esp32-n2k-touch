@@ -196,7 +196,7 @@ void publish_key_problem(int rssi, const uint8_t mac[6])
     }
 }
 
-void handle_victron_advertisement(const esp_ble_gap_cb_param_t::ble_scan_result_evt_param &scan)
+void handle_victron_advertisement(const struct ble_scan_result_evt_param &scan)
 {
     if (!g_settings.smartshunt_enabled || scan.search_evt != ESP_GAP_SEARCH_INQ_RES_EVT || !mac_matches(scan.bda)) return;
 
@@ -267,15 +267,16 @@ bool smartshunt_ble_start(const AppSettings &settings)
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return false;
 
     ESP_ERROR_CHECK(esp_ble_gap_register_callback(gap_callback));
-    static esp_ble_scan_params_t scan_params{
-        .scan_type = BLE_SCAN_TYPE_PASSIVE,
-        .own_addr_type = BLE_ADDR_TYPE_PUBLIC,
-        .scan_filter_policy = BLE_SCAN_FILTER_ALLOW_ALL,
-        .scan_interval = 0x80,
-        .scan_window = 0x30,
-        .scan_duplicate = BLE_SCAN_DUPLICATE_DISABLE,
-    };
+
+    static esp_ble_scan_params_t scan_params{};
+    scan_params.scan_type = BLE_SCAN_TYPE_PASSIVE;
+    scan_params.own_addr_type = BLE_ADDR_TYPE_PUBLIC;
+    scan_params.scan_filter_policy = BLE_SCAN_FILTER_ALLOW_ALL;
+    scan_params.scan_interval = 0x80;
+    scan_params.scan_window = 0x30;
+    scan_params.scan_duplicate = BLE_SCAN_DUPLICATE_DISABLE;
     ESP_ERROR_CHECK(esp_ble_gap_set_scan_params(&scan_params));
+
     g_ble_initialized = true;
     ESP_LOGI(TAG, "Passive SmartShunt Instant Readout scanner started");
     return true;
