@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 constexpr size_t MAX_SMARTSHUNTS = 4;
