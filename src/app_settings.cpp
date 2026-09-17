@@ -1,6 +1,7 @@
 #include "app_settings.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 
 #include "esp_err.h"
