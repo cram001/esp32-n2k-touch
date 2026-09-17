@@ -48,6 +48,13 @@ uint32_t unique_device_number()
     return folded & 0x1FFFFFU;
 }
 
+void publish_temperature(tN2kTempSource source, double actual)
+{
+    if (actual == N2kDoubleNA) return;
+    if (source == N2kts_SeaTemperature) instrument_data_update_nmea(DataMetric::WaterTemperature, actual);
+    else if (source == N2kts_OutsideTemperature) instrument_data_update_nmea(DataMetric::AirTemperature, actual);
+}
+
 void handle_nmea_message(const tN2kMsg &msg)
 {
     switch (msg.PGN) {
@@ -75,7 +82,6 @@ void handle_nmea_message(const tN2kMsg &msg)
     case 128275L: {
         uint16_t days; double seconds; uint32_t log, trip;
         if (ParseN2kPGN128275(msg, days, seconds, log, trip)) {
-            // PGN 128275 log fields are metres.
             instrument_data_update_nmea(DataMetric::TripDistance, static_cast<double>(trip));
         }
         break;
@@ -103,10 +109,12 @@ void handle_nmea_message(const tN2kMsg &msg)
     }
     case 130312L: {
         unsigned char sid, instance; tN2kTempSource source; double actual, set;
-        if (ParseN2kPGN130312(msg, sid, instance, source, actual, set) && actual != N2kDoubleNA) {
-            if (source == N2kts_SeaTemperature) instrument_data_update_nmea(DataMetric::WaterTemperature, actual);
-            else if (source == N2kts_OutsideTemperature) instrument_data_update_nmea(DataMetric::AirTemperature, actual);
-        }
+        if (ParseN2kPGN130312(msg, sid, instance, source, actual, set)) publish_temperature(source, actual);
+        break;
+    }
+    case 130316L: {
+        unsigned char sid, instance; tN2kTempSource source; double actual, set;
+        if (ParseN2kPGN130316(msg, sid, instance, source, actual, set)) publish_temperature(source, actual);
         break;
     }
     default:
