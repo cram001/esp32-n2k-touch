@@ -94,6 +94,25 @@ void handle_nmea_message(const tN2kMsg &msg)
         }
         break;
     }
+    case 129284L: {
+        unsigned char sid;
+        double distance_to_waypoint, eta_time, bearing_origin, bearing_position;
+        double destination_latitude, destination_longitude, waypoint_closing_velocity;
+        tN2kHeadingReference bearing_reference;
+        bool perpendicular_crossed, arrival_circle_entered;
+        tN2kDistanceCalculationType calculation_type;
+        int16_t eta_date;
+        uint32_t origin_waypoint, destination_waypoint;
+        if (ParseN2kPGN129284(msg, sid, distance_to_waypoint, bearing_reference,
+                              perpendicular_crossed, arrival_circle_entered, calculation_type,
+                              eta_time, eta_date, bearing_origin, bearing_position,
+                              origin_waypoint, destination_waypoint, destination_latitude,
+                              destination_longitude, waypoint_closing_velocity) &&
+            distance_to_waypoint != N2kDoubleNA) {
+            instrument_data_update_nmea(DataMetric::DistanceToWaypoint, distance_to_waypoint);
+        }
+        break;
+    }
     case 130306L: {
         unsigned char sid; double speed, angle; tN2kWindReference ref;
         if (ParseN2kPGN130306(msg, sid, speed, angle, ref)) {
