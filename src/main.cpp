@@ -1,7 +1,9 @@
 #include "app_settings.hpp"
+#include "n2k_bridge.hpp"
+#include "smartshunt_ble.hpp"
 #include "ui.hpp"
 
-#include "bsp/display.h"
+#include "bsp/esp-bsp.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_rom_sys.h"
@@ -28,7 +30,6 @@ void board_i2c_recover()
     ESP_ERROR_CHECK(gpio_set_pull_mode(BOARD_I2C_SCL, GPIO_PULLUP_ONLY));
     ESP_ERROR_CHECK(gpio_set_level(BOARD_I2C_SCL, 1));
     esp_rom_delay_us(10);
-
     for (int i = 0; i < 9 && gpio_get_level(BOARD_I2C_SDA) == 0; ++i) {
         ESP_ERROR_CHECK(gpio_set_level(BOARD_I2C_SCL, 0));
         esp_rom_delay_us(10);
@@ -55,7 +56,7 @@ void board_i2c_recover()
 
 extern "C" void app_main(void)
 {
-    ESP_LOGI(TAG, "Starting esp32-n2k-touch Milestone 1");
+    ESP_LOGI(TAG, "Starting esp32-n2k-touch");
 
     if (!settings_init()) {
         ESP_LOGW(TAG, "Continuing with default settings because NVS initialization failed");
@@ -63,11 +64,19 @@ extern "C" void app_main(void)
     const AppSettings settings = settings_load();
 
     board_i2c_recover();
-
-    bsp_display_start();
+    if (bsp_display_start() == nullptr) {
+        ESP_LOGE(TAG, "Display initialization failed");
+        return;
+    }
     bsp_display_lock(0);
     ui_start(settings);
     bsp_display_unlock();
-
     ESP_LOGI(TAG, "Display and touch UI initialized");
+
+    if (!smartshunt_ble_start(settings)) {
+        ESP_LOGE(TAG, "SmartShunt BLE service failed to initialize");
+    }
+    if (!n2k_bridge_start(settings)) {
+        ESP_LOGE(TAG, "NMEA 2000 service failed to initialize");
+    }
 }
