@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstring>
 
+#include "aes/esp_aes.h"
 #include "esp_bt.h"
 #include "esp_bt_main.h"
 #include "esp_gap_ble_api.h"
@@ -12,7 +13,6 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
-#include "mbedtls/aes.h"
 
 namespace {
 constexpr const char *TAG = "smartshunt";
@@ -170,10 +170,10 @@ void update_discovery(const struct ble_scan_result_evt_param &scan)
 bool decrypt_payload(const std::array<uint8_t, 16> &key, const uint8_t *encrypted, size_t encrypted_len,
                      uint8_t nonce_lsb, uint8_t nonce_msb, uint8_t *decrypted)
 {
-    mbedtls_aes_context ctx;
-    mbedtls_aes_init(&ctx);
-    if (mbedtls_aes_setkey_enc(&ctx, key.data(), 128) != 0) {
-        mbedtls_aes_free(&ctx);
+    esp_aes_context ctx;
+    esp_aes_init(&ctx);
+    if (esp_aes_setkey(&ctx, key.data(), 128) != 0) {
+        esp_aes_free(&ctx);
         return false;
     }
     size_t nc_offset = 0;
@@ -181,8 +181,8 @@ bool decrypt_payload(const std::array<uint8_t, 16> &key, const uint8_t *encrypte
     unsigned char stream_block[16]{};
     nonce_counter[0] = nonce_lsb;
     nonce_counter[1] = nonce_msb;
-    const int rc = mbedtls_aes_crypt_ctr(&ctx, encrypted_len, &nc_offset, nonce_counter, stream_block, encrypted, decrypted);
-    mbedtls_aes_free(&ctx);
+    const int rc = esp_aes_crypt_ctr(&ctx, encrypted_len, &nc_offset, nonce_counter, stream_block, encrypted, decrypted);
+    esp_aes_free(&ctx);
     return rc == 0;
 }
 
