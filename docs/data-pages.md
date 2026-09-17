@@ -29,11 +29,10 @@ The initial live decoder supports:
 - Heading — PGN 127250
 - Apparent wind speed/angle — PGN 130306
 - True wind speed/angle — PGN 130306
-- Water temperature — PGN 130312
-- Outside/air temperature — PGN 130312
+- Water temperature — PGN 130312 and PGN 130316
+- Outside/air temperature — PGN 130312 and PGN 130316
 - Trip distance — PGN 128275
-
-Distance to waypoint is already present in the field model and UI but its PGN 129284 decoder is still to be added.
+- Distance to waypoint — PGN 129284
 
 ## SmartShunt metrics
 
