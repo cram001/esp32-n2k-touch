@@ -138,7 +138,7 @@ void advertised_name(const uint8_t *adv, size_t adv_len, char out[25], const uin
     std::snprintf(out, 25, "SmartShunt %02X%02X", mac[4], mac[5]);
 }
 
-void update_discovery(const struct ble_scan_result_evt_param &scan)
+void update_discovery(const esp_ble_gap_cb_param_t::ble_scan_result_evt_param &scan)
 {
     char mac_text[18]{};
     format_mac(scan.bda, mac_text);
@@ -212,7 +212,7 @@ SmartShuntData decode_record(const uint8_t *record, int rssi)
     return next;
 }
 
-void handle_victron_advertisement(const struct ble_scan_result_evt_param &scan)
+void handle_victron_advertisement(const esp_ble_gap_cb_param_t::ble_scan_result_evt_param &scan)
 {
     if (scan.search_evt != ESP_GAP_SEARCH_INQ_RES_EVT) return;
 
