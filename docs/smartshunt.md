@@ -2,32 +2,60 @@
 
 ## Transport
 
-The firmware uses Victron **Instant Readout** BLE manufacturer advertisements. It does not open or hold a GATT connection to the SmartShunt.
+The firmware uses Victron **Instant Readout** BLE manufacturer advertisements. It does not open or hold a GATT connection to a SmartShunt.
 
-This is intentional:
+The scanner runs continuously so the UI can discover nearby Victron battery monitors and configured devices can update in the background. Live battery data remains advertisement-based and does not require a connection.
 
-- VictronConnect can still connect normally.
-- The ESP32 only listens for advertisements.
-- No polling interval or reconnect loop is required.
-- BLE traffic is limited to passive scanning and decoding relevant packets.
+## Multiple SmartShunts
 
-## Configuration
+Up to four SmartShunts can be configured independently.
 
-SmartShunt support is disabled by default.
+Each configured device stores:
 
-Settings provide:
+- Friendly/device name shown in the UI
+- BLE identity used internally to match future advertisements
+- Instant Readout encryption key
+- Read enabled/disabled state
+- NMEA 2000 bridge enabled/disabled state
+- NMEA 2000 battery instance
 
-1. **Read BLE Instant Readout** — enables use of decoded SmartShunt advertisements.
-2. **Send battery data to NMEA 2000** — enables the battery bridge. This is forced off when SmartShunt reading is disabled.
-3. **Battery instance** — 0 through 252.
-4. **MAC address** — optional device filter. Recommended when multiple Victron battery monitors are in range.
-5. **Instant Readout key** — 128-bit AES key represented as 32 hexadecimal characters.
+The BLE hardware address is an internal stable identifier. Normal setup and operation do **not** require the user to type or select a MAC address.
 
-The key is stored in ESP-IDF NVS. It is not printed to normal application logs.
+## Name-based discovery
+
+Use **Settings > SmartShunts > Add SmartShunt**.
+
+The ESP32 lists nearby Victron battery-monitor advertisements by their advertised Bluetooth name. Signal strength is shown as secondary information. Tapping a name binds that physical device internally and opens its editor.
+
+If an advertisement does not contain a readable local name, the UI creates a fallback `SmartShunt ####` label for selection. The stored display name can then be changed in the editor.
+
+After selecting a device:
+
+1. Confirm or edit its display name.
+2. Enter the 32-character Instant Readout encryption key from VictronConnect.
+3. Enable or disable reading that SmartShunt.
+4. Optionally enable NMEA 2000 transmission.
+5. Select its battery instance.
+
+The key is stored in ESP-IDF NVS and is not printed in normal logs.
+
+## Battery pages
+
+Each configured SmartShunt has its own logical battery page. The battery screen displays the selected device name at the top and provides previous/next controls to move between configured devices.
+
+Each page shows, when available:
+
+- State of charge
+- Battery voltage
+- Battery current
+- Consumed Ah
+- Time-to-go
+- BLE RSSI/status
+- NMEA 2000 bridge state and battery instance
 
 ## Decoded battery-monitor fields
 
-The 16-byte decrypted battery monitor record contains:
+The 16-byte decrypted battery-monitor record contains:
 
 - Time-to-go
 - Battery voltage
@@ -43,11 +71,13 @@ The auxiliary field is exposed as battery temperature only when the SmartShunt r
 
 ## Stale data
 
-A successful battery-monitor advertisement records its receive timestamp. Data older than 5 seconds is marked stale and is no longer transmitted onto NMEA 2000.
+Each SmartShunt has its own receive timestamp. Data older than 5 seconds is marked stale and that device stops transmitting onto NMEA 2000 until fresh data arrives.
 
-This prevents an old battery state from continuing to be announced if the SmartShunt goes out of range, powers down, Bluetooth is disabled, or the key/configuration changes.
+Discovery entries age out of the nearby-device list after 15 seconds.
 
 ## NMEA 2000 mapping
+
+Every SmartShunt has an independent bridge toggle and battery instance.
 
 ### PGN 127508 — Battery Status
 
@@ -55,7 +85,7 @@ This prevents an old battery state from continuing to be announced if the SmartS
 - Voltage: SmartShunt battery voltage
 - Current: SmartShunt battery current
 - Temperature: SmartShunt auxiliary temperature when available
-- SID: rolling sequence identifier
+- SID: rolling per-device sequence identifier
 
 ### PGN 127506 — DC Detailed Status
 
@@ -69,9 +99,11 @@ This prevents an old battery state from continuing to be announced if the SmartS
 
 Consumed Ah is displayed locally but is not mapped to a non-standard proprietary PGN.
 
-## Duplicate-source protection
+## Duplicate-instance protection
 
-The NMEA bridge defaults to **off**. Do not enable it if the same SmartShunt is already being bridged to NMEA 2000 by another device unless the installations use deliberately different battery instances.
+If two configured SmartShunts are both enabled for NMEA 2000 with the same battery instance, the firmware suppresses transmission for the conflicting instance and reports the conflict on the battery page. This prevents two different batteries from being announced as the same NMEA battery instance.
+
+This protection does not detect an external device such as a Cerbo GX transmitting the same SmartShunt, so the bridge still defaults off for newly added devices.
 
 ## CAN hardware
 
@@ -79,7 +111,5 @@ Current Waveshare hardware routes the onboard TJA1051 CAN transceiver to:
 
 - TX: GPIO6
 - RX: GPIO0
-
-The firmware configures NMEA 2000 at the transport layer through the ESP32 TWAI driver used by `NMEA2000_esp32xx`.
 
 The onboard transceiver should not be assumed to provide certified galvanic isolation for permanent NMEA 2000 installation. Review isolation, common grounding, backbone power, connector wiring and NMEA 2000 physical-layer requirements before vessel installation.
