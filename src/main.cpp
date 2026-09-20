@@ -1,6 +1,8 @@
 #include "app_settings.hpp"
 #include "n2k_bridge.hpp"
 #include "smartshunt_ble.hpp"
+#include "ota.hpp"
+#include "wifi_service.hpp"
 #include "ui.hpp"
 
 #include "bsp/esp-bsp.h"
@@ -57,6 +59,7 @@ void board_i2c_recover()
 extern "C" void app_main(void)
 {
     ESP_LOGI(TAG, "Starting esp32-n2k-touch");
+    ota_confirm_running_image();
 
     if (!settings_init()) {
         ESP_LOGW(TAG, "Continuing with default settings because NVS initialization failed");
@@ -73,6 +76,9 @@ extern "C" void app_main(void)
     bsp_display_unlock();
     ESP_LOGI(TAG, "Display and touch UI initialized");
 
+    if (!wifi_service_start(settings.wifi)) {
+        ESP_LOGE(TAG, "Wi-Fi service failed to initialize");
+    }
     if (!smartshunt_ble_start(settings)) {
         ESP_LOGE(TAG, "SmartShunt BLE service failed to initialize");
     }
