@@ -75,17 +75,21 @@ extern "C" void app_main(void)
     bsp_display_unlock();
     ESP_LOGI(TAG, "Display and touch UI initialized");
 
-    if (!wifi_service_start(settings.wifi)) {
-        ESP_LOGE(TAG, "Wi-Fi service failed to initialize");
-    }
-    if (!smartshunt_ble_start(settings)) {
-        ESP_LOGE(TAG, "SmartShunt BLE service failed to initialize");
-    }
-    if (!n2k_bridge_start(settings)) {
-        ESP_LOGE(TAG, "NMEA 2000 service failed to initialize");
-    }
+    const bool wifi_ok = wifi_service_start(settings.wifi);
+    if (!wifi_ok) ESP_LOGE(TAG, "Wi-Fi service failed to initialize");
 
-    // Confirm a newly installed OTA image only after the core application has
-    // completed initialization. A reset before this point allows rollback.
-    ota_confirm_running_image();
+    const bool ble_ok = smartshunt_ble_start(settings);
+    if (!ble_ok) ESP_LOGE(TAG, "SmartShunt BLE service failed to initialize");
+
+    const bool n2k_ok = n2k_bridge_start(settings);
+    if (!n2k_ok) ESP_LOGE(TAG, "NMEA 2000 service failed to initialize");
+
+    // A newly installed image is confirmed only after all core services have
+    // initialized. If any service fails, leave the image pending so a reboot
+    // can trigger bootloader rollback to the previous slot.
+    if (wifi_ok && ble_ok && n2k_ok) {
+        ota_confirm_running_image();
+    } else {
+        ESP_LOGE(TAG, "OTA image left unconfirmed because startup health checks failed");
+    }
 }
