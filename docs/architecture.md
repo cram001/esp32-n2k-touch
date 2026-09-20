@@ -7,7 +7,7 @@
 - LVGL 9.5 through the Waveshare BSP
 - ESP32 NVS for persistent settings
 - ESP32 BLE GAP passive scanner for Victron Instant Readout
-- NMEA2000 library with ESP32 TWAI transport
+- NMEA2000 library with a vendored ESP-IDF/TWAI transport derived from jiauka/NMEA2000_esp32xx
 
 ## Runtime services
 
@@ -15,12 +15,7 @@
 
 The Waveshare BSP owns display, touch and backlight initialization. LVGL screens are created after `bsp_display_start()` while the BSP display lock is held.
 
-The current UI contains:
-
-- Depth screen
-- SmartShunt battery screen
-- General display settings
-- SmartShunt/BLE/NMEA bridge settings
+The current UI contains six configurable instrument pages, units/settings screens, Wi-Fi setup/status, and multi-SmartShunt setup.
 
 Day and Night modes have independent brightness values. Brightness changes are sent through `bsp_display_brightness_set()` because the board backlight is controlled through the Waveshare helper/IO-expander path rather than a normal ESP32 PWM GPIO.
 
@@ -68,22 +63,19 @@ SmartShunt-to-NMEA output defaults off to avoid duplicate battery sources.
 
 ## Planned services
 
-### Depth
-
-Incoming NMEA 2000 PGN 128267 will update a dedicated depth-state object. The UI will enforce stale-data timeout behavior instead of leaving an old depth value displayed indefinitely.
-
 ### Cerbo GX / inverter
 
 A network service will join the vessel Wi-Fi and use the Cerbo GX local API/MQTT path to read and command the VE.Bus inverter mode. UI state changes will be based on confirmed Cerbo feedback rather than optimistic button state.
 
 ### OTA
 
-The flash layout reserves two OTA application slots. OTA transport and update UI remain to be implemented.
+The flash layout provides two OTA application slots. HTTPS OTA transport, project/secure-version validation, startup-health confirmation and bootloader rollback are implemented. The release-selection/update UI remains to be implemented.
 
 ## Concurrency rules
 
 - LVGL is changed only while the display/LVGL context is safe.
-- BLE callbacks decode into a protected data snapshot rather than directly changing UI objects.
+- BLE callbacks decode into a protected, generation-checked data snapshot rather than directly changing UI objects.
+- NMEA input values are published into a synchronized cache; the UI reads snapshots.
 - NMEA output reads copies of settings and SmartShunt state.
 - Settings changes are persisted, then applied to the relevant runtime service.
 
