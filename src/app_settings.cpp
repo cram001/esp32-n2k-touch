@@ -40,6 +40,13 @@ struct PersistedWifiConfig {
     std::array<char, 33> ssid{};
 };
 
+static_assert(sizeof(SmartShuntConfig) == 80, "SmartShuntConfig ABI changed; bump SHUNTS_SCHEMA and migrate");
+static_assert(sizeof(PersistedSmartShunts) == 324, "PersistedSmartShunts ABI changed; bump SHUNTS_SCHEMA and migrate");
+static_assert(sizeof(UnitsSettings) == 12, "UnitsSettings ABI changed; bump DISPLAY_SCHEMA and migrate");
+static_assert(sizeof(DataPageConfig) == 37, "DataPageConfig ABI changed; bump DISPLAY_SCHEMA and migrate");
+static_assert(sizeof(PersistedDisplayConfig) == 240, "PersistedDisplayConfig ABI changed; bump DISPLAY_SCHEMA and migrate");
+static_assert(sizeof(PersistedWifiConfig) == 40, "PersistedWifiConfig ABI changed; bump WIFI_SCHEMA and migrate");
+
 uint8_t clamp_brightness(uint8_t value)
 {
     return value < 1 ? 1 : (value > 100 ? 100 : value);
