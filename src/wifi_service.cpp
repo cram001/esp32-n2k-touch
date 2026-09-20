@@ -1,5 +1,6 @@
 #include "wifi_service.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 
