@@ -110,7 +110,15 @@ void brightness_changed_cb(lv_event_t *event)
         g_settings.night_brightness = brightness;
     }
 
-    persist_and_apply();
+    update_settings_labels();
+    apply_backlight();
+}
+
+void brightness_released_cb(lv_event_t *)
+{
+    if (!settings_save(g_settings)) {
+        ESP_LOGW(TAG, "Brightness changed but could not be persisted");
+    }
 }
 
 lv_obj_t *make_button(lv_obj_t *parent, const char *text, lv_event_cb_t callback)
@@ -129,6 +137,10 @@ lv_obj_t *make_button(lv_obj_t *parent, const char *text, lv_event_cb_t callback
 void create_depth_screen()
 {
     g_depth_screen = lv_obj_create(nullptr);
+    if (g_depth_screen == nullptr) {
+        ESP_LOGE(TAG, "Failed to allocate depth screen");
+        return;
+    }
     lv_obj_remove_flag(g_depth_screen, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *title = lv_label_create(g_depth_screen);
@@ -153,6 +165,10 @@ void create_depth_screen()
 void create_settings_screen()
 {
     g_settings_screen = lv_obj_create(nullptr);
+    if (g_settings_screen == nullptr) {
+        ESP_LOGE(TAG, "Failed to allocate settings screen");
+        return;
+    }
     lv_obj_remove_flag(g_settings_screen, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *title = lv_label_create(g_settings_screen);
@@ -185,10 +201,15 @@ void create_settings_screen()
     lv_obj_align(g_brightness_value, LV_ALIGN_TOP_RIGHT, -38, 220);
 
     g_brightness_slider = lv_slider_create(g_settings_screen);
+    if (g_brightness_slider == nullptr) {
+        ESP_LOGE(TAG, "Failed to allocate brightness slider");
+        return;
+    }
     lv_obj_set_size(g_brightness_slider, 380, 28);
     lv_slider_set_range(g_brightness_slider, 1, 100);
     lv_obj_align(g_brightness_slider, LV_ALIGN_TOP_MID, 0, 265);
     lv_obj_add_event_cb(g_brightness_slider, brightness_changed_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+    lv_obj_add_event_cb(g_brightness_slider, brightness_released_cb, LV_EVENT_RELEASED, nullptr);
 
     lv_obj_t *note = lv_label_create(g_settings_screen);
     lv_label_set_text(note, "Day and night brightness are stored separately.");
@@ -206,6 +227,10 @@ void ui_start(AppSettings initial_settings)
 
     create_depth_screen();
     create_settings_screen();
+    if (g_depth_screen == nullptr || g_settings_screen == nullptr || g_brightness_slider == nullptr) {
+        ESP_LOGE(TAG, "Critical LVGL object creation failed; UI startup aborted");
+        return;
+    }
     update_settings_labels();
     apply_theme();
     lv_screen_load(g_depth_screen);
