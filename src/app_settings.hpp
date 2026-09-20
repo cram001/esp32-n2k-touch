@@ -91,8 +91,9 @@ struct SmartShuntConfig {
 
 struct WifiConfig {
     bool enabled = false;
+    bool open_network = false;
     std::array<char, 33> ssid{};
-    std::array<char, 65> password{};
+    std::array<char, 65> password{}; // Volatile only; never persisted to NVS.
 };
 
 struct AppSettings {
