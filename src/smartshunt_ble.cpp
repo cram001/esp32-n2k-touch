@@ -19,7 +19,8 @@ constexpr const char *TAG = "smartshunt";
 constexpr uint16_t VICTRON_COMPANY_ID = 0x02E1;
 constexpr uint8_t VICTRON_PRODUCT_ADVERTISEMENT = 0x10;
 constexpr uint8_t VICTRON_BATTERY_MONITOR_RECORD = 0x02;
-constexpr size_t VICTRON_HEADER_LEN = 5;
+constexpr uint8_t VICTRON_INSTANT_READOUT = 0xA0;
+constexpr size_t VICTRON_HEADER_LEN = 8;
 constexpr size_t BATTERY_RECORD_LEN = 16;
 constexpr uint32_t STALE_AFTER_MS = 5000;
 constexpr uint32_t DISCOVERY_STALE_MS = 15000;
@@ -221,7 +222,15 @@ void handle_victron_advertisement(const esp_ble_gap_cb_param_t::ble_scan_result_
     const size_t raw_len = static_cast<size_t>(scan.adv_data_len) + static_cast<size_t>(scan.scan_rsp_len);
     const uint8_t *payload = find_manufacturer_payload(scan.ble_adv, raw_len, payload_len);
     if (payload == nullptr || payload_len < VICTRON_HEADER_LEN) return;
-    if (payload[0] != VICTRON_PRODUCT_ADVERTISEMENT || payload[1] != VICTRON_BATTERY_MONITOR_RECORD) return;
+    // Victron manufacturer payload after the 0x02E1 company ID:
+    // [0] 0x10 product advertisement, [1..2] product ID (LE),
+    // [3] 0xA0 instant-readout type, [4] record type,
+    // [5..6] AES nonce/counter (LE), [7] key-check byte, [8..] ciphertext.
+    if (payload[0] != VICTRON_PRODUCT_ADVERTISEMENT ||
+        payload[3] != VICTRON_INSTANT_READOUT ||
+        payload[4] != VICTRON_BATTERY_MONITOR_RECORD) {
+        return;
+    }
 
     update_discovery(scan);
 
@@ -244,7 +253,7 @@ void handle_victron_advertisement(const esp_ble_gap_cb_param_t::ble_scan_result_
 
         if (!cfg.configured || !cfg.enabled || !runtime_snapshot.mac_valid || incoming != runtime_snapshot.mac) continue;
 
-        if (!runtime_snapshot.key_valid || payload[4] != runtime_snapshot.key[0]) {
+        if (!runtime_snapshot.key_valid || payload[7] != runtime_snapshot.key[0]) {
             if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
                 if (generation == g_config_generation && incoming == g_runtime[i].mac) {
                     g_runtime[i].data = {};
@@ -262,7 +271,7 @@ void handle_victron_advertisement(const esp_ble_gap_cb_param_t::ble_scan_result_
 
         uint8_t decrypted[BATTERY_RECORD_LEN]{};
         if (!decrypt_payload(runtime_snapshot.key, payload + VICTRON_HEADER_LEN, BATTERY_RECORD_LEN,
-                             payload[2], payload[3], decrypted)) {
+                             payload[5], payload[6], decrypted)) {
             continue;
         }
 
