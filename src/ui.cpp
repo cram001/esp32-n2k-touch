@@ -240,6 +240,7 @@ void update_wifi_status()
     case WifiState::Disabled: std::snprintf(b,sizeof(b),"Disabled"); break;
     case WifiState::Connecting: std::snprintf(b,sizeof(b),"Connecting to %s...",st.ssid.data()); break;
     case WifiState::Connected: std::snprintf(b,sizeof(b),"%s\n%s   %d dBm",st.ssid.data(),st.ip.data(),st.rssi); break;
+    case WifiState::CredentialsRequired: std::snprintf(b,sizeof(b),"%s\nPassword required after reboot",st.ssid.data()); break;
     case WifiState::Disconnected: std::snprintf(b,sizeof(b),"Disconnected - reconnecting"); break;
     case WifiState::Error: std::snprintf(b,sizeof(b),"Wi-Fi error"); break;
     }
@@ -308,6 +309,7 @@ void wifi_save_cb(lv_event_t *){
     g_settings.wifi.enabled=lv_obj_has_state(g_wifi_enabled,LV_STATE_CHECKED);
     std::snprintf(g_settings.wifi.ssid.data(),g_settings.wifi.ssid.size(),"%s",lv_textarea_get_text(g_wifi_ssid));
     std::snprintf(g_settings.wifi.password.data(),g_settings.wifi.password.size(),"%s",lv_textarea_get_text(g_wifi_password));
+    g_settings.wifi.open_network = g_settings.wifi.password[0] == '\0';
     persist();
     update_wifi_status();
 }
