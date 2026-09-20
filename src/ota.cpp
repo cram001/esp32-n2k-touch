@@ -29,6 +29,41 @@ void ensure_mutex()
     if (g_mutex == nullptr) g_mutex = xSemaphoreCreateMutex();
 }
 
+void set_active(bool active)
+{
+    ensure_mutex();
+    if (g_mutex != nullptr && xSemaphoreTake(g_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        g_active = active;
+        xSemaphoreGive(g_mutex);
+    }
+}
+
+bool claim_update(const char *url)
+{
+    ensure_mutex();
+    if (g_mutex == nullptr) return false;
+    if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(100)) != pdTRUE) return false;
+    if (g_active) {
+        xSemaphoreGive(g_mutex);
+        return false;
+    }
+    g_active = true;
+    std::snprintf(g_url, sizeof(g_url), "%s", url);
+    xSemaphoreGive(g_mutex);
+    return true;
+}
+
+void url_snapshot(char *out, size_t out_size)
+{
+    if (out == nullptr || out_size == 0) return;
+    out[0] = '\0';
+    ensure_mutex();
+    if (g_mutex != nullptr && xSemaphoreTake(g_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        std::snprintf(out, out_size, "%s", g_url);
+        xSemaphoreGive(g_mutex);
+    }
+}
+
 void set_status(OtaState state, int progress, esp_err_t err, const char *message)
 {
     ensure_mutex();
@@ -45,8 +80,11 @@ void ota_task(void *)
 {
     set_status(OtaState::Starting, 0, ESP_OK, "Connecting");
 
+    char url[OTA_URL_MAX]{};
+    url_snapshot(url, sizeof(url));
+
     esp_http_client_config_t http_config{};
-    http_config.url = g_url;
+    http_config.url = url;
     http_config.crt_bundle_attach = esp_crt_bundle_attach;
     http_config.timeout_ms = 15000;
     http_config.keep_alive_enable = true;
@@ -59,7 +97,7 @@ void ota_task(void *)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_https_ota_begin failed: %s", esp_err_to_name(err));
         set_status(OtaState::Failed, 0, err, "OTA connection failed");
-        g_active = false;
+        set_active(false);
         vTaskDelete(nullptr);
         return;
     }
@@ -70,7 +108,7 @@ void ota_task(void *)
         ESP_LOGE(TAG, "Could not read OTA image descriptor: %s", esp_err_to_name(err));
         esp_https_ota_abort(handle);
         set_status(OtaState::Failed, 0, err, "Invalid firmware image");
-        g_active = false;
+        set_active(false);
         vTaskDelete(nullptr);
         return;
     }
@@ -82,7 +120,7 @@ void ota_task(void *)
                  candidate.project_name, running ? running->project_name : "unknown");
         esp_https_ota_abort(handle);
         set_status(OtaState::Failed, 0, ESP_ERR_INVALID_ARG, "Wrong firmware project");
-        g_active = false;
+        set_active(false);
         vTaskDelete(nullptr);
         return;
     }
@@ -91,7 +129,7 @@ void ota_task(void *)
         ESP_LOGE(TAG, "Rejecting OTA image with lower secure version");
         esp_https_ota_abort(handle);
         set_status(OtaState::Failed, 0, ESP_ERR_INVALID_VERSION, "Firmware security downgrade");
-        g_active = false;
+        set_active(false);
         vTaskDelete(nullptr);
         return;
     }
@@ -112,7 +150,7 @@ void ota_task(void *)
         ESP_LOGE(TAG, "OTA download failed: %s", esp_err_to_name(err));
         esp_https_ota_abort(handle);
         set_status(OtaState::Failed, 0, err, "OTA download failed");
-        g_active = false;
+        set_active(false);
         vTaskDelete(nullptr);
         return;
     }
@@ -122,14 +160,14 @@ void ota_task(void *)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "OTA validation/finalization failed: %s", esp_err_to_name(err));
         set_status(OtaState::Failed, 100, err, "OTA validation failed");
-        g_active = false;
+        set_active(false);
         vTaskDelete(nullptr);
         return;
     }
 
     ESP_LOGI(TAG, "OTA image installed successfully; reboot required");
     set_status(OtaState::ReadyToReboot, 100, ESP_OK, "Update ready - reboot");
-    g_active = false;
+    set_active(false);
     vTaskDelete(nullptr);
 }
 } // namespace
@@ -164,7 +202,7 @@ bool ota_start_https(const char *url)
     set_status(OtaState::Starting, 0, ESP_OK, "Starting");
 
     if (xTaskCreate(ota_task, "ota", OTA_TASK_STACK, nullptr, 4, nullptr) != pdPASS) {
-        g_active = false;
+        set_active(false);
         set_status(OtaState::Failed, 0, ESP_ERR_NO_MEM, "Could not start OTA task");
         return false;
     }
