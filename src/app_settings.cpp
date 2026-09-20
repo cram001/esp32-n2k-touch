@@ -36,6 +36,7 @@ struct PersistedDisplayConfig {
 struct PersistedWifiConfig {
     uint32_t schema = WIFI_SCHEMA;
     bool enabled = false;
+    bool open_network = false;
     std::array<char, 33> ssid{};
 };
 
@@ -149,6 +150,7 @@ AppSettings settings_load()
     if (nvs_get_blob(handle, KEY_WIFI, &persisted_wifi, &size) == ESP_OK &&
         size == sizeof(persisted_wifi) && persisted_wifi.schema == WIFI_SCHEMA) {
         settings.wifi.enabled = persisted_wifi.enabled;
+        settings.wifi.open_network = persisted_wifi.open_network;
         settings.wifi.ssid = persisted_wifi.ssid;
         settings.wifi.ssid.back() = '\0';
         settings.wifi.password.fill('\0');
@@ -178,6 +180,7 @@ bool settings_save(const AppSettings &settings)
 
     PersistedWifiConfig persisted_wifi{};
     persisted_wifi.enabled = settings.wifi.enabled;
+    persisted_wifi.open_network = settings.wifi.open_network;
     persisted_wifi.ssid = settings.wifi.ssid;
     persisted_wifi.ssid.back() = '\0';
 
