@@ -6,13 +6,15 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
 namespace {
 constexpr const char *TAG = "wifi";
-constexpr int MAX_RETRY_BEFORE_BACKOFF = 10;
+constexpr int MAX_BACKOFF_EXPONENT = 5;
+constexpr int64_t MAX_RECONNECT_DELAY_US = 30000000;
 
 SemaphoreHandle_t g_mutex = nullptr;
 WifiStatus g_status{};
@@ -22,6 +24,7 @@ esp_event_handler_instance_t g_wifi_handler = nullptr;
 esp_event_handler_instance_t g_ip_handler = nullptr;
 bool g_initialized = false;
 int g_retry_count = 0;
+esp_timer_handle_t g_reconnect_timer = nullptr;
 
 void lock_status()
 {
@@ -74,8 +77,7 @@ void event_handler(void *, esp_event_base_t event_base, int32_t event_id, void *
         }
 
         set_state(WifiState::Disconnected);
-        if (g_retry_count < MAX_RETRY_BEFORE_BACKOFF) ++g_retry_count;
-        esp_wifi_connect();
+        schedule_reconnect();
         return;
     }
 
@@ -100,11 +102,36 @@ void event_handler(void *, esp_event_base_t event_base, int32_t event_id, void *
     }
 }
 
+bool same_config(const WifiConfig &a, const WifiConfig &b)
+{
+    return a.enabled == b.enabled && a.ssid == b.ssid && a.password == b.password;
+}
+
+void reconnect_timer_cb(void *)
+{
+    if (g_config.enabled && g_config.ssid[0] != '\0') {
+        set_state(WifiState::Connecting);
+        esp_wifi_connect();
+    }
+}
+
+void schedule_reconnect()
+{
+    if (g_reconnect_timer == nullptr) return;
+    const int exponent = std::min(g_retry_count, MAX_BACKOFF_EXPONENT);
+    const int64_t delay_us = std::min<int64_t>(1000000LL << exponent, MAX_RECONNECT_DELAY_US);
+    ++g_retry_count;
+    esp_timer_stop(g_reconnect_timer);
+    esp_timer_start_once(g_reconnect_timer, delay_us);
+}
+
 bool configure_station(const WifiConfig &config)
 {
     wifi_config_t wifi_config{};
-    std::snprintf(reinterpret_cast<char *>(wifi_config.sta.ssid), sizeof(wifi_config.sta.ssid), "%s", config.ssid.data());
-    std::snprintf(reinterpret_cast<char *>(wifi_config.sta.password), sizeof(wifi_config.sta.password), "%s", config.password.data());
+    const size_t ssid_len = std::min(config.ssid.size() - 1, sizeof(wifi_config.sta.ssid));
+    const size_t pass_len = std::min(config.password.size() - 1, sizeof(wifi_config.sta.password));
+    std::memcpy(wifi_config.sta.ssid, config.ssid.data(), ssid_len);
+    std::memcpy(wifi_config.sta.password, config.password.data(), pass_len);
     wifi_config.sta.threshold.authmode = config.password[0] == '\0' ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
     wifi_config.sta.pmf_cfg.capable = true;
     wifi_config.sta.pmf_cfg.required = false;
@@ -160,6 +187,11 @@ bool wifi_service_start(const WifiConfig &config)
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, nullptr, &g_wifi_handler));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, nullptr, &g_ip_handler));
 
+    esp_timer_create_args_t timer_args{};
+    timer_args.callback = reconnect_timer_cb;
+    timer_args.name = "wifi_reconnect";
+    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &g_reconnect_timer));
+
     if (!configure_station(g_config)) {
         set_state(WifiState::Error);
         return false;
@@ -183,6 +215,8 @@ bool wifi_service_start(const WifiConfig &config)
 
 void wifi_service_apply_config(const WifiConfig &config)
 {
+    if (g_initialized && same_config(config, g_config)) return;
+
     g_config = config;
     copy_ssid(g_config.ssid.data());
 
@@ -191,6 +225,7 @@ void wifi_service_apply_config(const WifiConfig &config)
         return;
     }
 
+    if (g_reconnect_timer != nullptr) esp_timer_stop(g_reconnect_timer);
     esp_wifi_disconnect();
     clear_link_details();
 
