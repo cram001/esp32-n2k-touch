@@ -1,7 +1,6 @@
 #include "app_settings.hpp"
 #include "n2k_bridge.hpp"
 #include "smartshunt_ble.hpp"
-#include "ota.hpp"
 #include "wifi_service.hpp"
 #include "ui.hpp"
 
@@ -99,12 +98,10 @@ extern "C" void app_main(void)
     const bool n2k_ok = n2k_bridge_start(settings);
     if (!n2k_ok) ESP_LOGE(TAG, "NMEA 2000 service failed to initialize");
 
-    // A newly installed image is confirmed only after all core services have
-    // initialized. If any service fails, leave the image pending so a reboot
-    // can trigger bootloader rollback to the previous slot.
-    if (wifi_ok && ble_ok && n2k_ok) {
-        ota_confirm_running_image();
-    } else {
-        ESP_LOGE(TAG, "OTA image left unconfirmed because startup health checks failed");
-    }
+
+    // OTA is temporarily excluded while diagnosing firmware link/IRAM pressure.
+    // Keep service initialization results visible for startup diagnostics.
+    (void)wifi_ok;
+    (void)ble_ok;
+    (void)n2k_ok;
 }
