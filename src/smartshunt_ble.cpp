@@ -39,7 +39,8 @@ struct DiscoveredSlot {
 };
 
 SemaphoreHandle_t g_mutex = nullptr;
-AppSettings g_settings;
+std::array<SmartShuntConfig, MAX_SMARTSHUNTS> g_configs{};
+uint32_t g_config_generation = 0;
 std::array<RuntimeSlot, MAX_SMARTSHUNTS> g_runtime{};
 std::array<DiscoveredSlot, MAX_DISCOVERED_SMARTSHUNTS> g_discovered{};
 bool g_ble_initialized = false;
@@ -227,17 +228,30 @@ void handle_victron_advertisement(const esp_ble_gap_cb_param_t::ble_scan_result_
     std::array<uint8_t, 6> incoming{};
     std::memcpy(incoming.data(), scan.bda, incoming.size());
 
-    for (size_t i = 0; i < g_settings.smartshunts.size(); ++i) {
-        const auto &cfg = g_settings.smartshunts[i];
-        auto &runtime = g_runtime[i];
-        if (!cfg.configured || !cfg.enabled || !runtime.mac_valid || incoming != runtime.mac) continue;
+    for (size_t i = 0; i < MAX_SMARTSHUNTS; ++i) {
+        SmartShuntConfig cfg{};
+        RuntimeSlot runtime_snapshot{};
+        uint32_t generation = 0;
 
-        if (!runtime.key_valid || payload[4] != runtime.key[0]) {
+        if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(5)) != pdTRUE) continue;
+        cfg = g_configs[i];
+        runtime_snapshot.mac = g_runtime[i].mac;
+        runtime_snapshot.key = g_runtime[i].key;
+        runtime_snapshot.mac_valid = g_runtime[i].mac_valid;
+        runtime_snapshot.key_valid = g_runtime[i].key_valid;
+        generation = g_config_generation;
+        xSemaphoreGive(g_mutex);
+
+        if (!cfg.configured || !cfg.enabled || !runtime_snapshot.mac_valid || incoming != runtime_snapshot.mac) continue;
+
+        if (!runtime_snapshot.key_valid || payload[4] != runtime_snapshot.key[0]) {
             if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
-                runtime.data = {};
-                runtime.data.key_valid = false;
-                runtime.data.rssi = scan.rssi;
-                runtime.last_rx_us = esp_timer_get_time();
+                if (generation == g_config_generation && incoming == g_runtime[i].mac) {
+                    g_runtime[i].data = {};
+                    g_runtime[i].data.key_valid = false;
+                    g_runtime[i].data.rssi = scan.rssi;
+                    g_runtime[i].last_rx_us = esp_timer_get_time();
+                }
                 xSemaphoreGive(g_mutex);
             }
             continue;
@@ -245,18 +259,23 @@ void handle_victron_advertisement(const esp_ble_gap_cb_param_t::ble_scan_result_
 
         const size_t encrypted_len = payload_len - VICTRON_HEADER_LEN;
         if (encrypted_len < BATTERY_RECORD_LEN) continue;
+
         uint8_t decrypted[BATTERY_RECORD_LEN]{};
-        if (!decrypt_payload(runtime.key, payload + VICTRON_HEADER_LEN, BATTERY_RECORD_LEN, payload[2], payload[3], decrypted)) continue;
+        if (!decrypt_payload(runtime_snapshot.key, payload + VICTRON_HEADER_LEN, BATTERY_RECORD_LEN,
+                             payload[2], payload[3], decrypted)) {
+            continue;
+        }
 
         const SmartShuntData decoded = decode_record(decrypted, scan.rssi);
         if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
-            runtime.data = decoded;
-            runtime.last_rx_us = esp_timer_get_time();
+            if (generation == g_config_generation && incoming == g_runtime[i].mac) {
+                g_runtime[i].data = decoded;
+                g_runtime[i].last_rx_us = esp_timer_get_time();
+            }
             xSemaphoreGive(g_mutex);
         }
     }
 }
-
 void gap_callback(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
 {
     if (event == ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT) {
@@ -270,10 +289,26 @@ void gap_callback(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param)
 void refresh_runtime(const AppSettings &settings)
 {
     if (g_mutex != nullptr) xSemaphoreTake(g_mutex, portMAX_DELAY);
-    g_settings = settings;
+    g_configs = settings.smartshunts;
+    ++g_config_generation;
     for (size_t i = 0; i < g_runtime.size(); ++i) {
+        const auto previous_mac = g_runtime[i].mac;
+        const auto previous_key = g_runtime[i].key;
+        const bool previous_mac_valid = g_runtime[i].mac_valid;
+        const bool previous_key_valid = g_runtime[i].key_valid;
+
         g_runtime[i].mac_valid = parse_mac(settings.smartshunts[i].mac.data(), g_runtime[i].mac);
         g_runtime[i].key_valid = parse_bindkey(settings.smartshunts[i].bindkey.data(), g_runtime[i].key);
+
+        const bool identity_changed =
+            previous_mac_valid != g_runtime[i].mac_valid ||
+            previous_key_valid != g_runtime[i].key_valid ||
+            previous_mac != g_runtime[i].mac ||
+            previous_key != g_runtime[i].key;
+        if (identity_changed) {
+            g_runtime[i].data = {};
+            g_runtime[i].last_rx_us = 0;
+        }
     }
     if (g_mutex != nullptr) xSemaphoreGive(g_mutex);
 }
