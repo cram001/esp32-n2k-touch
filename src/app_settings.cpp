@@ -42,7 +42,7 @@ struct PersistedWifiConfig {
 
 uint8_t clamp_brightness(uint8_t value)
 {
-    return value > 100 ? 100 : value;
+    return value < 1 ? 1 : (value > 100 ? 100 : value);
 }
 
 bool valid_layout(PageLayout layout)
