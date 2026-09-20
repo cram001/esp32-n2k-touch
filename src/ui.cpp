@@ -734,6 +734,8 @@ void create_shunt_edit_screen()
     lv_obj_add_flag(g_keyboard, LV_OBJ_FLAG_HIDDEN);
 }
 
+} // namespace
+
 void ui_start(AppSettings initial_settings)
 {
     g_settings = initial_settings;
