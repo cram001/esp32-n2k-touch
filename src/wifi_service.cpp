@@ -136,7 +136,9 @@ bool configure_station(const WifiConfig &config)
     wifi_config.sta.pmf_cfg.capable = true;
     wifi_config.sta.pmf_cfg.required = false;
 
-    esp_err_t err = esp_wifi_set_mode(WIFI_MODE_STA);
+    esp_err_t err = esp_wifi_set_storage(WIFI_STORAGE_RAM);
+    if (err != ESP_OK) return false;
+    err = esp_wifi_set_mode(WIFI_MODE_STA);
     if (err != ESP_OK) return false;
     err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
     if (err != ESP_OK) return false;
