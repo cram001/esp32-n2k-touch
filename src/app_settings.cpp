@@ -35,7 +35,8 @@ struct PersistedDisplayConfig {
 
 struct PersistedWifiConfig {
     uint32_t schema = WIFI_SCHEMA;
-    WifiConfig config{};
+    bool enabled = false;
+    std::array<char, 33> ssid{};
 };
 
 uint8_t clamp_brightness(uint8_t value)
@@ -147,9 +148,10 @@ AppSettings settings_load()
     size = sizeof(persisted_wifi);
     if (nvs_get_blob(handle, KEY_WIFI, &persisted_wifi, &size) == ESP_OK &&
         size == sizeof(persisted_wifi) && persisted_wifi.schema == WIFI_SCHEMA) {
-        settings.wifi = persisted_wifi.config;
+        settings.wifi.enabled = persisted_wifi.enabled;
+        settings.wifi.ssid = persisted_wifi.ssid;
         settings.wifi.ssid.back() = '\0';
-        settings.wifi.password.back() = '\0';
+        settings.wifi.password.fill('\0');
     }
 
     sanitize_display_settings(settings);
@@ -175,7 +177,9 @@ bool settings_save(const AppSettings &settings)
     persisted_display.pages = settings.pages;
 
     PersistedWifiConfig persisted_wifi{};
-    persisted_wifi.config = settings.wifi;
+    persisted_wifi.enabled = settings.wifi.enabled;
+    persisted_wifi.ssid = settings.wifi.ssid;
+    persisted_wifi.ssid.back() = '\0';
 
     err = nvs_set_u8(handle, KEY_THEME, static_cast<uint8_t>(settings.theme));
     if (err == ESP_OK) err = nvs_set_u8(handle, KEY_DAY_BRIGHTNESS, clamp_brightness(settings.day_brightness));
