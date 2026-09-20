@@ -1,0 +1,156 @@
+#include "ota.hpp"
+
+#include <algorithm>
+#include <cstdio>
+#include <cstring>
+
+#include "esp_app_desc.h"
+#include "esp_crt_bundle.h"
+#include "esp_err.h"
+#include "esp_https_ota.h"
+#include "esp_log.h"
+#include "esp_ota_ops.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
+#include "freertos/task.h"
+
+namespace {
+constexpr const char *TAG = "ota";
+constexpr size_t OTA_URL_MAX = 256;
+constexpr uint32_t OTA_TASK_STACK = 8192;
+
+SemaphoreHandle_t g_mutex = nullptr;
+OtaStatus g_status{};
+char g_url[OTA_URL_MAX]{};
+bool g_active = false;
+
+void ensure_mutex()
+{
+    if (g_mutex == nullptr) g_mutex = xSemaphoreCreateMutex();
+}
+
+void set_status(OtaState state, int progress, esp_err_t err, const char *message)
+{
+    ensure_mutex();
+    if (g_mutex != nullptr && xSemaphoreTake(g_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        g_status.state = state;
+        g_status.progress_percent = std::clamp(progress, 0, 100);
+        g_status.last_error = static_cast<int>(err);
+        std::snprintf(g_status.message, sizeof(g_status.message), "%s", message ? message : "");
+        xSemaphoreGive(g_mutex);
+    }
+}
+
+void ota_task(void *)
+{
+    set_status(OtaState::Starting, 0, ESP_OK, "Connecting");
+
+    esp_http_client_config_t http_config{};
+    http_config.url = g_url;
+    http_config.crt_bundle_attach = esp_crt_bundle_attach;
+    http_config.timeout_ms = 15000;
+    http_config.keep_alive_enable = true;
+
+    esp_https_ota_config_t ota_config{};
+    ota_config.http_config = &http_config;
+
+    esp_https_ota_handle_t handle = nullptr;
+    esp_err_t err = esp_https_ota_begin(&ota_config, &handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "esp_https_ota_begin failed: %s", esp_err_to_name(err));
+        set_status(OtaState::Failed, 0, err, "OTA connection failed");
+        g_active = false;
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    const int image_size = esp_https_ota_get_image_size(handle);
+    set_status(OtaState::Downloading, 0, ESP_OK, "Downloading");
+
+    while ((err = esp_https_ota_perform(handle)) == ESP_ERR_HTTPS_OTA_IN_PROGRESS) {
+        const int read = esp_https_ota_get_image_len_read(handle);
+        int percent = 0;
+        if (image_size > 0) percent = static_cast<int>((static_cast<int64_t>(read) * 100) / image_size);
+        set_status(OtaState::Downloading, percent, ESP_OK, "Downloading");
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "OTA download failed: %s", esp_err_to_name(err));
+        esp_https_ota_abort(handle);
+        set_status(OtaState::Failed, 0, err, "OTA download failed");
+        g_active = false;
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    set_status(OtaState::Validating, 100, ESP_OK, "Validating");
+    err = esp_https_ota_finish(handle);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "OTA validation/finalization failed: %s", esp_err_to_name(err));
+        set_status(OtaState::Failed, 100, err, "OTA validation failed");
+        g_active = false;
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    ESP_LOGI(TAG, "OTA image installed successfully; reboot required");
+    set_status(OtaState::ReadyToReboot, 100, ESP_OK, "Update ready - reboot");
+    g_active = false;
+    vTaskDelete(nullptr);
+}
+} // namespace
+
+void ota_confirm_running_image()
+{
+    ensure_mutex();
+
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_ota_img_states_t state{};
+    const esp_err_t err = esp_ota_get_state_partition(running, &state);
+    if (err == ESP_OK && state == ESP_OTA_IMG_PENDING_VERIFY) {
+        const esp_err_t confirm = esp_ota_mark_app_valid_cancel_rollback();
+        if (confirm == ESP_OK) {
+            ESP_LOGI(TAG, "Running OTA image confirmed valid");
+        } else {
+            ESP_LOGE(TAG, "Failed to confirm OTA image: %s", esp_err_to_name(confirm));
+        }
+    }
+}
+
+bool ota_start_https(const char *url)
+{
+    if (url == nullptr || std::strncmp(url, "https://", 8) != 0) return false;
+    if (std::strlen(url) >= sizeof(g_url)) return false;
+
+    ensure_mutex();
+    if (g_active) return false;
+
+    std::snprintf(g_url, sizeof(g_url), "%s", url);
+    g_active = true;
+    set_status(OtaState::Starting, 0, ESP_OK, "Starting");
+
+    if (xTaskCreate(ota_task, "ota", OTA_TASK_STACK, nullptr, 4, nullptr) != pdPASS) {
+        g_active = false;
+        set_status(OtaState::Failed, 0, ESP_ERR_NO_MEM, "Could not start OTA task");
+        return false;
+    }
+    return true;
+}
+
+OtaStatus ota_get_status()
+{
+    ensure_mutex();
+    OtaStatus copy{};
+    if (g_mutex != nullptr && xSemaphoreTake(g_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        copy = g_status;
+        xSemaphoreGive(g_mutex);
+    }
+    return copy;
+}
+
+const char *ota_running_version()
+{
+    const esp_app_desc_t *desc = esp_app_get_description();
+    return desc != nullptr ? desc->version : "unknown";
+}
