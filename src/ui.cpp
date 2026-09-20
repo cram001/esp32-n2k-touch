@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #include "bsp/display.h"
@@ -16,6 +17,15 @@
 
 namespace {
 constexpr const char *TAG = "ui";
+
+lv_obj_t *require_obj(lv_obj_t *obj, const char *what)
+{
+    if (obj == nullptr) {
+        ESP_LOGE(TAG, "LVGL allocation failed for %s", what);
+        std::abort();
+    }
+    return obj;
+}
 
 AppSettings g_settings;
 size_t g_active_page = 0;
@@ -165,8 +175,9 @@ void persist()
 
 lv_obj_t *make_button(lv_obj_t *parent, const char *text, lv_event_cb_t cb, int w=120, int h=48, void *user=nullptr)
 {
-    lv_obj_t *b = lv_button_create(parent); lv_obj_set_size(b,w,h); lv_obj_add_event_cb(b,cb,LV_EVENT_CLICKED,user); style_button(b);
-    lv_obj_t *l = lv_label_create(b); lv_label_set_text(l,text); lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0); lv_obj_center(l); return b;
+    lv_obj_t *b = require_obj(lv_button_create(parent), "button");
+    lv_obj_set_size(b,w,h); lv_obj_add_event_cb(b,cb,LV_EVENT_CLICKED,user); style_button(b);
+    lv_obj_t *l = require_obj(lv_label_create(b), "button label"); lv_label_set_text(l,text); lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0); lv_obj_center(l); return b;
 }
 
 lv_obj_t *button_label(lv_obj_t *button) { return lv_obj_get_child(button,0); }
@@ -355,7 +366,7 @@ void shunt_save_cb(lv_event_t *){auto&c=g_settings.smartshunts[g_edit_shunt];std
 
 void create_data_screen()
 {
-    g_data_screen=lv_obj_create(nullptr);
+    g_data_screen=require_obj(lv_obj_create(nullptr),"screen root");
     lv_obj_remove_flag(g_data_screen,LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_color(g_data_screen,ui_bg(),0);
     lv_obj_set_style_pad_all(g_data_screen,0,0);
@@ -398,7 +409,7 @@ void create_data_screen()
 }
 void create_settings_screen()
 {
-    g_settings_screen=lv_obj_create(nullptr);
+    g_settings_screen=require_obj(lv_obj_create(nullptr),"screen root");
     lv_obj_remove_flag(g_settings_screen,LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t*l=lv_label_create(g_settings_screen);
     lv_label_set_text(l,"Settings");
@@ -424,12 +435,12 @@ void create_settings_screen()
     b=make_button(g_settings_screen,"BACK",data_screen_cb,120,46);
     lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-18);
 }
-void create_page_setup_screen(){g_page_setup_screen=lv_obj_create(nullptr);lv_obj_remove_flag(g_page_setup_screen,LV_OBJ_FLAG_SCROLLABLE);g_page_setup_title=lv_label_create(g_page_setup_screen);lv_obj_set_style_text_font(g_page_setup_title,&lv_font_montserrat_20,0);lv_obj_align(g_page_setup_title,LV_ALIGN_TOP_MID,0,18);lv_obj_t*b=make_button(g_page_setup_screen,"< PAGE",edit_prev_page_cb,90,42);lv_obj_align(b,LV_ALIGN_TOP_LEFT,20,52);b=make_button(g_page_setup_screen,"PAGE >",edit_next_page_cb,90,42);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-20,52);lv_obj_t*l=lv_label_create(g_page_setup_screen);lv_label_set_text(l,"Enabled");lv_obj_align(l,LV_ALIGN_TOP_LEFT,140,64);g_page_enable_switch=lv_switch_create(g_page_setup_screen);lv_obj_align(g_page_enable_switch,LV_ALIGN_TOP_RIGHT,-120,54);lv_obj_add_event_cb(g_page_enable_switch,page_enabled_cb,LV_EVENT_VALUE_CHANGED,nullptr);b=make_button(g_page_setup_screen,"",layout_cb,180,44);g_layout_button_label=button_label(b);lv_obj_align(b,LV_ALIGN_TOP_MID,0,106);for(size_t i=0;i<MAX_DATA_FIELDS_PER_PAGE;++i){b=make_button(g_page_setup_screen,"",open_field_editor_cb,216,74,nullptr);g_field_buttons[i]=b;g_field_button_labels[i]=button_label(b);lv_label_set_long_mode(g_field_button_labels[i],LV_LABEL_LONG_WRAP);lv_obj_set_width(g_field_button_labels[i],196);lv_obj_set_style_text_align(g_field_button_labels[i],LV_TEXT_ALIGN_CENTER,0);lv_obj_set_pos(b,16+static_cast<int>(i%2)*232,164+static_cast<int>(i/2)*82);lv_obj_remove_event_cb(b,open_field_editor_cb);lv_obj_add_event_cb(b,open_field_editor_cb,LV_EVENT_CLICKED,reinterpret_cast<void*>(i));}b=make_button(g_page_setup_screen,"BACK",settings_screen_cb,120,46);lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-12);}
-void create_field_editor_screen(){g_field_editor_screen=lv_obj_create(nullptr);lv_obj_remove_flag(g_field_editor_screen,LV_OBJ_FLAG_SCROLLABLE);lv_obj_t*l=lv_label_create(g_field_editor_screen);lv_label_set_text(l,"DATA FIELD");lv_obj_set_style_text_font(l,&lv_font_montserrat_24,0);lv_obj_align(l,LV_ALIGN_TOP_MID,0,24);l=lv_label_create(g_field_editor_screen);lv_label_set_text(l,"Source");lv_obj_align(l,LV_ALIGN_TOP_LEFT,40,95);lv_obj_t*b=make_button(g_field_editor_screen,"SOURCE",field_source_cb,190,52);g_field_source_label=button_label(b);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-40,80);l=lv_label_create(g_field_editor_screen);lv_label_set_text(l,"Data");lv_obj_align(l,LV_ALIGN_TOP_LEFT,40,175);b=make_button(g_field_editor_screen,"<",field_metric_prev_cb,55,50);lv_obj_align(b,LV_ALIGN_TOP_LEFT,130,157);b=make_button(g_field_editor_screen,"",field_metric_next_cb,190,50);g_field_metric_label=button_label(b);lv_obj_align(b,LV_ALIGN_TOP_MID,55,157);b=make_button(g_field_editor_screen,">",field_metric_next_cb,55,50);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-25,157);l=lv_label_create(g_field_editor_screen);lv_label_set_text(l,"Device");lv_obj_align(l,LV_ALIGN_TOP_LEFT,40,250);g_field_device_button=make_button(g_field_editor_screen,"",field_device_cb,250,52);g_field_device_label=button_label(g_field_device_button);lv_obj_align(g_field_device_button,LV_ALIGN_TOP_RIGHT,-40,232);b=make_button(g_field_editor_screen,"DONE",field_done_cb,150,54);lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-40);}
-void create_units_screen(){g_units_screen=lv_obj_create(nullptr);lv_obj_remove_flag(g_units_screen,LV_OBJ_FLAG_SCROLLABLE);lv_obj_t*l=lv_label_create(g_units_screen);lv_label_set_text(l,"UNITS");lv_obj_set_style_text_font(l,&lv_font_montserrat_24,0);lv_obj_align(l,LV_ALIGN_TOP_MID,0,18);const char*names[]={"Depth","Temperature","Wind speed","Boat speed","Distance","Short distance"};lv_obj_t**vals[]={&g_units_depth,&g_units_temp,&g_units_wind,&g_units_vessel,&g_units_distance,&g_units_short};lv_event_cb_t cbs[]={unit_depth_cb,unit_temp_cb,unit_wind_cb,unit_vessel_cb,unit_distance_cb,unit_short_cb};for(int i=0;i<6;++i){l=lv_label_create(g_units_screen);lv_label_set_text(l,names[i]);lv_obj_align(l,LV_ALIGN_TOP_LEFT,32,64+i*48);lv_obj_t*b=make_button(g_units_screen,"",cbs[i],170,40);*vals[i]=button_label(b);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-32,54+i*48);}l=lv_label_create(g_units_screen);lv_label_set_text(l,"Short if");lv_obj_align(l,LV_ALIGN_TOP_LEFT,32,355);lv_obj_t*b=make_button(g_units_screen,"-",unit_threshold_down_cb,48,38);lv_obj_align(b,LV_ALIGN_TOP_LEFT,145,344);b=make_button(g_units_screen,"",unit_threshold_up_cb,125,38);g_units_threshold=button_label(b);lv_obj_align(b,LV_ALIGN_TOP_MID,60,344);b=make_button(g_units_screen,"+",unit_threshold_up_cb,48,38);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-32,344);b=make_button(g_units_screen,"BACK",settings_screen_cb,120,46);lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-12);}
+void create_page_setup_screen(){g_page_setup_screen=require_obj(lv_obj_create(nullptr),"screen root");lv_obj_remove_flag(g_page_setup_screen,LV_OBJ_FLAG_SCROLLABLE);g_page_setup_title=lv_label_create(g_page_setup_screen);lv_obj_set_style_text_font(g_page_setup_title,&lv_font_montserrat_20,0);lv_obj_align(g_page_setup_title,LV_ALIGN_TOP_MID,0,18);lv_obj_t*b=make_button(g_page_setup_screen,"< PAGE",edit_prev_page_cb,90,42);lv_obj_align(b,LV_ALIGN_TOP_LEFT,20,52);b=make_button(g_page_setup_screen,"PAGE >",edit_next_page_cb,90,42);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-20,52);lv_obj_t*l=lv_label_create(g_page_setup_screen);lv_label_set_text(l,"Enabled");lv_obj_align(l,LV_ALIGN_TOP_LEFT,140,64);g_page_enable_switch=lv_switch_create(g_page_setup_screen);lv_obj_align(g_page_enable_switch,LV_ALIGN_TOP_RIGHT,-120,54);lv_obj_add_event_cb(g_page_enable_switch,page_enabled_cb,LV_EVENT_VALUE_CHANGED,nullptr);b=make_button(g_page_setup_screen,"",layout_cb,180,44);g_layout_button_label=button_label(b);lv_obj_align(b,LV_ALIGN_TOP_MID,0,106);for(size_t i=0;i<MAX_DATA_FIELDS_PER_PAGE;++i){b=make_button(g_page_setup_screen,"",open_field_editor_cb,216,74,nullptr);g_field_buttons[i]=b;g_field_button_labels[i]=button_label(b);lv_label_set_long_mode(g_field_button_labels[i],LV_LABEL_LONG_WRAP);lv_obj_set_width(g_field_button_labels[i],196);lv_obj_set_style_text_align(g_field_button_labels[i],LV_TEXT_ALIGN_CENTER,0);lv_obj_set_pos(b,16+static_cast<int>(i%2)*232,164+static_cast<int>(i/2)*82);lv_obj_remove_event_cb(b,open_field_editor_cb);lv_obj_add_event_cb(b,open_field_editor_cb,LV_EVENT_CLICKED,reinterpret_cast<void*>(i));}b=make_button(g_page_setup_screen,"BACK",settings_screen_cb,120,46);lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-12);}
+void create_field_editor_screen(){g_field_editor_screen=require_obj(lv_obj_create(nullptr),"screen root");lv_obj_remove_flag(g_field_editor_screen,LV_OBJ_FLAG_SCROLLABLE);lv_obj_t*l=lv_label_create(g_field_editor_screen);lv_label_set_text(l,"DATA FIELD");lv_obj_set_style_text_font(l,&lv_font_montserrat_24,0);lv_obj_align(l,LV_ALIGN_TOP_MID,0,24);l=lv_label_create(g_field_editor_screen);lv_label_set_text(l,"Source");lv_obj_align(l,LV_ALIGN_TOP_LEFT,40,95);lv_obj_t*b=make_button(g_field_editor_screen,"SOURCE",field_source_cb,190,52);g_field_source_label=button_label(b);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-40,80);l=lv_label_create(g_field_editor_screen);lv_label_set_text(l,"Data");lv_obj_align(l,LV_ALIGN_TOP_LEFT,40,175);b=make_button(g_field_editor_screen,"<",field_metric_prev_cb,55,50);lv_obj_align(b,LV_ALIGN_TOP_LEFT,130,157);b=make_button(g_field_editor_screen,"",field_metric_next_cb,190,50);g_field_metric_label=button_label(b);lv_obj_align(b,LV_ALIGN_TOP_MID,55,157);b=make_button(g_field_editor_screen,">",field_metric_next_cb,55,50);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-25,157);l=lv_label_create(g_field_editor_screen);lv_label_set_text(l,"Device");lv_obj_align(l,LV_ALIGN_TOP_LEFT,40,250);g_field_device_button=make_button(g_field_editor_screen,"",field_device_cb,250,52);g_field_device_label=button_label(g_field_device_button);lv_obj_align(g_field_device_button,LV_ALIGN_TOP_RIGHT,-40,232);b=make_button(g_field_editor_screen,"DONE",field_done_cb,150,54);lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-40);}
+void create_units_screen(){g_units_screen=require_obj(lv_obj_create(nullptr),"screen root");lv_obj_remove_flag(g_units_screen,LV_OBJ_FLAG_SCROLLABLE);lv_obj_t*l=lv_label_create(g_units_screen);lv_label_set_text(l,"UNITS");lv_obj_set_style_text_font(l,&lv_font_montserrat_24,0);lv_obj_align(l,LV_ALIGN_TOP_MID,0,18);const char*names[]={"Depth","Temperature","Wind speed","Boat speed","Distance","Short distance"};lv_obj_t**vals[]={&g_units_depth,&g_units_temp,&g_units_wind,&g_units_vessel,&g_units_distance,&g_units_short};lv_event_cb_t cbs[]={unit_depth_cb,unit_temp_cb,unit_wind_cb,unit_vessel_cb,unit_distance_cb,unit_short_cb};for(int i=0;i<6;++i){l=lv_label_create(g_units_screen);lv_label_set_text(l,names[i]);lv_obj_align(l,LV_ALIGN_TOP_LEFT,32,64+i*48);lv_obj_t*b=make_button(g_units_screen,"",cbs[i],170,40);*vals[i]=button_label(b);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-32,54+i*48);}l=lv_label_create(g_units_screen);lv_label_set_text(l,"Short if");lv_obj_align(l,LV_ALIGN_TOP_LEFT,32,355);lv_obj_t*b=make_button(g_units_screen,"-",unit_threshold_down_cb,48,38);lv_obj_align(b,LV_ALIGN_TOP_LEFT,145,344);b=make_button(g_units_screen,"",unit_threshold_up_cb,125,38);g_units_threshold=button_label(b);lv_obj_align(b,LV_ALIGN_TOP_MID,60,344);b=make_button(g_units_screen,"+",unit_threshold_up_cb,48,38);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-32,344);b=make_button(g_units_screen,"BACK",settings_screen_cb,120,46);lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-12);}
 void create_wifi_screen()
 {
-    g_wifi_screen=lv_obj_create(nullptr);
+    g_wifi_screen=require_obj(lv_obj_create(nullptr),"screen root");
     lv_obj_remove_flag(g_wifi_screen,LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t*l=lv_label_create(g_wifi_screen);
@@ -489,7 +500,27 @@ void create_wifi_screen()
     lv_obj_add_event_cb(g_wifi_keyboard,wifi_keyboard_cb,LV_EVENT_ALL,nullptr);
     lv_obj_add_flag(g_wifi_keyboard,LV_OBJ_FLAG_HIDDEN);
 }
-void create_shunts_screen(){g_shunts_screen=lv_obj_create(nullptr);lv_obj_remove_flag(g_shunts_screen,LV_OBJ_FLAG_SCROLLABLE);lv_obj_t*l=lv_label_create(g_shunts_screen);lv_label_set_text(l,"SMARTSHUNTS");lv_obj_set_style_text_font(l,&lv_font_montserrat_24,0);lv_obj_align(l,LV_ALIGN_TOP_MID,0,22);for(size_t i=0;i<MAX_SMARTSHUNTS;++i){lv_obj_t*b=make_button(g_shunts_screen,"",shunt_slot_cb,360,62,nullptr);g_shunt_slot_labels[i]=button_label(b);lv_obj_align(b,LV_ALIGN_TOP_MID,0,78+static_cast<int>(i)*72);lv_obj_remove_event_cb(b,shunt_slot_cb);lv_obj_add_event_cb(b,shunt_slot_cb,LV_EVENT_CLICKED,reinterpret_cast<void*>(i));}lv_obj_t*b=make_button(g_shunts_screen,"BACK",settings_screen_cb,120,46);lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-12);}
+void create_shunts_screen()
+{
+    g_shunts_screen = require_obj(lv_obj_create(nullptr), "SmartShunts screen");
+    lv_obj_remove_flag(g_shunts_screen, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *l = require_obj(lv_label_create(g_shunts_screen), "SmartShunts title");
+    lv_label_set_text(l, "SMARTSHUNTS");
+    lv_obj_set_style_text_font(l, &lv_font_montserrat_24, 0);
+    lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 22);
+
+    for (size_t i = 0; i < MAX_SMARTSHUNTS; ++i) {
+        lv_obj_t *b = make_button(g_shunts_screen, "", shunt_slot_cb, 360, 62, nullptr);
+        g_shunt_slot_labels[i] = button_label(b);
+        lv_obj_align(b, LV_ALIGN_TOP_MID, 0, 78 + static_cast<int>(i) * 72);
+        lv_obj_remove_event_cb(b, shunt_slot_cb);
+        lv_obj_add_event_cb(b, shunt_slot_cb, LV_EVENT_CLICKED, reinterpret_cast<void *>(i));
+    }
+
+    lv_obj_t *b = make_button(g_shunts_screen, "BACK", settings_screen_cb, 120, 46);
+    lv_obj_align(b, LV_ALIGN_BOTTOM_MID, 0, -12);
+}
 void create_shunt_picker_screen()
 {
     g_shunt_picker_screen = lv_obj_create(nullptr);
@@ -510,10 +541,97 @@ void create_shunt_picker_screen()
     lv_obj_t *b = make_button(g_shunt_picker_screen, "BACK", shunt_picker_back_cb, 120, 44);
     lv_obj_align(b, LV_ALIGN_BOTTOM_MID, 0, -10);
 }
-void create_shunt_edit_screen(){g_shunt_edit_screen=lv_obj_create(nullptr);lv_obj_remove_flag(g_shunt_edit_screen,LV_OBJ_FLAG_SCROLLABLE);lv_obj_t*l=lv_label_create(g_shunt_edit_screen);lv_label_set_text(l,"SMARTSHUNT");lv_obj_set_style_text_font(l,&lv_font_montserrat_24,0);lv_obj_align(l,LV_ALIGN_TOP_MID,0,14);lv_obj_t*b=make_button(g_shunt_edit_screen,"SELECT NEARBY",choose_nearby_cb,200,44);lv_obj_align(b,LV_ALIGN_TOP_MID,0,52);l=lv_label_create(g_shunt_edit_screen);lv_label_set_text(l,"Name");lv_obj_align(l,LV_ALIGN_TOP_LEFT,30,112);g_shunt_name=lv_textarea_create(g_shunt_edit_screen);lv_obj_set_style_bg_color(g_shunt_name,ui_card(),0);lv_obj_set_style_text_color(g_shunt_name,ui_text(),0);lv_obj_set_style_border_color(g_shunt_name,ui_border(),0);lv_obj_set_style_radius(g_shunt_name,8,0);lv_obj_set_size(g_shunt_name,300,42);lv_textarea_set_one_line(g_shunt_name,true);lv_textarea_set_max_length(g_shunt_name,24);lv_obj_align(g_shunt_name,LV_ALIGN_TOP_RIGHT,-30,100);lv_obj_add_event_cb(g_shunt_name,textarea_focus_cb,LV_EVENT_FOCUSED,nullptr);l=lv_label_create(g_shunt_edit_screen);lv_label_set_text(l,"Key");lv_obj_align(l,LV_ALIGN_TOP_LEFT,30,167);g_shunt_key=lv_textarea_create(g_shunt_edit_screen);lv_obj_set_style_bg_color(g_shunt_key,ui_card(),0);lv_obj_set_style_text_color(g_shunt_key,ui_text(),0);lv_obj_set_style_border_color(g_shunt_key,ui_border(),0);lv_obj_set_style_radius(g_shunt_key,8,0);lv_obj_set_size(g_shunt_key,300,42);lv_textarea_set_one_line(g_shunt_key,true);lv_textarea_set_password_mode(g_shunt_key,true);lv_textarea_set_max_length(g_shunt_key,32);lv_obj_align(g_shunt_key,LV_ALIGN_TOP_RIGHT,-30,155);lv_obj_add_event_cb(g_shunt_key,textarea_focus_cb,LV_EVENT_FOCUSED,nullptr);l=lv_label_create(g_shunt_edit_screen);lv_label_set_text(l,"Send to N2K");lv_obj_align(l,LV_ALIGN_TOP_LEFT,30,220);g_shunt_n2k=lv_switch_create(g_shunt_edit_screen);lv_obj_align(g_shunt_n2k,LV_ALIGN_TOP_RIGHT,-45,207);l=lv_label_create(g_shunt_edit_screen);lv_label_set_text(l,"Battery instance");lv_obj_align(l,LV_ALIGN_TOP_LEFT,30,272);b=make_button(g_shunt_edit_screen,"-",shunt_instance_down_cb,48,38);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-180,258);g_shunt_instance=lv_label_create(g_shunt_edit_screen);lv_obj_set_style_text_font(g_shunt_instance,&lv_font_montserrat_20,0);lv_obj_align(g_shunt_instance,LV_ALIGN_TOP_RIGHT,-112,267);b=make_button(g_shunt_edit_screen,"+",shunt_instance_up_cb,48,38);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-40,258);b=make_button(g_shunt_edit_screen,"SAVE",shunt_save_cb,120,46);lv_obj_align(b,LV_ALIGN_BOTTOM_LEFT,45,-18);b=make_button(g_shunt_edit_screen,"BACK",shunts_screen_cb,120,46);lv_obj_align(b,LV_ALIGN_BOTTOM_RIGHT,-45,-18);g_keyboard=lv_keyboard_create(g_shunt_edit_screen);lv_obj_set_size(g_keyboard,460,205);lv_obj_align(g_keyboard,LV_ALIGN_BOTTOM_MID,0,0);lv_obj_add_event_cb(g_keyboard,keyboard_cb,LV_EVENT_ALL,nullptr);lv_obj_add_flag(g_keyboard,LV_OBJ_FLAG_HIDDEN);}
+void create_shunt_edit_screen()
+{
+    g_shunt_edit_screen = require_obj(lv_obj_create(nullptr), "SmartShunt edit screen");
+    lv_obj_remove_flag(g_shunt_edit_screen, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *l = require_obj(lv_label_create(g_shunt_edit_screen), "SmartShunt title");
+    lv_label_set_text(l, "SMARTSHUNT");
+    lv_obj_set_style_text_font(l, &lv_font_montserrat_24, 0);
+    lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 14);
+
+    lv_obj_t *b = make_button(g_shunt_edit_screen, "SELECT NEARBY", choose_nearby_cb, 200, 44);
+    lv_obj_align(b, LV_ALIGN_TOP_MID, 0, 52);
+
+    l = require_obj(lv_label_create(g_shunt_edit_screen), "SmartShunt name label");
+    lv_label_set_text(l, "Name");
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 30, 112);
+    g_shunt_name = require_obj(lv_textarea_create(g_shunt_edit_screen), "SmartShunt name field");
+    lv_obj_set_style_bg_color(g_shunt_name, ui_card(), 0);
+    lv_obj_set_style_text_color(g_shunt_name, ui_text(), 0);
+    lv_obj_set_style_border_color(g_shunt_name, ui_border(), 0);
+    lv_obj_set_style_radius(g_shunt_name, 8, 0);
+    lv_obj_set_size(g_shunt_name, 300, 42);
+    lv_textarea_set_one_line(g_shunt_name, true);
+    lv_textarea_set_max_length(g_shunt_name, 24);
+    lv_obj_align(g_shunt_name, LV_ALIGN_TOP_RIGHT, -30, 100);
+    lv_obj_add_event_cb(g_shunt_name, textarea_focus_cb, LV_EVENT_FOCUSED, nullptr);
+
+    l = require_obj(lv_label_create(g_shunt_edit_screen), "SmartShunt key label");
+    lv_label_set_text(l, "Key");
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 30, 167);
+    g_shunt_key = require_obj(lv_textarea_create(g_shunt_edit_screen), "SmartShunt key field");
+    lv_obj_set_style_bg_color(g_shunt_key, ui_card(), 0);
+    lv_obj_set_style_text_color(g_shunt_key, ui_text(), 0);
+    lv_obj_set_style_border_color(g_shunt_key, ui_border(), 0);
+    lv_obj_set_style_radius(g_shunt_key, 8, 0);
+    lv_obj_set_size(g_shunt_key, 300, 42);
+    lv_textarea_set_one_line(g_shunt_key, true);
+    lv_textarea_set_password_mode(g_shunt_key, true);
+    lv_textarea_set_max_length(g_shunt_key, 32);
+    lv_obj_align(g_shunt_key, LV_ALIGN_TOP_RIGHT, -30, 155);
+    lv_obj_add_event_cb(g_shunt_key, textarea_focus_cb, LV_EVENT_FOCUSED, nullptr);
+
+    l = require_obj(lv_label_create(g_shunt_edit_screen), "NMEA bridge label");
+    lv_label_set_text(l, "Send to N2K");
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 30, 220);
+    g_shunt_n2k = require_obj(lv_switch_create(g_shunt_edit_screen), "NMEA bridge switch");
+    lv_obj_align(g_shunt_n2k, LV_ALIGN_TOP_RIGHT, -45, 207);
+
+    l = require_obj(lv_label_create(g_shunt_edit_screen), "battery instance label");
+    lv_label_set_text(l, "Battery instance");
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 30, 272);
+    b = make_button(g_shunt_edit_screen, "-", shunt_instance_down_cb, 48, 38);
+    lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -180, 258);
+    g_shunt_instance = require_obj(lv_label_create(g_shunt_edit_screen), "battery instance value");
+    lv_obj_set_style_text_font(g_shunt_instance, &lv_font_montserrat_20, 0);
+    lv_obj_align(g_shunt_instance, LV_ALIGN_TOP_RIGHT, -112, 267);
+    b = make_button(g_shunt_edit_screen, "+", shunt_instance_up_cb, 48, 38);
+    lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -40, 258);
+
+    b = make_button(g_shunt_edit_screen, "SAVE", shunt_save_cb, 120, 46);
+    lv_obj_align(b, LV_ALIGN_BOTTOM_LEFT, 45, -18);
+    b = make_button(g_shunt_edit_screen, "BACK", shunts_screen_cb, 120, 46);
+    lv_obj_align(b, LV_ALIGN_BOTTOM_RIGHT, -45, -18);
+
+    g_keyboard = require_obj(lv_keyboard_create(g_shunt_edit_screen), "SmartShunt keyboard");
+    lv_obj_set_size(g_keyboard, 460, 205);
+    lv_obj_align(g_keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_add_event_cb(g_keyboard, keyboard_cb, LV_EVENT_ALL, nullptr);
+    lv_obj_add_flag(g_keyboard, LV_OBJ_FLAG_HIDDEN);
 }
 
 void ui_start(AppSettings initial_settings)
 {
-    g_settings=initial_settings;g_active_page=first_enabled_page();create_data_screen();create_settings_screen();create_page_setup_screen();create_field_editor_screen();create_units_screen();create_wifi_screen();create_shunts_screen();create_shunt_picker_screen();create_shunt_edit_screen();apply_theme();render_active_page();update_units();update_page_setup();update_shunts_list();lv_screen_load(g_data_screen);g_refresh_timer=lv_timer_create(refresh_cb,500,nullptr);
+    g_settings = initial_settings;
+    g_active_page = first_enabled_page();
+
+    create_data_screen();
+    create_settings_screen();
+    create_page_setup_screen();
+    create_field_editor_screen();
+    create_units_screen();
+    create_wifi_screen();
+    create_shunts_screen();
+    create_shunt_picker_screen();
+    create_shunt_edit_screen();
+
+    apply_theme();
+    render_active_page();
+    update_units();
+    update_page_setup();
+    update_shunts_list();
+    lv_screen_load(g_data_screen);
+    g_refresh_timer = require_obj(reinterpret_cast<lv_obj_t *>(lv_timer_create(refresh_cb, 500, nullptr)), "refresh timer");
 }
