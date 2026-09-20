@@ -633,5 +633,9 @@ void ui_start(AppSettings initial_settings)
     update_page_setup();
     update_shunts_list();
     lv_screen_load(g_data_screen);
-    g_refresh_timer = require_obj(reinterpret_cast<lv_obj_t *>(lv_timer_create(refresh_cb, 500, nullptr)), "refresh timer");
+    g_refresh_timer = lv_timer_create(refresh_cb, 500, nullptr);
+    if (g_refresh_timer == nullptr) {
+        ESP_LOGE(TAG, "LVGL allocation failed for refresh timer");
+        std::abort();
+    }
 }
