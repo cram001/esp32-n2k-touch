@@ -435,9 +435,131 @@ void create_settings_screen()
     b=make_button(g_settings_screen,"BACK",data_screen_cb,120,46);
     lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-18);
 }
-void create_page_setup_screen(){g_page_setup_screen=require_obj(lv_obj_create(nullptr),"screen root");lv_obj_remove_flag(g_page_setup_screen,LV_OBJ_FLAG_SCROLLABLE);g_page_setup_title=lv_label_create(g_page_setup_screen);lv_obj_set_style_text_font(g_page_setup_title,&lv_font_montserrat_20,0);lv_obj_align(g_page_setup_title,LV_ALIGN_TOP_MID,0,18);lv_obj_t*b=make_button(g_page_setup_screen,"< PAGE",edit_prev_page_cb,90,42);lv_obj_align(b,LV_ALIGN_TOP_LEFT,20,52);b=make_button(g_page_setup_screen,"PAGE >",edit_next_page_cb,90,42);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-20,52);lv_obj_t*l=lv_label_create(g_page_setup_screen);lv_label_set_text(l,"Enabled");lv_obj_align(l,LV_ALIGN_TOP_LEFT,140,64);g_page_enable_switch=lv_switch_create(g_page_setup_screen);lv_obj_align(g_page_enable_switch,LV_ALIGN_TOP_RIGHT,-120,54);lv_obj_add_event_cb(g_page_enable_switch,page_enabled_cb,LV_EVENT_VALUE_CHANGED,nullptr);b=make_button(g_page_setup_screen,"",layout_cb,180,44);g_layout_button_label=button_label(b);lv_obj_align(b,LV_ALIGN_TOP_MID,0,106);for(size_t i=0;i<MAX_DATA_FIELDS_PER_PAGE;++i){b=make_button(g_page_setup_screen,"",open_field_editor_cb,216,74,nullptr);g_field_buttons[i]=b;g_field_button_labels[i]=button_label(b);lv_label_set_long_mode(g_field_button_labels[i],LV_LABEL_LONG_WRAP);lv_obj_set_width(g_field_button_labels[i],196);lv_obj_set_style_text_align(g_field_button_labels[i],LV_TEXT_ALIGN_CENTER,0);lv_obj_set_pos(b,16+static_cast<int>(i%2)*232,164+static_cast<int>(i/2)*82);lv_obj_remove_event_cb(b,open_field_editor_cb);lv_obj_add_event_cb(b,open_field_editor_cb,LV_EVENT_CLICKED,reinterpret_cast<void*>(i));}b=make_button(g_page_setup_screen,"BACK",settings_screen_cb,120,46);lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-12);}
-void create_field_editor_screen(){g_field_editor_screen=require_obj(lv_obj_create(nullptr),"screen root");lv_obj_remove_flag(g_field_editor_screen,LV_OBJ_FLAG_SCROLLABLE);lv_obj_t*l=lv_label_create(g_field_editor_screen);lv_label_set_text(l,"DATA FIELD");lv_obj_set_style_text_font(l,&lv_font_montserrat_24,0);lv_obj_align(l,LV_ALIGN_TOP_MID,0,24);l=lv_label_create(g_field_editor_screen);lv_label_set_text(l,"Source");lv_obj_align(l,LV_ALIGN_TOP_LEFT,40,95);lv_obj_t*b=make_button(g_field_editor_screen,"SOURCE",field_source_cb,190,52);g_field_source_label=button_label(b);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-40,80);l=lv_label_create(g_field_editor_screen);lv_label_set_text(l,"Data");lv_obj_align(l,LV_ALIGN_TOP_LEFT,40,175);b=make_button(g_field_editor_screen,"<",field_metric_prev_cb,55,50);lv_obj_align(b,LV_ALIGN_TOP_LEFT,130,157);b=make_button(g_field_editor_screen,"",field_metric_next_cb,190,50);g_field_metric_label=button_label(b);lv_obj_align(b,LV_ALIGN_TOP_MID,55,157);b=make_button(g_field_editor_screen,">",field_metric_next_cb,55,50);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-25,157);l=lv_label_create(g_field_editor_screen);lv_label_set_text(l,"Device");lv_obj_align(l,LV_ALIGN_TOP_LEFT,40,250);g_field_device_button=make_button(g_field_editor_screen,"",field_device_cb,250,52);g_field_device_label=button_label(g_field_device_button);lv_obj_align(g_field_device_button,LV_ALIGN_TOP_RIGHT,-40,232);b=make_button(g_field_editor_screen,"DONE",field_done_cb,150,54);lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-40);}
-void create_units_screen(){g_units_screen=require_obj(lv_obj_create(nullptr),"screen root");lv_obj_remove_flag(g_units_screen,LV_OBJ_FLAG_SCROLLABLE);lv_obj_t*l=lv_label_create(g_units_screen);lv_label_set_text(l,"UNITS");lv_obj_set_style_text_font(l,&lv_font_montserrat_24,0);lv_obj_align(l,LV_ALIGN_TOP_MID,0,18);const char*names[]={"Depth","Temperature","Wind speed","Boat speed","Distance","Short distance"};lv_obj_t**vals[]={&g_units_depth,&g_units_temp,&g_units_wind,&g_units_vessel,&g_units_distance,&g_units_short};lv_event_cb_t cbs[]={unit_depth_cb,unit_temp_cb,unit_wind_cb,unit_vessel_cb,unit_distance_cb,unit_short_cb};for(int i=0;i<6;++i){l=lv_label_create(g_units_screen);lv_label_set_text(l,names[i]);lv_obj_align(l,LV_ALIGN_TOP_LEFT,32,64+i*48);lv_obj_t*b=make_button(g_units_screen,"",cbs[i],170,40);*vals[i]=button_label(b);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-32,54+i*48);}l=lv_label_create(g_units_screen);lv_label_set_text(l,"Short if");lv_obj_align(l,LV_ALIGN_TOP_LEFT,32,355);lv_obj_t*b=make_button(g_units_screen,"-",unit_threshold_down_cb,48,38);lv_obj_align(b,LV_ALIGN_TOP_LEFT,145,344);b=make_button(g_units_screen,"",unit_threshold_up_cb,125,38);g_units_threshold=button_label(b);lv_obj_align(b,LV_ALIGN_TOP_MID,60,344);b=make_button(g_units_screen,"+",unit_threshold_up_cb,48,38);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-32,344);b=make_button(g_units_screen,"BACK",settings_screen_cb,120,46);lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-12);}
+void create_page_setup_screen()
+{
+    g_page_setup_screen = require_obj(lv_obj_create(nullptr), "page setup screen");
+    lv_obj_remove_flag(g_page_setup_screen, LV_OBJ_FLAG_SCROLLABLE);
+
+    g_page_setup_title = require_obj(lv_label_create(g_page_setup_screen), "page setup title");
+    lv_obj_set_style_text_font(g_page_setup_title, &lv_font_montserrat_20, 0);
+    lv_obj_align(g_page_setup_title, LV_ALIGN_TOP_MID, 0, 18);
+
+    lv_obj_t *b = make_button(g_page_setup_screen, "< PAGE", edit_prev_page_cb, 90, 42);
+    lv_obj_align(b, LV_ALIGN_TOP_LEFT, 20, 52);
+    b = make_button(g_page_setup_screen, "PAGE >", edit_next_page_cb, 90, 42);
+    lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -20, 52);
+
+    lv_obj_t *l = require_obj(lv_label_create(g_page_setup_screen), "page enabled label");
+    lv_label_set_text(l, "Enabled");
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 140, 64);
+
+    g_page_enable_switch = require_obj(lv_switch_create(g_page_setup_screen), "page enabled switch");
+    lv_obj_align(g_page_enable_switch, LV_ALIGN_TOP_RIGHT, -120, 54);
+    lv_obj_add_event_cb(g_page_enable_switch, page_enabled_cb, LV_EVENT_VALUE_CHANGED, nullptr);
+
+    b = make_button(g_page_setup_screen, "", layout_cb, 180, 44);
+    g_layout_button_label = button_label(b);
+    lv_obj_align(b, LV_ALIGN_TOP_MID, 0, 106);
+
+    for (size_t i = 0; i < MAX_DATA_FIELDS_PER_PAGE; ++i) {
+        b = make_button(g_page_setup_screen, "", open_field_editor_cb, 216, 74, nullptr);
+        g_field_buttons[i] = b;
+        g_field_button_labels[i] = button_label(b);
+        lv_label_set_long_mode(g_field_button_labels[i], LV_LABEL_LONG_WRAP);
+        lv_obj_set_width(g_field_button_labels[i], 196);
+        lv_obj_set_style_text_align(g_field_button_labels[i], LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_pos(b, 16 + static_cast<int>(i % 2) * 232,
+                      164 + static_cast<int>(i / 2) * 82);
+        lv_obj_remove_event_cb(b, open_field_editor_cb);
+        lv_obj_add_event_cb(b, open_field_editor_cb, LV_EVENT_CLICKED,
+                            reinterpret_cast<void *>(i));
+    }
+
+    b = make_button(g_page_setup_screen, "BACK", settings_screen_cb, 120, 46);
+    lv_obj_align(b, LV_ALIGN_BOTTOM_MID, 0, -12);
+}
+
+void create_field_editor_screen()
+{
+    g_field_editor_screen = require_obj(lv_obj_create(nullptr), "field editor screen");
+    lv_obj_remove_flag(g_field_editor_screen, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *l = require_obj(lv_label_create(g_field_editor_screen), "field editor title");
+    lv_label_set_text(l, "DATA FIELD");
+    lv_obj_set_style_text_font(l, &lv_font_montserrat_24, 0);
+    lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 24);
+
+    l = require_obj(lv_label_create(g_field_editor_screen), "field source label");
+    lv_label_set_text(l, "Source");
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 40, 95);
+    lv_obj_t *b = make_button(g_field_editor_screen, "SOURCE", field_source_cb, 190, 52);
+    g_field_source_label = button_label(b);
+    lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -40, 80);
+
+    l = require_obj(lv_label_create(g_field_editor_screen), "field data label");
+    lv_label_set_text(l, "Data");
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 40, 175);
+    b = make_button(g_field_editor_screen, "<", field_metric_prev_cb, 55, 50);
+    lv_obj_align(b, LV_ALIGN_TOP_LEFT, 130, 157);
+    b = make_button(g_field_editor_screen, "", field_metric_next_cb, 190, 50);
+    g_field_metric_label = button_label(b);
+    lv_obj_align(b, LV_ALIGN_TOP_MID, 55, 157);
+    b = make_button(g_field_editor_screen, ">", field_metric_next_cb, 55, 50);
+    lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -25, 157);
+
+    l = require_obj(lv_label_create(g_field_editor_screen), "field device label");
+    lv_label_set_text(l, "Device");
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 40, 250);
+    g_field_device_button = make_button(g_field_editor_screen, "", field_device_cb, 250, 52);
+    g_field_device_label = button_label(g_field_device_button);
+    lv_obj_align(g_field_device_button, LV_ALIGN_TOP_RIGHT, -40, 232);
+
+    b = make_button(g_field_editor_screen, "DONE", field_done_cb, 150, 54);
+    lv_obj_align(b, LV_ALIGN_BOTTOM_MID, 0, -40);
+}
+
+void create_units_screen()
+{
+    g_units_screen = require_obj(lv_obj_create(nullptr), "units screen");
+    lv_obj_remove_flag(g_units_screen, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *l = require_obj(lv_label_create(g_units_screen), "units title");
+    lv_label_set_text(l, "UNITS");
+    lv_obj_set_style_text_font(l, &lv_font_montserrat_24, 0);
+    lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 18);
+
+    const char *names[] = {"Depth", "Temperature", "Wind speed", "Boat speed", "Distance", "Short distance"};
+    lv_obj_t **vals[] = {&g_units_depth, &g_units_temp, &g_units_wind,
+                         &g_units_vessel, &g_units_distance, &g_units_short};
+    lv_event_cb_t cbs[] = {unit_depth_cb, unit_temp_cb, unit_wind_cb,
+                           unit_vessel_cb, unit_distance_cb, unit_short_cb};
+
+    for (int i = 0; i < 6; ++i) {
+        l = require_obj(lv_label_create(g_units_screen), "unit row label");
+        lv_label_set_text(l, names[i]);
+        lv_obj_align(l, LV_ALIGN_TOP_LEFT, 32, 64 + i * 48);
+
+        lv_obj_t *b = make_button(g_units_screen, "", cbs[i], 170, 40);
+        *vals[i] = button_label(b);
+        lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -32, 54 + i * 48);
+    }
+
+    l = require_obj(lv_label_create(g_units_screen), "short-distance threshold label");
+    lv_label_set_text(l, "Short if");
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 32, 355);
+
+    lv_obj_t *b = make_button(g_units_screen, "-", unit_threshold_down_cb, 48, 38);
+    lv_obj_align(b, LV_ALIGN_TOP_LEFT, 145, 344);
+    b = make_button(g_units_screen, "", unit_threshold_up_cb, 125, 38);
+    g_units_threshold = button_label(b);
+    lv_obj_align(b, LV_ALIGN_TOP_MID, 60, 344);
+    b = make_button(g_units_screen, "+", unit_threshold_up_cb, 48, 38);
+    lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -32, 344);
+
+    b = make_button(g_units_screen, "BACK", settings_screen_cb, 120, 46);
+    lv_obj_align(b, LV_ALIGN_BOTTOM_MID, 0, -12);
+}
+
 void create_wifi_screen()
 {
     g_wifi_screen=require_obj(lv_obj_create(nullptr),"screen root");
