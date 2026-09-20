@@ -16,6 +16,11 @@
 
 namespace {
 constexpr const char *TAG = "n2k_bridge";
+// Waveshare ESP32-S3-Touch-LCD-4 hardware routes the onboard CAN transceiver
+// directly to CANTX=GPIO6 and CANRX=GPIO0; these are not freely assignable.
+// GPIO0 is also an ESP32-S3 strapping pin. The board schematic is authoritative:
+// avoid externally forcing CANRX low during reset/boot, because that can affect
+// boot-mode sampling. Do not "fix" this by selecting an unrouted GPIO in software.
 constexpr gpio_num_t CAN_TX = GPIO_NUM_6;
 constexpr gpio_num_t CAN_RX = GPIO_NUM_0;
 constexpr TickType_t LOOP_DELAY = pdMS_TO_TICKS(20);
