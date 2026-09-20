@@ -9,6 +9,7 @@ enum class WifiState : uint8_t {
     Disabled = 0,
     Connecting,
     Connected,
+    CredentialsRequired,
     Disconnected,
     Error,
 };
