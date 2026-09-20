@@ -194,11 +194,7 @@ bool ota_start_https(const char *url)
     if (url == nullptr || std::strncmp(url, "https://", 8) != 0) return false;
     if (std::strlen(url) >= sizeof(g_url)) return false;
 
-    ensure_mutex();
-    if (g_active) return false;
-
-    std::snprintf(g_url, sizeof(g_url), "%s", url);
-    g_active = true;
+    if (!claim_update(url)) return false;
     set_status(OtaState::Starting, 0, ESP_OK, "Starting");
 
     if (xTaskCreate(ota_task, "ota", OTA_TASK_STACK, nullptr, 4, nullptr) != pdPASS) {
