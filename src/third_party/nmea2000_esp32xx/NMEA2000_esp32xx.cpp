@@ -55,10 +55,44 @@ bool tNMEA2000_esp32xx::rx_done_cb(twai_node_handle_t handle,
     return woken == pdTRUE;
 }
 
+bool tNMEA2000_esp32xx::error_cb(twai_node_handle_t,
+                                  const twai_error_event_data_t *edata,
+                                  void *user_ctx)
+{
+    auto *self = static_cast<tNMEA2000_esp32xx *>(user_ctx);
+    if (self != nullptr && edata != nullptr) self->last_error_flags_ = edata->err_flags.val;
+    return false;
+}
+
+bool tNMEA2000_esp32xx::state_change_cb(twai_node_handle_t,
+                                         const twai_state_change_event_data_t *edata,
+                                         void *user_ctx)
+{
+    auto *self = static_cast<tNMEA2000_esp32xx *>(user_ctx);
+    if (self != nullptr && edata != nullptr && edata->new_sta == TWAI_ERROR_BUS_OFF) {
+        self->recovery_requested_ = true;
+    }
+    return false;
+}
+
+void tNMEA2000_esp32xx::service_bus_recovery()
+{
+    if (!recovery_requested_ || node_ == nullptr) return;
+    recovery_requested_ = false;
+
+    ESP_LOGW(TAG, "TWAI bus-off detected (error flags 0x%08lx); starting recovery",
+             static_cast<unsigned long>(last_error_flags_));
+    const esp_err_t err = twai_node_recover(node_);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "TWAI recovery request failed: %s", esp_err_to_name(err));
+    }
+}
+
 bool tNMEA2000_esp32xx::CANSendFrame(unsigned long id, unsigned char len,
                                     const unsigned char *buf, bool)
 {
     if (!is_open_ || node_ == nullptr) return false;
+    service_bus_recovery();
 
     uint8_t data[8]{};
     const size_t data_len = std::min<size_t>(len, sizeof(data));
@@ -104,6 +138,8 @@ bool tNMEA2000_esp32xx::CANOpen()
 
     twai_event_callbacks_t callbacks{};
     callbacks.on_rx_done = rx_done_cb;
+    callbacks.on_error = error_cb;
+    callbacks.on_state_change = state_change_cb;
     err = twai_node_register_event_callbacks(node_, &callbacks, this);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "TWAI callback registration failed: %s", esp_err_to_name(err));
@@ -152,6 +188,7 @@ bool tNMEA2000_esp32xx::CANOpen()
 bool tNMEA2000_esp32xx::CANGetFrame(unsigned long &id, unsigned char &len, unsigned char *buf)
 {
     if (!is_open_ || rx_queue_ == nullptr) return false;
+    service_bus_recovery();
 
     RxFrame rx{};
     if (xQueueReceive(rx_queue_, &rx, 0) != pdTRUE) return false;
