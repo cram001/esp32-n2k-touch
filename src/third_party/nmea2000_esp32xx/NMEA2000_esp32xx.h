@@ -12,36 +12,35 @@ subject to retaining this copyright and permission notice.
 
 #pragma once
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
 #include "driver/gpio.h"
 #include "esp_twai.h"
-#include "esp_twai.h"
-#include "NMEA2000.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "N2kMsg.h"
+#include "NMEA2000.h"
 
 class tNMEA2000_esp32xx : public tNMEA2000 {
 private:
-    struct tCANFrame {
-        uint32_t id = 0;
-        uint8_t len = 0;
-        uint8_t buf[8]{};
-    };
-
     bool is_open_ = false;
     static bool can_in_use_;
     twai_node_handle_t node_ = nullptr;
     QueueHandle_t rx_queue_ = nullptr;
+    volatile bool recovery_requested_ = false;
+    volatile uint32_t last_error_flags_ = 0;
 
-    static bool rx_done_cb(twai_node_handle_t handle, const twai_rx_done_event_data_t *edata, void *user_ctx);
     gpio_num_t tx_pin_;
     gpio_num_t rx_pin_;
-    twai_node_handle_t node_ = nullptr;
-    QueueHandle_t rx_queue_ = nullptr;
 
-    static bool rx_done_callback(twai_node_handle_t handle,
-                                 const twai_rx_done_event_data_t *edata,
-                                 void *user_ctx);
+    static bool rx_done_cb(twai_node_handle_t handle,
+                           const twai_rx_done_event_data_t *edata,
+                           void *user_ctx);
+    static bool error_cb(twai_node_handle_t handle,
+                         const twai_error_event_data_t *edata,
+                         void *user_ctx);
+    static bool state_change_cb(twai_node_handle_t handle,
+                                const twai_state_change_event_data_t *edata,
+                                void *user_ctx);
+    void service_bus_recovery();
 
 protected:
     bool CANSendFrame(unsigned long id, unsigned char len,
