@@ -10,7 +10,7 @@ Marine touchscreen instrument for the Waveshare **ESP32-S3-Touch-LCD-4**.
 - Passively receive Victron SmartShunt **Instant Readout** BLE advertisements.
 - Display SmartShunt voltage, current, SOC, consumed Ah and time-to-go.
 - Optionally bridge SmartShunt battery data onto NMEA 2000 using a selectable battery instance.
-- Connect to Wi-Fi in station mode using settings stored in NVS.
+- Connect to Wi-Fi in station mode; SSID/auth mode persist in NVS while the password remains RAM-only during development.
 - Use the same Wi-Fi transport for future Cerbo GX control.
 - Dual-slot HTTPS OTA update engine with boot validation and rollback support.
 
@@ -40,13 +40,9 @@ Settings are persisted in ESP-IDF NVS.
 
 ## Wi-Fi
 
-Wi-Fi uses the ESP-IDF station interface. The touchscreen stores:
+Wi-Fi uses the ESP-IDF station interface. The touchscreen stores the enable/disable state, SSID and whether the network is open or secured. The password is intentionally **not persisted** during development; it remains RAM-only and must be re-entered after reboot for a secured network.
 
-- Enable/disable state
-- SSID
-- Password
-
-The status screen reports connection state, IP address and RSSI. The Wi-Fi connection is shared by network features such as OTA and the planned Cerbo GX integration.
+The status screen reports connection state, credentials-required state, IP address and RSSI. Reconnects use capped exponential backoff. The Wi-Fi connection is shared by network features such as OTA and the planned Cerbo GX integration.
 
 ## OTA updates
 
@@ -54,7 +50,7 @@ The board has 16 MB flash and the project partition table already provides two 6
 
 A newly installed image is only marked valid after the display and core application services finish initialization. If the new image crashes or resets before validation, the bootloader can return to the previous application slot.
 
-The OTA download engine is implemented. The user-facing update-source/release selection workflow is still to be added before OTA is considered complete for field use.
+The OTA download engine validates the incoming firmware project identity and secure version before installation. A user-facing update-source/release selection workflow is still to be added before OTA is considered complete for field use.
 
 ## SmartShunt Instant Readout
 
