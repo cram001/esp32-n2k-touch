@@ -20,7 +20,7 @@ constexpr const char *KEY_DISPLAY = "display_v1";
 constexpr const char *KEY_WIFI = "wifi_v1";
 constexpr uint32_t SHUNTS_SCHEMA = 2;
 constexpr uint32_t DISPLAY_SCHEMA = 1;
-constexpr uint32_t WIFI_SCHEMA = 1;
+constexpr uint32_t WIFI_SCHEMA = 2;
 
 struct PersistedSmartShunts {
     uint32_t schema = SHUNTS_SCHEMA;
