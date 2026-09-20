@@ -5,7 +5,7 @@
 #include <cmath>
 
 #include "N2kMessages.h"
-#include "NMEA2000_esp32.h"
+#include "third_party/nmea2000_esp32xx/NMEA2000_esp32xx.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "freertos/FreeRTOS.h"
@@ -24,7 +24,7 @@ constexpr uint32_t DC_STATUS_PERIOD_MS = 1500;
 
 SemaphoreHandle_t g_settings_mutex = nullptr;
 AppSettings g_settings;
-tNMEA2000_esp32 g_nmea2000(CAN_TX, CAN_RX);
+tNMEA2000_esp32xx g_nmea2000(CAN_TX, CAN_RX);
 bool g_started = false;
 
 AppSettings settings_snapshot()
