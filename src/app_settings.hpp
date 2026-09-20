@@ -89,10 +89,17 @@ struct SmartShuntConfig {
     std::array<char, 33> bindkey{};   // 128-bit key as 32 hex chars.
 };
 
+struct WifiConfig {
+    bool enabled = false;
+    std::array<char, 33> ssid{};
+    std::array<char, 65> password{};
+};
+
 struct AppSettings {
     DisplayTheme theme = DisplayTheme::Day;
     uint8_t day_brightness = 80;
     uint8_t night_brightness = 20;
+    WifiConfig wifi{};
     UnitsSettings units{};
     std::array<DataPageConfig, MAX_DATA_PAGES> pages{};
     std::array<SmartShuntConfig, MAX_SMARTSHUNTS> smartshunts{};
