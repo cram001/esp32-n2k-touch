@@ -16,6 +16,7 @@ subject to retaining this copyright and permission notice.
 #include "freertos/queue.h"
 #include "driver/gpio.h"
 #include "esp_twai.h"
+#include "esp_twai.h"
 #include "NMEA2000.h"
 #include "N2kMsg.h"
 
@@ -29,6 +30,10 @@ private:
 
     bool is_open_ = false;
     static bool can_in_use_;
+    twai_node_handle_t node_ = nullptr;
+    QueueHandle_t rx_queue_ = nullptr;
+
+    static bool rx_done_cb(twai_node_handle_t handle, const twai_rx_done_event_data_t *edata, void *user_ctx);
     gpio_num_t tx_pin_;
     gpio_num_t rx_pin_;
     twai_node_handle_t node_ = nullptr;
