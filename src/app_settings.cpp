@@ -17,8 +17,10 @@ constexpr const char *KEY_DAY_BRIGHTNESS = "day_br";
 constexpr const char *KEY_NIGHT_BRIGHTNESS = "night_br";
 constexpr const char *KEY_SHUNTS = "shunts_v2";
 constexpr const char *KEY_DISPLAY = "display_v1";
+constexpr const char *KEY_WIFI = "wifi_v1";
 constexpr uint32_t SHUNTS_SCHEMA = 2;
 constexpr uint32_t DISPLAY_SCHEMA = 1;
+constexpr uint32_t WIFI_SCHEMA = 1;
 
 struct PersistedSmartShunts {
     uint32_t schema = SHUNTS_SCHEMA;
@@ -29,6 +31,11 @@ struct PersistedDisplayConfig {
     uint32_t schema = DISPLAY_SCHEMA;
     UnitsSettings units{};
     std::array<DataPageConfig, MAX_DATA_PAGES> pages{};
+};
+
+struct PersistedWifiConfig {
+    uint32_t schema = WIFI_SCHEMA;
+    WifiConfig config{};
 };
 
 uint8_t clamp_brightness(uint8_t value)
@@ -136,6 +143,15 @@ AppSettings settings_load()
         settings.units = persisted_display.units;
         settings.pages = persisted_display.pages;
     }
+    PersistedWifiConfig persisted_wifi{};
+    size = sizeof(persisted_wifi);
+    if (nvs_get_blob(handle, KEY_WIFI, &persisted_wifi, &size) == ESP_OK &&
+        size == sizeof(persisted_wifi) && persisted_wifi.schema == WIFI_SCHEMA) {
+        settings.wifi = persisted_wifi.config;
+        settings.wifi.ssid.back() = '\0';
+        settings.wifi.password.back() = '\0';
+    }
+
     sanitize_display_settings(settings);
 
     nvs_close(handle);
@@ -158,11 +174,15 @@ bool settings_save(const AppSettings &settings)
     persisted_display.units = settings.units;
     persisted_display.pages = settings.pages;
 
+    PersistedWifiConfig persisted_wifi{};
+    persisted_wifi.config = settings.wifi;
+
     err = nvs_set_u8(handle, KEY_THEME, static_cast<uint8_t>(settings.theme));
     if (err == ESP_OK) err = nvs_set_u8(handle, KEY_DAY_BRIGHTNESS, clamp_brightness(settings.day_brightness));
     if (err == ESP_OK) err = nvs_set_u8(handle, KEY_NIGHT_BRIGHTNESS, clamp_brightness(settings.night_brightness));
     if (err == ESP_OK) err = nvs_set_blob(handle, KEY_SHUNTS, &persisted_shunts, sizeof(persisted_shunts));
     if (err == ESP_OK) err = nvs_set_blob(handle, KEY_DISPLAY, &persisted_display, sizeof(persisted_display));
+    if (err == ESP_OK) err = nvs_set_blob(handle, KEY_WIFI, &persisted_wifi, sizeof(persisted_wifi));
     if (err == ESP_OK) err = nvs_commit(handle);
 
     nvs_close(handle);
