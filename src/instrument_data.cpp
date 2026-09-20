@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
 #include "smartshunt_ble.hpp"
 
 namespace {
@@ -26,6 +27,7 @@ struct CachedValue {
 };
 
 std::array<CachedValue, METRIC_COUNT> g_nmea{};
+portMUX_TYPE g_nmea_mux = portMUX_INITIALIZER_UNLOCKED;
 
 size_t metric_index(DataMetric metric) { return static_cast<size_t>(metric); }
 
@@ -99,9 +101,12 @@ void instrument_data_update_nmea(DataMetric metric, double value)
 {
     const size_t idx = metric_index(metric);
     if (idx >= g_nmea.size() || metric == DataMetric::None) return;
+    const int64_t now = esp_timer_get_time();
+    portENTER_CRITICAL(&g_nmea_mux);
     g_nmea[idx].valid = true;
     g_nmea[idx].value = value;
-    g_nmea[idx].updated_us = esp_timer_get_time();
+    g_nmea[idx].updated_us = now;
+    portEXIT_CRITICAL(&g_nmea_mux);
 }
 
 InstrumentValue instrument_data_get(const DataFieldSelection &selection)
@@ -109,10 +114,17 @@ InstrumentValue instrument_data_get(const DataFieldSelection &selection)
     if (selection.source == DataSourceType::SmartShunt) return smartshunt_value(selection);
     InstrumentValue out{};
     const size_t idx = metric_index(selection.metric);
-    if (idx >= g_nmea.size() || !g_nmea[idx].valid) return out;
+    if (idx >= g_nmea.size()) return out;
+
+    CachedValue cached{};
+    portENTER_CRITICAL(&g_nmea_mux);
+    cached = g_nmea[idx];
+    portEXIT_CRITICAL(&g_nmea_mux);
+
+    if (!cached.valid) return out;
     out.valid = true;
-    out.value = g_nmea[idx].value;
-    out.age_ms = static_cast<uint32_t>((esp_timer_get_time() - g_nmea[idx].updated_us) / 1000);
+    out.value = cached.value;
+    out.age_ms = static_cast<uint32_t>((esp_timer_get_time() - cached.updated_us) / 1000);
     out.stale = out.age_ms > NMEA_STALE_MS;
     return out;
 }
