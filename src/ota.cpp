@@ -64,6 +64,39 @@ void ota_task(void *)
         return;
     }
 
+    esp_app_desc_t candidate{};
+    err = esp_https_ota_get_img_desc(handle, &candidate);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Could not read OTA image descriptor: %s", esp_err_to_name(err));
+        esp_https_ota_abort(handle);
+        set_status(OtaState::Failed, 0, err, "Invalid firmware image");
+        g_active = false;
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    const esp_app_desc_t *running = esp_app_get_description();
+    if (running == nullptr || std::strncmp(candidate.project_name, running->project_name,
+                                           sizeof(candidate.project_name)) != 0) {
+        ESP_LOGE(TAG, "Rejecting OTA image for project '%s' (running '%s')",
+                 candidate.project_name, running ? running->project_name : "unknown");
+        esp_https_ota_abort(handle);
+        set_status(OtaState::Failed, 0, ESP_ERR_INVALID_ARG, "Wrong firmware project");
+        g_active = false;
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    if (candidate.secure_version < running->secure_version) {
+        ESP_LOGE(TAG, "Rejecting OTA image with lower secure version");
+        esp_https_ota_abort(handle);
+        set_status(OtaState::Failed, 0, ESP_ERR_INVALID_VERSION, "Firmware security downgrade");
+        g_active = false;
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    ESP_LOGI(TAG, "OTA candidate %s version %s", candidate.project_name, candidate.version);
     const int image_size = esp_https_ota_get_image_size(handle);
     set_status(OtaState::Downloading, 0, ESP_OK, "Downloading");
 
