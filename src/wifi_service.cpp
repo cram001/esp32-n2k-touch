@@ -124,7 +124,7 @@ bool configure_station(const WifiConfig &config)
                     std::min(pass_len, sizeof(wifi_config.sta.password)));
     }
 
-    wifi_config.sta.threshold.authmode = config.open_network ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
+    wifi_config.sta.threshold.authmode = config.open_network ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_WPA3_PSK;
     wifi_config.sta.pmf_cfg.capable = true;
     wifi_config.sta.pmf_cfg.required = false;
 
