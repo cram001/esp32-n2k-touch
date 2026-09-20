@@ -10,8 +10,9 @@ Marine touchscreen instrument for the Waveshare **ESP32-S3-Touch-LCD-4**.
 - Passively receive Victron SmartShunt **Instant Readout** BLE advertisements.
 - Display SmartShunt voltage, current, SOC, consumed Ah and time-to-go.
 - Optionally bridge SmartShunt battery data onto NMEA 2000 using a selectable battery instance.
-- Connect by Wi-Fi to a Victron Cerbo GX and control a VE.Bus inverter (planned).
-- OTA-capable flash layout reserved from the start.
+- Connect to Wi-Fi in station mode using settings stored in NVS.
+- Use the same Wi-Fi transport for future Cerbo GX control.
+- Dual-slot HTTPS OTA update engine with boot validation and rollback support.
 
 ## Development stack
 
@@ -24,19 +25,36 @@ Marine touchscreen instrument for the Waveshare **ESP32-S3-Touch-LCD-4**.
 
 ## Current UI
 
-The firmware provides:
+The firmware provides six configurable instrument pages with 1, 2, 4, or 6 data fields per page. Fields can mix NMEA 2000 and SmartShunt sources.
 
-- **Depth** screen (PGN 128267 data path still to be completed).
-- **Battery** screen for SmartShunt data.
-- **Settings** screen with Day/Night mode and independent brightness.
-- **SmartShunt** settings with:
-  - Enable/disable passive BLE reading.
-  - Enable/disable SmartShunt-to-NMEA-2000 bridging.
-  - Select battery instance 0-252.
-  - Optional SmartShunt BLE MAC filter.
-  - Victron Instant Readout encryption key.
+The Settings area includes:
 
-All settings are persisted in ESP-IDF NVS.
+- Page enable/layout/data-field configuration.
+- Global units for depth, temperature, wind speed, vessel speed, long distance and short distance.
+- Day/Night mode and independent brightness.
+- Wi-Fi station configuration with SSID, masked password, connection state, IP address and RSSI.
+- Multi-SmartShunt setup with per-device Instant Readout key and optional NMEA 2000 bridging.
+
+Settings are persisted in ESP-IDF NVS.
+
+
+## Wi-Fi
+
+Wi-Fi uses the ESP-IDF station interface. The touchscreen stores:
+
+- Enable/disable state
+- SSID
+- Password
+
+The status screen reports connection state, IP address and RSSI. The Wi-Fi connection is shared by network features such as OTA and the planned Cerbo GX integration.
+
+## OTA updates
+
+The board has 16 MB flash and the project partition table already provides two 6 MB OTA application slots plus OTA metadata. Firmware updates use ESP-IDF HTTPS OTA APIs and the system is configured for bootloader rollback.
+
+A newly installed image is only marked valid after the display and core application services finish initialization. If the new image crashes or resets before validation, the bootloader can return to the previous application slot.
+
+The OTA download engine is implemented. The user-facing update-source/release selection workflow is still to be added before OTA is considered complete for field use.
 
 ## SmartShunt Instant Readout
 
