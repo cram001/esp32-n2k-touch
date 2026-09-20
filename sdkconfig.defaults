@@ -17,6 +17,12 @@ CONFIG_FREERTOS_HZ=1000
 CONFIG_BT_ENABLED=y
 CONFIG_BT_BLUEDROID_ENABLED=y
 CONFIG_BT_BLE_ENABLED=y
+# SmartShunt uses the legacy esp_ble_gap_set_scan_params/start_scanning API.
+# On ESP32-S3 that implementation is compiled only with Bluedroid BLE 4.2
+# scanning support; BLE 5 extended scanning is a different API.
+CONFIG_BT_BLE_42_FEATURES_SUPPORTED=y
+CONFIG_BT_BLE_42_SCAN_EN=y
+# CONFIG_BT_BLE_50_FEATURES_SUPPORTED is not set
 # Bluedroid defaults to Classic-only host mode unless BLE is selected explicitly.
 # The SmartShunt scanner uses esp_ble_gap_* APIs, so keep the host BLE-only.
 CONFIG_BT_BLUEDROID_PINNED_TO_CORE_0=y
