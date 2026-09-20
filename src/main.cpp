@@ -59,7 +59,6 @@ void board_i2c_recover()
 extern "C" void app_main(void)
 {
     ESP_LOGI(TAG, "Starting esp32-n2k-touch");
-    ota_confirm_running_image();
 
     if (!settings_init()) {
         ESP_LOGW(TAG, "Continuing with default settings because NVS initialization failed");
@@ -85,4 +84,8 @@ extern "C" void app_main(void)
     if (!n2k_bridge_start(settings)) {
         ESP_LOGE(TAG, "NMEA 2000 service failed to initialize");
     }
+
+    // Confirm a newly installed OTA image only after the core application has
+    // completed initialization. A reset before this point allows rollback.
+    ota_confirm_running_image();
 }
