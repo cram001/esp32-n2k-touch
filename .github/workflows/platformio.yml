@@ -30,4 +30,17 @@ jobs:
         run: python -m pip install --upgrade platformio
 
       - name: Build firmware
-        run: pio run
+        shell: bash
+        run: |
+          set -o pipefail
+          pio run 2>&1 | tee build.log
+
+      - name: Reject unknown Kconfig symbols
+        if: always()
+        shell: bash
+        run: |
+          if grep -Eqi 'not found in any of the input files|unknown[[:space:]_-]+kconfig[[:space:]_-]+symbol|unrecognized[[:space:]_-]+symbol' build.log; then
+            echo "::error::ESP-IDF reported an unknown or unrecognized Kconfig symbol."
+            grep -Ein 'not found in any of the input files|unknown[[:space:]_-]+kconfig[[:space:]_-]+symbol|unrecognized[[:space:]_-]+symbol' build.log
+            exit 1
+          fi
