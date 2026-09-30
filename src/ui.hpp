@@ -8,3 +8,5 @@
 // NMEA worker tasks publish into synchronized service/data snapshots and must
 // never call LVGL directly.
 void ui_start(AppSettings initial_settings);
+
+bool ui_is_healthy();

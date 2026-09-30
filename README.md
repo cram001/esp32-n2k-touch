@@ -10,9 +10,9 @@ Marine touchscreen instrument for the Waveshare **ESP32-S3-Touch-LCD-4**.
 - Passively receive Victron SmartShunt **Instant Readout** BLE advertisements.
 - Display SmartShunt voltage, current, SOC, consumed Ah and time-to-go.
 - Optionally bridge SmartShunt battery data onto NMEA 2000 using a selectable battery instance.
-- Connect to Wi-Fi in station mode; SSID/auth mode persist in NVS while the password remains RAM-only during development.
+- Connect to Wi-Fi in station or Access Point mode; separate credentials persist in application NVS.
 - Use the same Wi-Fi transport for future Cerbo GX control.
-- Dual-slot HTTPS OTA update engine with boot validation and rollback support.
+- Dual-slot HTTPS pull and local AP-upload OTA with startup validation and rollback support.
 
 ## Development stack
 
@@ -32,7 +32,7 @@ The Settings area includes:
 - Page enable/layout/data-field configuration.
 - Global units for depth, temperature, wind speed, vessel speed, long distance and short distance.
 - Day/Night mode and independent brightness.
-- Wi-Fi station configuration with SSID, masked password, connection state, IP address and RSSI.
+- Wi-Fi Station/AP selection, masked/showable password, on-demand SSID scan/select, diagnostics and firmware updates.
 - Multi-SmartShunt setup with per-device Instant Readout key and optional NMEA 2000 bridging.
 
 Settings are persisted in ESP-IDF NVS.
@@ -40,17 +40,19 @@ Settings are persisted in ESP-IDF NVS.
 
 ## Wi-Fi
 
-Wi-Fi uses the ESP-IDF station interface. The touchscreen stores the enable/disable state, SSID and whether the network is open or secured. The password is intentionally **not persisted** during development; it remains RAM-only and must be re-entered after reboot for a secured network.
+Choose Station to join a 2.4 GHz router, or Access Point for a direct local firmware upload. Station and AP credentials are stored separately in application NVS and survive reboot. Passwords are masked by default and can be shown explicitly. Open station networks require the Open network checkbox.
 
-The status screen reports connection state, credentials-required state, IP address and RSSI. Reconnects use capped exponential backoff. The Wi-Fi connection is shared by network features such as OTA and the planned Cerbo GX integration.
+Tap Scan Networks for a single scan and select an SSID, or enter a hidden SSID manually. There is no continuous Wi-Fi scanning. The status includes IP address, connection state, signal strength and readable/numeric disconnect reasons; reconnect uses capped backoff.
+
+Existing schema-2 settings migrate without erasing NVS. A protected network requires one password entry on upgrade because the previous version never saved it. The old settings key remains available to the previous firmware.
 
 ## OTA updates
 
-The board has 16 MB flash and the project partition table already provides two 6 MB OTA application slots plus OTA metadata. Firmware updates use ESP-IDF HTTPS OTA APIs and the system is configured for bootloader rollback.
+The unchanged 16 MB flash layout provides two 6 MB application slots and OTA metadata. Under Wi-Fi > Firmware Update, enter an HTTPS application-image URL while connected in Station mode. In AP mode, connect a phone/laptop to the display and open its displayed HTTP address to upload `firmware.bin` directly. Both methods validate the image and require an explicit reboot.
 
-A newly installed image is only marked valid after the display and core application services finish initialization. If the new image crashes or resets before validation, the bootloader can return to the previous application slot.
+A candidate image is confirmed after local services initialize and a five-second UI heartbeat check succeeds. A pending image that fails health checks is rejected; a crash/reset before confirmation permits bootloader rollback to a valid previous slot. On-board rollback and radio/touch behavior require bench acceptance.
 
-The OTA download engine validates the incoming firmware project identity and secure version before installation. A user-facing update-source/release selection workflow is still to be added before OTA is considered complete for field use.
+See [release notes and bench checklist](docs/next-release-wifi-ota.md) for setup, migration, validation and future gesture/Actisense planning.
 
 ## SmartShunt Instant Readout
 
