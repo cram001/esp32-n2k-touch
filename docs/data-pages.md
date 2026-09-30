@@ -26,7 +26,9 @@ The initial live decoder supports:
 - Depth — PGN 128267
 - Boat speed / speed through water — PGN 128259
 - SOG / COG — PGN 129026
-- Heading — PGN 127250
+- Heading — PGN 127250; Units selects True or Magnetic. Conversion uses received
+  magnetic variation (127250 or 127258); labels show `deg T` / `deg M`. Missing
+  variation shows `---` when conversion is required. COG remains unchanged.
 - Apparent wind speed/angle — PGN 130306
 - True wind speed/angle — PGN 130306
 - Water temperature — PGN 130312 and PGN 130316

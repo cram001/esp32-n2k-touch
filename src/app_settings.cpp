@@ -17,6 +17,7 @@ constexpr const char *KEY_DAY_BRIGHTNESS = "day_br";
 constexpr const char *KEY_NIGHT_BRIGHTNESS = "night_br";
 constexpr const char *KEY_SHUNTS = "shunts_v2";
 constexpr const char *KEY_DISPLAY = "display_v1";
+constexpr const char *KEY_HEADING_REFERENCE = "heading_ref";
 constexpr const char *KEY_WIFI = "wifi_v3";
 constexpr const char *KEY_WIFI_LEGACY = "wifi_v1";
 constexpr uint32_t SHUNTS_SCHEMA = 2;
@@ -44,6 +45,8 @@ struct LegacyWifiConfig {
 static_assert(sizeof(SmartShuntConfig) == 80, "SmartShuntConfig ABI changed; bump SHUNTS_SCHEMA and migrate");
 static_assert(sizeof(PersistedSmartShunts) == 324, "PersistedSmartShunts ABI changed; bump SHUNTS_SCHEMA and migrate");
 static_assert(sizeof(UnitsSettings) == 12, "UnitsSettings ABI changed; bump DISPLAY_SCHEMA and migrate");
+static_assert(offsetof(UnitsSettings, short_distance_threshold_nm) == 8, "Legacy unit layout changed");
+static_assert(offsetof(UnitsSettings, heading_reference) == 6, "Heading must occupy former padding");
 static_assert(sizeof(DataPageConfig) == 37, "DataPageConfig ABI changed; bump DISPLAY_SCHEMA and migrate");
 static_assert(sizeof(PersistedDisplayConfig) == 240, "PersistedDisplayConfig ABI changed; bump DISPLAY_SCHEMA and migrate");
 static_assert(sizeof(LegacyWifiConfig) == 40, "Legacy Wi-Fi ABI changed");
@@ -199,6 +202,13 @@ AppSettings settings_load()
 
     sanitize_display_settings(settings);
 
+    // Old display blobs contain arbitrary padding at the new field's offset.
+    // Never interpret that padding as a saved heading preference.
+    settings.units.heading_reference = HeadingReference::True;
+    if (nvs_get_u8(handle, KEY_HEADING_REFERENCE, &value) == ESP_OK && value <= 1) {
+        settings.units.heading_reference = static_cast<HeadingReference>(value);
+    }
+
     nvs_close(handle);
     if (migrate_wifi) {
         if (!settings_save(settings)) ESP_LOGW(TAG, "Wi-Fi migration will retry next boot");
@@ -236,6 +246,8 @@ bool settings_save(const AppSettings &settings)
     persisted_wifi.ap_password.back() = '\0';
 
     err = nvs_set_u8(handle, KEY_THEME, static_cast<uint8_t>(settings.theme));
+    if (err == ESP_OK) err = nvs_set_u8(handle, KEY_HEADING_REFERENCE,
+        settings.units.heading_reference == HeadingReference::Magnetic ? 1 : 0);
     if (err == ESP_OK) err = nvs_set_u8(handle, KEY_DAY_BRIGHTNESS, clamp_brightness(settings.day_brightness));
     if (err == ESP_OK) err = nvs_set_u8(handle, KEY_NIGHT_BRIGHTNESS, clamp_brightness(settings.night_brightness));
     if (err == ESP_OK) err = nvs_set_blob(handle, KEY_SHUNTS, &persisted_shunts, sizeof(persisted_shunts));

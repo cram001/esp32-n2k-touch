@@ -44,6 +44,7 @@ static_assert(sizeof(LegacyWifi)==40,"Migration fixture ABI");
 int main(){
     reset();assert(settings_init());auto defaults=settings_load();
     assert(!defaults.wifi.enabled && defaults.pages[0].enabled && commits==0);
+    assert(defaults.units.heading_reference==HeadingReference::True);
 
     reset();LegacyWifi legacy;fixture("wifi_v1",legacy);const Bytes old=durable["wifi_v1"];
     auto migrated=settings_load();
@@ -69,11 +70,22 @@ int main(){
     expected.smartshunts[0].configured=true;expected.smartshunts[0].n2k_enabled=true;
     expected.smartshunts[0].battery_instance=17;std::strcpy(expected.smartshunts[0].bindkey.data(),"0123456789abcdef0123456789abcdef");
     expected.units.depth=DepthUnit::Feet;expected.pages[1].enabled=true;expected.pages[1].layout=PageLayout::Six;
+    expected.units.heading_reference=HeadingReference::Magnetic;
     assert(settings_save(expected));reboot=settings_load();
     assert(reboot.wifi.enabled && reboot.wifi.ssid==expected.wifi.ssid && reboot.wifi.password==expected.wifi.password);
     assert(reboot.wifi.ap_ssid==expected.wifi.ap_ssid && reboot.wifi.ap_password==expected.wifi.ap_password && reboot.wifi.mode==WifiMode::AccessPoint);
     assert(reboot.smartshunts[0].bindkey==expected.smartshunts[0].bindkey && reboot.smartshunts[0].battery_instance==17 && reboot.smartshunts[0].n2k_enabled);
     assert(reboot.units.depth==DepthUnit::Feet && reboot.pages[1].layout==PageLayout::Six && reboot.pages[1].enabled);
+    assert(reboot.units.heading_reference==HeadingReference::Magnetic);
+    // Original display_v1 padding must not be treated as a heading preference.
+    durable.erase("heading_ref");
+    durable["display_v1"][4+6]=255;
+    reboot=settings_load();assert(reboot.units.heading_reference==HeadingReference::True);
+    assert(reboot.units.depth==DepthUnit::Feet && reboot.pages[1].enabled);
+    durable["heading_ref"]=Bytes(1,255);
+    reboot=settings_load();assert(reboot.units.heading_reference==HeadingReference::True);
+    expected.units.heading_reference=HeadingReference::True;
+    assert(settings_save(expected));assert(settings_load().units.heading_reference==HeadingReference::True);
 
     auto config=expected.wifi;assert(wifi_config_valid(config,&reason));
     config.ap_password.fill(0);assert(!wifi_config_valid(config,&reason));
