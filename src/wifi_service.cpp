@@ -170,7 +170,7 @@ bool configure(const WifiConfig &config) {
     xSemaphoreGive(g_mutex);
     if (g_started) {
         const esp_err_t err = esp_wifi_stop();
-        if (err != ESP_OK) { state(WifiState::Error, err, esp_err_to_name(err)); return false; }
+        if (err != ESP_OK) { g_switching = false; state(WifiState::Error, err, esp_err_to_name(err)); return false; }
         g_started = false;
     }
     xSemaphoreTake(g_mutex, portMAX_DELAY);
@@ -182,6 +182,8 @@ bool configure(const WifiConfig &config) {
     g_next_retry = 0;
     const char *reason = nullptr;
     if (!wifi_config_valid(config, &reason)) {
+        // No interface will start, so no start event can release this flag.
+        g_switching = false;
         state(WifiState::CredentialsRequired, ESP_ERR_INVALID_ARG, reason);
         return true; // Invalid user configuration is not a service init failure.
     }
@@ -203,7 +205,7 @@ bool configure(const WifiConfig &config) {
         err = esp_wifi_set_config(WIFI_IF_STA, &cfg);
     }
     if (err == ESP_OK) err = esp_wifi_start();
-    if (err != ESP_OK) { state(WifiState::Error, err, esp_err_to_name(err)); return false; }
+    if (err != ESP_OK) { g_switching = false; state(WifiState::Error, err, esp_err_to_name(err)); return false; }
     g_started = true;
     return true;
 }

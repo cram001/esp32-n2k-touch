@@ -7,6 +7,6 @@
 // After startup, only LVGL callbacks/timers mutate UI objects. Wi-Fi, BLE and
 // NMEA worker tasks publish into synchronized service/data snapshots and must
 // never call LVGL directly.
-void ui_start(AppSettings initial_settings);
+void ui_start(const AppSettings &initial_settings);
 
 bool ui_is_healthy();

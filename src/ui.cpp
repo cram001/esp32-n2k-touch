@@ -18,6 +18,7 @@
 #include "ota.hpp"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "esp_app_desc.h"
 
 namespace {
 constexpr const char *TAG = "ui";
@@ -38,6 +39,7 @@ size_t g_edit_field = 0;
 size_t g_edit_shunt = 0;
 
 lv_obj_t *g_data_screen = nullptr;
+lv_obj_t *g_boot_screen = nullptr;
 lv_obj_t *g_settings_screen = nullptr;
 lv_obj_t *g_page_setup_screen = nullptr;
 lv_obj_t *g_field_editor_screen = nullptr;
@@ -564,6 +566,13 @@ void create_settings_screen()
     b=make_button(g_settings_screen,"BR +",brightness_up_cb,80,46);
     lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-35,286);
 
+    lv_obj_t *identity = require_obj(lv_label_create(g_settings_screen), "firmware identity");
+    const esp_app_desc_t *app = esp_app_get_description();
+    lv_label_set_text_fmt(identity, "Firmware: %s\nBuilt: %s %s", app->version, app->date, app->time);
+    lv_obj_set_width(identity, 440);
+    lv_obj_set_style_text_align(identity, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(identity, LV_ALIGN_TOP_MID, 0, 346);
+
     b=make_button(g_settings_screen,"BACK",data_screen_cb,120,46);
     lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-18);
 }
@@ -850,7 +859,7 @@ void create_shunt_edit_screen()
 
 } // namespace
 
-void ui_start(AppSettings initial_settings)
+void ui_start(const AppSettings &initial_settings)
 {
     g_settings = initial_settings;
     g_active_page = first_enabled_page();
@@ -870,7 +879,26 @@ void ui_start(AppSettings initial_settings)
     update_units();
     update_page_setup();
     update_shunts_list();
-    lv_screen_load(g_data_screen);
+    g_boot_screen = require_obj(lv_obj_create(nullptr), "boot screen");
+    lv_obj_remove_flag(g_boot_screen, LV_OBJ_FLAG_SCROLLABLE);
+    apply_theme_to(g_boot_screen);
+    lv_obj_t *identity = require_obj(lv_label_create(g_boot_screen), "boot firmware identity");
+    const esp_app_desc_t *app = esp_app_get_description();
+    lv_label_set_text_fmt(identity, "ESP32 N2K TOUCH\n\nFirmware: %s\n\nBuilt: %s\n%s\n\nStarting services...",
+                          app->version, app->date, app->time);
+    lv_obj_set_width(identity, 440);
+    lv_obj_set_style_text_font(identity, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_align(identity, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_center(identity);
+    lv_screen_load(g_boot_screen);
+    // This callback runs on the LVGL task, retaining display/touch ownership.
+    lv_timer_t *boot_timer = lv_timer_create([](lv_timer_t *) {
+        lv_screen_load(g_data_screen);
+        lv_obj_delete(g_boot_screen);
+        g_boot_screen = nullptr;
+    }, 5000, nullptr);
+    if (!boot_timer) std::abort();
+    lv_timer_set_repeat_count(boot_timer, 1);
     g_refresh_timer = lv_timer_create(refresh_cb, 500, nullptr);
     if (g_refresh_timer == nullptr) {
         ESP_LOGE(TAG, "LVGL allocation failed for refresh timer");
