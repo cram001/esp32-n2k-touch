@@ -3,6 +3,7 @@
 #include "smartshunt_ble.hpp"
 #include "wifi_service.hpp"
 #include "ui.hpp"
+#include "ota.hpp"
 
 #include "bsp/esp-bsp.h"
 #include "driver/gpio.h"
@@ -69,22 +70,30 @@ extern "C" void app_main(void)
 {
     ESP_LOGI(TAG, "Starting esp32-n2k-touch");
 
-    if (!settings_init()) {
+    const bool settings_ok = settings_init();
+    if (!settings_ok) {
         ESP_LOGW(TAG, "Continuing with default settings because NVS initialization failed");
     }
     const AppSettings settings = settings_load();
+    ota_prepare();
+    wifi_service_prepare();
 
     if (!board_i2c_recover()) {
         ESP_LOGW(TAG, "I2C recovery was incomplete; continuing so BSP initialization can report the real bus error");
     }
-    if (bsp_display_start() == nullptr) {
+    lv_display_t *display = bsp_display_start();
+    if (display == nullptr) {
         ESP_LOGE(TAG, "Display initialization failed");
+        ota_reject_running_image();
         return;
     }
     if (!bsp_display_lock(pdMS_TO_TICKS(1000))) {
         ESP_LOGE(TAG, "Timed out acquiring LVGL display lock; UI construction aborted");
+        ota_reject_running_image();
         return;
     }
+    // The LVGL port rotates pixels; LVGL rotates the associated input points.
+    bsp_display_rotate(display, LV_DISPLAY_ROTATION_180);
     ui_start(settings);
     bsp_display_unlock();
     ESP_LOGI(TAG, "Display and touch UI initialized");
@@ -99,9 +108,17 @@ extern "C" void app_main(void)
     if (!n2k_ok) ESP_LOGE(TAG, "NMEA 2000 service failed to initialize");
 
 
-    // OTA is temporarily excluded while diagnosing firmware link/IRAM pressure.
-    // Keep service initialization results visible for startup diagnostics.
-    (void)wifi_ok;
-    (void)ble_ok;
-    (void)n2k_ok;
+    const bool ota_ok = wifi_ok && ota_start_local_server();
+    if (!ota_ok) ESP_LOGE(TAG, "OTA server or partition validation failed");
+
+    // Confirm only after local services initialize. Router availability is not
+    // a health requirement; Wi-Fi initialization itself must succeed.
+    if (settings_ok && wifi_ok && ble_ok && n2k_ok && ota_ok) {
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        if (ui_is_healthy()) ota_confirm_running_image();
+        else ota_reject_running_image();
+    } else {
+        ESP_LOGE(TAG, "Startup health check failed; rejecting pending OTA image");
+        ota_reject_running_image();
+    }
 }

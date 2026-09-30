@@ -89,11 +89,16 @@ struct SmartShuntConfig {
     std::array<char, 33> bindkey{};   // 128-bit key as 32 hex chars.
 };
 
+enum class WifiMode : uint8_t { Station = 0, AccessPoint = 1 };
+
 struct WifiConfig {
     bool enabled = false;
     bool open_network = false;
     std::array<char, 33> ssid{};
-    std::array<char, 65> password{}; // Volatile only; never persisted to NVS.
+    std::array<char, 65> password{};
+    WifiMode mode = WifiMode::Station;
+    std::array<char, 33> ap_ssid{"esp32-n2k-touch"};
+    std::array<char, 65> ap_password{};
 };
 
 struct AppSettings {

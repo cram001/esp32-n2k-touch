@@ -69,7 +69,7 @@ A network service will join the vessel Wi-Fi and use the Cerbo GX local API/MQTT
 
 ### OTA
 
-The flash layout provides two OTA application slots. HTTPS OTA transport, project/secure-version validation, startup-health confirmation and bootloader rollback are implemented. The release-selection/update UI remains to be implemented.
+The flash layout provides two OTA application slots. HTTPS OTA transport, project/secure-version validation, startup-health confirmation and bootloader rollback are implemented. An HTTPS URL update screen and local AP upload page are available; see `next-release-wifi-ota.md`.
 
 ## Concurrency rules
 
@@ -78,6 +78,8 @@ The flash layout provides two OTA application slots. HTTPS OTA transport, projec
 - NMEA input values are published into a synchronized cache; the UI reads snapshots.
 - NMEA output reads copies of settings and SmartShunt state.
 - Settings changes are persisted, then applied to the relevant runtime service.
+- Wi-Fi configuration and scans are queued to a dedicated worker; scan records are processed outside the event-loop stack. Wi-Fi events publish protected status snapshots.
+- HTTP/HTTPS OTA tasks publish status snapshots and share an update claim with network reconfiguration; they never access LVGL.
 
 ## Installation constraints
 
