@@ -1,7 +1,10 @@
 #include "app_settings.hpp"
+#include "n2k_bridge.hpp"
+#include "smartshunt_ble.hpp"
+#include "wifi_service.hpp"
 #include "ui.hpp"
 
-#include "bsp/display.h"
+#include "bsp/esp-bsp.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_rom_sys.h"
@@ -53,7 +56,6 @@ bool board_i2c_recover()
     esp_rom_delay_us(10);
     ok &= try_gpio(gpio_set_level(BOARD_I2C_SDA, 1), "SDA stop high");
     esp_rom_delay_us(10);
-
     ok &= try_gpio(gpio_set_direction(BOARD_I2C_SDA, GPIO_MODE_INPUT), "SDA release");
     ok &= try_gpio(gpio_set_direction(BOARD_I2C_SCL, GPIO_MODE_INPUT), "SCL release");
     ok &= try_gpio(gpio_set_pull_mode(BOARD_I2C_SDA, GPIO_PULLUP_ONLY), "SDA final pull-up");
@@ -65,7 +67,7 @@ bool board_i2c_recover()
 
 extern "C" void app_main(void)
 {
-    ESP_LOGI(TAG, "Starting esp32-n2k-touch Milestone 1");
+    ESP_LOGI(TAG, "Starting esp32-n2k-touch");
 
     if (!settings_init()) {
         ESP_LOGW(TAG, "Continuing with default settings because NVS initialization failed");
@@ -75,14 +77,31 @@ extern "C" void app_main(void)
     if (!board_i2c_recover()) {
         ESP_LOGW(TAG, "I2C recovery was incomplete; continuing so BSP initialization can report the real bus error");
     }
-
-    bsp_display_start();
+    if (bsp_display_start() == nullptr) {
+        ESP_LOGE(TAG, "Display initialization failed");
+        return;
+    }
     if (!bsp_display_lock(pdMS_TO_TICKS(1000))) {
         ESP_LOGE(TAG, "Timed out acquiring LVGL display lock; UI construction aborted");
         return;
     }
     ui_start(settings);
     bsp_display_unlock();
-
     ESP_LOGI(TAG, "Display and touch UI initialized");
+
+    const bool wifi_ok = wifi_service_start(settings.wifi);
+    if (!wifi_ok) ESP_LOGE(TAG, "Wi-Fi service failed to initialize");
+
+    const bool ble_ok = smartshunt_ble_start(settings);
+    if (!ble_ok) ESP_LOGE(TAG, "SmartShunt BLE service failed to initialize");
+
+    const bool n2k_ok = n2k_bridge_start(settings);
+    if (!n2k_ok) ESP_LOGE(TAG, "NMEA 2000 service failed to initialize");
+
+
+    // OTA is temporarily excluded while diagnosing firmware link/IRAM pressure.
+    // Keep service initialization results visible for startup diagnostics.
+    (void)wifi_ok;
+    (void)ble_ok;
+    (void)n2k_ok;
 }
