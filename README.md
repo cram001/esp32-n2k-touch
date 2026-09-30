@@ -2,6 +2,11 @@
 
 Marine touchscreen instrument for the Waveshare **ESP32-S3-Touch-LCD-4**.
 
+## 3D printed enclosure
+
+Wall mounted case 3D printed:  https://cults3d.com/en/3d-model/home/flush-mount-wall-case-for-waveshare-esp32-s3-touch-lcd-4-instrument-display
+
+
 ## Functions
 
 - Receive NMEA 2000 over the onboard CAN/TWAI interface.
