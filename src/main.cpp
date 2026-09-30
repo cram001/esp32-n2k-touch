@@ -8,11 +8,15 @@
 #include "bsp/esp-bsp.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_app_desc.h"
+#include "esp_ota_ops.h"
 #include "esp_rom_sys.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 namespace {
+static_assert(CONFIG_ESP_MAIN_TASK_STACK_SIZE >= 8192,
+              "Startup requires 8192 bytes of stack; regenerate sdkconfig before building");
 constexpr const char *TAG = "app";
 constexpr gpio_num_t BOARD_I2C_SDA = GPIO_NUM_15;
 constexpr gpio_num_t BOARD_I2C_SCL = GPIO_NUM_7;
@@ -69,6 +73,16 @@ bool board_i2c_recover()
 extern "C" void app_main(void)
 {
     ESP_LOGI(TAG, "Starting esp32-n2k-touch");
+    const esp_app_desc_t *app = esp_app_get_description();
+    ESP_LOGI(TAG, "Firmware %s; built %s %s", app->version, app->date, app->time);
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    esp_ota_img_states_t image_state{};
+    const esp_err_t state_error = esp_ota_get_state_partition(running, &image_state);
+    ESP_LOGI(TAG, "Boot slot %s; OTA state %d (query: %s)", running ? running->label : "unknown",
+             state_error == ESP_OK ? static_cast<int>(image_state) : -1, esp_err_to_name(state_error));
+    if (state_error != ESP_OK || image_state == ESP_OTA_IMG_UNDEFINED) {
+        ESP_LOGW(TAG, "Boot is not an OTA trial; USB flashing does not establish automatic rollback");
+    }
 
     const bool settings_ok = settings_init();
     if (!settings_ok) {
@@ -97,6 +111,7 @@ extern "C" void app_main(void)
     ui_start(settings);
     bsp_display_unlock();
     ESP_LOGI(TAG, "Display and touch UI initialized");
+    ESP_LOGI(TAG, "Main stack minimum free after settings/UI: %u bytes", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
 
     const bool wifi_ok = wifi_service_start(settings.wifi);
     if (!wifi_ok) ESP_LOGE(TAG, "Wi-Fi service failed to initialize");
@@ -110,6 +125,7 @@ extern "C" void app_main(void)
 
     const bool ota_ok = wifi_ok && ota_start_local_server();
     if (!ota_ok) ESP_LOGE(TAG, "OTA server or partition validation failed");
+    ESP_LOGI(TAG, "Main stack minimum free after services: %u bytes", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
 
     // Confirm only after local services initialize. Router availability is not
     // a health requirement; Wi-Fi initialization itself must succeed.

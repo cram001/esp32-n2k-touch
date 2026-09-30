@@ -34,6 +34,8 @@ jobs:
         run: |
           g++ -std=c++17 -Wall -Wextra -I tests/host -I src src/app_settings.cpp src/wifi_config.cpp tests/host/settings_test.cpp -o /tmp/settings_test
           /tmp/settings_test
+          g++ -std=c++17 -Wall -Wextra -I tests/host/wifi -I tests/host -I src src/wifi_config.cpp tests/host/wifi_service_test.cpp -o /tmp/wifi_service_test
+          /tmp/wifi_service_test
 
       - name: Build firmware
         shell: bash

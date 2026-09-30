@@ -12,6 +12,8 @@ CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
 CONFIG_FREERTOS_HZ=1000
+# Startup loads/migrates NVS and initializes display, radio and OTA services.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 
 # BLE-only use through the ESP-IDF Bluedroid GAP scanner.
 CONFIG_BT_ENABLED=y

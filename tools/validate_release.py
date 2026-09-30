@@ -2,11 +2,17 @@
 from pathlib import Path
 import argparse
 import hashlib
+import re
 import struct
 import unittest
 
 FLASH_SIZE = 0x1000000
 SLOT_SIZE = 0x600000
+
+def validate_startup_stack(config):
+    stack = re.search(r'^#define CONFIG_ESP_MAIN_TASK_STACK_SIZE (\d+)$', config, re.M)
+    if not stack or int(stack.group(1)) < 8192:
+        raise ValueError("Startup stack below 8192 bytes; clean/reconfigure before flashing")
 
 def validate_partitions(data):
     partitions = {}
@@ -80,7 +86,10 @@ def validate_image(data, expected_project='esp32_n2k_touch'):
     hash_position = checksum_position + 1
     if len(data) != hash_position + 32 or hashlib.sha256(data[:hash_position]).digest() != data[hash_position:]:
         raise ValueError("Image SHA-256 mismatch")
-    return {'project': project, 'version': version, 'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
+    build_time = data[112:128].split(b'\0', 1)[0].decode('ascii')
+    build_date = data[128:144].split(b'\0', 1)[0].decode('ascii')
+    return {'project': project, 'version': version, 'build_date': build_date, 'build_time': build_time,
+            'bytes': len(data), 'sha256': hashlib.sha256(data).hexdigest()}
 
 def validate_build(build):
     build = Path(build)
@@ -88,6 +97,7 @@ def validate_build(build):
     for config in ('config/sdkconfig.h', 'bootloader/config/sdkconfig.h'):
         if '#define CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE 1' not in (build / config).read_text():
             raise ValueError(f"Rollback missing from generated {config}")
+    validate_startup_stack((build / 'config/sdkconfig.h').read_text())
     return validate_image((build / 'firmware.bin').read_bytes())
 
 class ArtifactNegativeTests(unittest.TestCase):
@@ -114,6 +124,12 @@ class ArtifactNegativeTests(unittest.TestCase):
     def test_partition_corruption(self):
         corrupted = bytearray(self.table); corrupted[8] ^= 1
         with self.assertRaises(ValueError): validate_partitions(corrupted)
+    def test_stale_startup_stack(self):
+        with self.assertRaises(ValueError):
+            validate_startup_stack('#define CONFIG_ESP_MAIN_TASK_STACK_SIZE 3584\n')
+        validate_startup_stack('#define CONFIG_ESP_MAIN_TASK_STACK_SIZE 8192\n')
+    def test_missing_startup_stack(self):
+        with self.assertRaises(ValueError): validate_startup_stack('')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)

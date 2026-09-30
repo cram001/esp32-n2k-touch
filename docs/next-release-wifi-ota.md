@@ -46,6 +46,39 @@ The artifact validator checks generated partition-table integrity and layout, ro
 
 ## Bench acceptance still required
 
+### Boot troubleshooting and USB recovery
+
+The startup screen displays the ESP application version (Git commit identifier) and
+build date/time for five seconds. Settings retains the same information. The time
+is the build machine's timestamp, not the current clock or an assumed UTC time.
+Serial output records that identity, the running OTA slot/state and the minimum
+remaining main-task stack after settings/UI and service initialization.
+
+Startup now uses an 8192-byte main-task stack in both the defaults and the checked-in
+PlatformIO configuration. A compile-time guard and artifact validation reject a
+stale smaller configuration. UI initialization takes settings by reference.
+
+**USB upload is installation/recovery, not a rollback-safe update.** The generated
+flashing plan writes the application at `0x20000` (`ota_0`) and initializes
+`otadata` at `0xf000`. It can overwrite the previous working image and reset the
+OTA trial state. Merely having two slots and rollback enabled does not retain a
+backup. After a known working USB installation, use HTTPS or local upload OTA to
+write the inactive slot and mark it as a trial. Automatic rollback then requires
+a bootable previous image and a rollback-enabled bootloader. If a USB-installed
+app boot-loops, recover through USB; do not erase NVS just to recover the app.
+
+The September 30 boot log reports a main-task stack overflow before display
+initialization. The Wi-Fi switching-flag defect is separate: migrated protected
+credentials now leave the service ready to accept an explicit scan, and failed
+stop/configure/start operations also release the switching flag.
+
+`tests/host/wifi_service_test.cpp` exercises the actual Wi-Fi service with SDK
+boundary doubles: credential-required startup, explicit scan acceptance and
+completion, stop/mode/config/start failure recovery, start-event gating, OTA
+exclusion and queue-full recovery. It does not simulate radio behavior or task
+concurrency. CI runs this alongside the NVS migration tests. Artifact tests also
+reject missing or stale startup stack configurations.
+
 1. Start on the bench with the existing N2K/CAN wiring and SmartShunt settings. Verify boot, inverted orientation and touch in all four corners, Wi-Fi keyboard, network picker, scroll areas and password toggle.
 2. Upgrade from schema 2 without erasing NVS. Confirm the old SSID remains, the protected-network password prompt appears, and pages/units/brightness/SmartShunt keys and bridge settings survive. Enter the password once, save, power-cycle, and verify automatic reconnection.
 3. Test a normal 2.4 GHz WPA2 network, an open network, a hidden SSID, wrong password and an unavailable SSID. Check the displayed numeric reason and error text. Power-cycle the router and confirm reconnect with backoff.
