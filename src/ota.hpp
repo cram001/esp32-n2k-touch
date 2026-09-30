@@ -21,7 +21,11 @@ struct OtaStatus {
 
 // Call once during boot. If the bootloader marked this image pending verification,
 // this confirms it as healthy and prevents automatic rollback.
+void ota_prepare();
 void ota_confirm_running_image();
+void ota_reject_running_image();
+bool ota_partition_layout_valid();
+bool ota_start_local_server();
 
 // Starts an HTTPS OTA update in a background FreeRTOS task.
 // Requires an already-working network connection. Returns false if an update is
@@ -30,3 +34,8 @@ bool ota_start_https(const char *url);
 
 OtaStatus ota_get_status();
 const char *ota_running_version();
+
+// Serialize network reconfiguration with the two OTA transports.
+bool ota_update_in_progress();
+bool ota_begin_network_change();
+void ota_end_network_change();

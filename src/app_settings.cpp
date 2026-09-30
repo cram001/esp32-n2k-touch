@@ -17,10 +17,11 @@ constexpr const char *KEY_DAY_BRIGHTNESS = "day_br";
 constexpr const char *KEY_NIGHT_BRIGHTNESS = "night_br";
 constexpr const char *KEY_SHUNTS = "shunts_v2";
 constexpr const char *KEY_DISPLAY = "display_v1";
-constexpr const char *KEY_WIFI = "wifi_v1";
+constexpr const char *KEY_WIFI = "wifi_v3";
+constexpr const char *KEY_WIFI_LEGACY = "wifi_v1";
 constexpr uint32_t SHUNTS_SCHEMA = 2;
 constexpr uint32_t DISPLAY_SCHEMA = 1;
-constexpr uint32_t WIFI_SCHEMA = 2;
+constexpr uint32_t WIFI_SCHEMA = 3;
 
 struct PersistedSmartShunts {
     uint32_t schema = SHUNTS_SCHEMA;
@@ -33,8 +34,8 @@ struct PersistedDisplayConfig {
     std::array<DataPageConfig, MAX_DATA_PAGES> pages{};
 };
 
-struct PersistedWifiConfig {
-    uint32_t schema = WIFI_SCHEMA;
+struct LegacyWifiConfig {
+    uint32_t schema = 2;
     bool enabled = false;
     bool open_network = false;
     std::array<char, 33> ssid{};
@@ -45,7 +46,19 @@ static_assert(sizeof(PersistedSmartShunts) == 324, "PersistedSmartShunts ABI cha
 static_assert(sizeof(UnitsSettings) == 12, "UnitsSettings ABI changed; bump DISPLAY_SCHEMA and migrate");
 static_assert(sizeof(DataPageConfig) == 37, "DataPageConfig ABI changed; bump DISPLAY_SCHEMA and migrate");
 static_assert(sizeof(PersistedDisplayConfig) == 240, "PersistedDisplayConfig ABI changed; bump DISPLAY_SCHEMA and migrate");
-static_assert(sizeof(PersistedWifiConfig) == 40, "PersistedWifiConfig ABI changed; bump WIFI_SCHEMA and migrate");
+static_assert(sizeof(LegacyWifiConfig) == 40, "Legacy Wi-Fi ABI changed");
+struct PersistedWifiConfig {
+    uint32_t schema = WIFI_SCHEMA;
+    uint8_t enabled = 0;
+    uint8_t open_network = 0;
+    uint8_t mode = 0;
+    uint8_t reserved = 0;
+    std::array<char, 33> ssid{};
+    std::array<char, 65> password{};
+    std::array<char, 33> ap_ssid{};
+    std::array<char, 65> ap_password{};
+};
+static_assert(sizeof(PersistedWifiConfig) == 204, "Wi-Fi v3 ABI changed");
 
 uint8_t clamp_brightness(uint8_t value)
 {
@@ -154,18 +167,42 @@ AppSettings settings_load()
     }
     PersistedWifiConfig persisted_wifi{};
     size = sizeof(persisted_wifi);
-    if (nvs_get_blob(handle, KEY_WIFI, &persisted_wifi, &size) == ESP_OK &&
-        size == sizeof(persisted_wifi) && persisted_wifi.schema == WIFI_SCHEMA) {
+    const esp_err_t wifi_read = nvs_get_blob(handle, KEY_WIFI, &persisted_wifi, &size);
+    const bool wifi_v3 = wifi_read == ESP_OK && size == sizeof(persisted_wifi) && persisted_wifi.schema == WIFI_SCHEMA;
+    bool migrate_wifi = false;
+    if (wifi_v3) {
         settings.wifi.enabled = persisted_wifi.enabled;
         settings.wifi.open_network = persisted_wifi.open_network;
         settings.wifi.ssid = persisted_wifi.ssid;
         settings.wifi.ssid.back() = '\0';
-        settings.wifi.password.fill('\0');
+        settings.wifi.password = persisted_wifi.password;
+        settings.wifi.password.back() = '\0';
+        settings.wifi.mode = persisted_wifi.mode == 1 ? WifiMode::AccessPoint : WifiMode::Station;
+        settings.wifi.ap_ssid = persisted_wifi.ap_ssid;
+        settings.wifi.ap_password = persisted_wifi.ap_password;
+        settings.wifi.ap_ssid.back() = '\0';
+        settings.wifi.ap_password.back() = '\0';
+    } else {
+        // Older firmware did not store passwords. Preserve SSID and require
+        // re-entry for protected networks; never reinterpret them as open.
+        LegacyWifiConfig legacy{};
+        size = sizeof(legacy);
+        if (nvs_get_blob(handle, KEY_WIFI_LEGACY, &legacy, &size) == ESP_OK &&
+            size == sizeof(legacy) && legacy.schema == 2) {
+            migrate_wifi = wifi_read == ESP_ERR_NVS_NOT_FOUND;
+            settings.wifi.enabled = legacy.enabled;
+            settings.wifi.open_network = legacy.open_network;
+            settings.wifi.ssid = legacy.ssid;
+            settings.wifi.ssid.back() = '\0';
+        }
     }
 
     sanitize_display_settings(settings);
 
     nvs_close(handle);
+    if (migrate_wifi) {
+        if (!settings_save(settings)) ESP_LOGW(TAG, "Wi-Fi migration will retry next boot");
+    }
     return settings;
 }
 
@@ -190,6 +227,13 @@ bool settings_save(const AppSettings &settings)
     persisted_wifi.open_network = settings.wifi.open_network;
     persisted_wifi.ssid = settings.wifi.ssid;
     persisted_wifi.ssid.back() = '\0';
+    persisted_wifi.password = settings.wifi.password;
+    persisted_wifi.password.back() = '\0';
+    persisted_wifi.mode = static_cast<uint8_t>(settings.wifi.mode);
+    persisted_wifi.ap_ssid = settings.wifi.ap_ssid;
+    persisted_wifi.ap_ssid.back() = '\0';
+    persisted_wifi.ap_password = settings.wifi.ap_password;
+    persisted_wifi.ap_password.back() = '\0';
 
     err = nvs_set_u8(handle, KEY_THEME, static_cast<uint8_t>(settings.theme));
     if (err == ESP_OK) err = nvs_set_u8(handle, KEY_DAY_BRIGHTNESS, clamp_brightness(settings.day_brightness));

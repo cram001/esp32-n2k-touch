@@ -1,319 +1,311 @@
 #include "wifi_service.hpp"
-
+#include "ota.hpp"
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstring>
-
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
+#include "esp_netif_sntp.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 
 namespace {
 constexpr const char *TAG = "wifi";
-constexpr int MAX_BACKOFF_EXPONENT = 5;
-constexpr int64_t MAX_RECONNECT_DELAY_US = 30000000;
-
 SemaphoreHandle_t g_mutex = nullptr;
-WifiStatus g_status{};
+QueueHandle_t g_commands = nullptr;
 WifiConfig g_config{};
-esp_netif_t *g_sta_netif = nullptr;
-esp_event_handler_instance_t g_wifi_handler = nullptr;
-esp_event_handler_instance_t g_ip_handler = nullptr;
-esp_timer_handle_t g_reconnect_timer = nullptr;
-bool g_initialized = false;
-int g_retry_count = 0;
+WifiStatus g_status{};
+WifiScanResults g_scan{};
+esp_netif_t *g_ap_netif = nullptr;
+std::atomic<bool> g_switching{false};
+std::atomic<bool> g_scanning{false};
+std::atomic<bool> g_reconnect{false};
+std::atomic<bool> g_initialized{false};
+std::atomic<bool> g_scan_finished{false};
+std::atomic<int> g_scan_error{0};
+int64_t g_next_retry = 0;
+unsigned g_retry_count = 0; // Owned exclusively by worker.
+bool g_started = false; // Owned exclusively by worker after initialization.
+enum class CommandType { Apply, Scan };
+struct Command { CommandType type; WifiConfig config; };
 
-bool ensure_mutex()
-{
-    if (g_mutex == nullptr) g_mutex = xSemaphoreCreateMutex();
-    return g_mutex != nullptr;
+WifiConfig snapshot() {
+    xSemaphoreTake(g_mutex, portMAX_DELAY);
+    auto result = g_config;
+    xSemaphoreGive(g_mutex);
+    return result;
 }
-
-WifiConfig config_snapshot()
-{
-    WifiConfig copy{};
-    if (!ensure_mutex()) return copy;
-    if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-        copy = g_config;
-        xSemaphoreGive(g_mutex);
+void state(WifiState value, esp_err_t error = ESP_OK, const char *message = "") {
+    xSemaphoreTake(g_mutex, portMAX_DELAY);
+    g_status.state = value;
+    g_status.last_error = error;
+    std::snprintf(g_status.message.data(), g_status.message.size(), "%s", message);
+    if (value != WifiState::Connected && value != WifiState::AccessPoint) {
+        g_status.ip.fill(0); g_status.rssi = 0;
     }
-    return copy;
+    xSemaphoreGive(g_mutex);
 }
-
-void store_config(const WifiConfig &config)
-{
-    if (!ensure_mutex()) return;
-    if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-        g_config = config;
-        std::snprintf(g_status.ssid.data(), g_status.ssid.size(), "%s", config.ssid.data());
-        xSemaphoreGive(g_mutex);
-    }
-}
-
-void set_state(WifiState state)
-{
-    if (!ensure_mutex()) return;
-    if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-        g_status.state = state;
-        xSemaphoreGive(g_mutex);
-    }
-}
-
-void clear_link_details()
-{
-    if (!ensure_mutex()) return;
-    if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-        g_status.rssi = 0;
-        g_status.ip[0] = '\0';
-        xSemaphoreGive(g_mutex);
+const char *disconnect_text(uint8_t reason) {
+    switch (reason) {
+    case WIFI_REASON_NO_AP_FOUND: return "SSID not found (2.4 GHz only)";
+    case WIFI_REASON_AUTH_FAIL: return "Authentication failed; check password";
+    case WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT:
+    case WIFI_REASON_HANDSHAKE_TIMEOUT: return "Security handshake timed out; check password";
+    case WIFI_REASON_BEACON_TIMEOUT: return "Router signal lost";
+    case WIFI_REASON_ASSOC_FAIL: return "Router rejected association";
+    case WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY: return "Router security incompatible";
+    case WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD: return "Router below WPA2 security threshold";
+    default: return "Disconnected; retrying";
     }
 }
-
-bool same_config(const WifiConfig &a, const WifiConfig &b)
-{
-    return a.enabled == b.enabled &&
-           a.open_network == b.open_network &&
-           a.ssid == b.ssid &&
-           a.password == b.password;
-}
-
-bool credentials_available(const WifiConfig &config)
-{
-    if (!config.enabled || config.ssid[0] == '\0') return false;
-    return config.open_network || config.password[0] != '\0';
-}
-
-void reconnect_timer_cb(void *)
-{
-    const WifiConfig config = config_snapshot();
-    if (!credentials_available(config)) return;
-    set_state(WifiState::Connecting);
+void connect() {
+    const auto config = snapshot();
+    if (!config.enabled || config.mode != WifiMode::Station || g_scanning) return;
+    const char *reason = nullptr;
+    if (!wifi_config_valid(config, &reason)) { state(WifiState::CredentialsRequired, ESP_ERR_INVALID_ARG, reason); return; }
+    state(WifiState::Connecting);
     const esp_err_t err = esp_wifi_connect();
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Reconnect attempt failed to start: %s", esp_err_to_name(err));
+        state(WifiState::Error, err, esp_err_to_name(err));
+        g_reconnect = true;
     }
 }
-
-void schedule_reconnect()
-{
-    if (g_reconnect_timer == nullptr) return;
-    const int exponent = std::min(g_retry_count, MAX_BACKOFF_EXPONENT);
-    const int64_t delay_us = std::min<int64_t>(1000000LL << exponent, MAX_RECONNECT_DELAY_US);
-    ++g_retry_count;
-    esp_timer_stop(g_reconnect_timer);
-    const esp_err_t err = esp_timer_start_once(g_reconnect_timer, delay_us);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Could not schedule Wi-Fi reconnect: %s", esp_err_to_name(err));
-    }
-}
-
-bool configure_station(const WifiConfig &config)
-{
-    wifi_config_t wifi_config{};
-    const size_t ssid_len = strnlen(config.ssid.data(), config.ssid.size() - 1);
-    const size_t pass_len = strnlen(config.password.data(), config.password.size() - 1);
-
-    std::memcpy(wifi_config.sta.ssid, config.ssid.data(),
-                std::min(ssid_len, sizeof(wifi_config.sta.ssid)));
-    if (!config.open_network) {
-        std::memcpy(wifi_config.sta.password, config.password.data(),
-                    std::min(pass_len, sizeof(wifi_config.sta.password)));
-    }
-
-    wifi_config.sta.threshold.authmode = config.open_network ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_WPA3_PSK;
-    wifi_config.sta.pmf_cfg.capable = true;
-    wifi_config.sta.pmf_cfg.required = false;
-
-    esp_err_t err = esp_wifi_set_storage(WIFI_STORAGE_RAM);
-    if (err != ESP_OK) return false;
-    err = esp_wifi_set_mode(WIFI_MODE_STA);
-    if (err != ESP_OK) return false;
-    err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
-    return err == ESP_OK;
-}
-
-void event_handler(void *, esp_event_base_t event_base, int32_t event_id, void *event_data)
-{
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        const WifiConfig config = config_snapshot();
-        if (!config.enabled || config.ssid[0] == '\0') {
-            set_state(WifiState::Disabled);
-        } else if (!credentials_available(config)) {
-            set_state(WifiState::CredentialsRequired);
-        } else {
-            set_state(WifiState::Connecting);
-            const esp_err_t err = esp_wifi_connect();
-            if (err != ESP_OK) {
-                ESP_LOGW(TAG, "Initial Wi-Fi connect failed to start: %s", esp_err_to_name(err));
-            }
-        }
-        return;
-    }
-
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        clear_link_details();
-        const WifiConfig config = config_snapshot();
-        if (!config.enabled || config.ssid[0] == '\0') {
-            set_state(WifiState::Disabled);
-        } else if (!credentials_available(config)) {
-            set_state(WifiState::CredentialsRequired);
-        } else {
-            set_state(WifiState::Disconnected);
-            schedule_reconnect();
-        }
-        return;
-    }
-
-    if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        const auto *event = static_cast<ip_event_got_ip_t *>(event_data);
-        char ip[16]{};
-        std::snprintf(ip, sizeof(ip), IPSTR, IP2STR(&event->ip_info.ip));
-
-        wifi_ap_record_t ap{};
-        int8_t rssi = 0;
-        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) rssi = ap.rssi;
-
-        const WifiConfig config = config_snapshot();
-        if (ensure_mutex() && xSemaphoreTake(g_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-            g_status.state = WifiState::Connected;
-            g_status.rssi = rssi;
-            std::snprintf(g_status.ip.data(), g_status.ip.size(), "%s", ip);
+void event(void *, esp_event_base_t base, int32_t id, void *data) {
+    if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
+        const auto config=snapshot();
+        if (config.enabled && config.mode != WifiMode::Station) return;
+        g_switching = false;
+        if (snapshot().enabled) connect();
+        else state(WifiState::Disabled);
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_AP_START) {
+        const auto config=snapshot();
+        if (!config.enabled || config.mode != WifiMode::AccessPoint) return;
+        g_switching = false;
+        esp_netif_ip_info_t ip{};
+        if (esp_netif_get_ip_info(g_ap_netif, &ip) == ESP_OK) {
+            state(WifiState::AccessPoint);
+            xSemaphoreTake(g_mutex, portMAX_DELAY);
+            std::snprintf(g_status.ip.data(), g_status.ip.size(), IPSTR, IP2STR(&ip.ip));
             xSemaphoreGive(g_mutex);
+        } else state(WifiState::Error, ESP_FAIL, "AP IP unavailable");
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_CONNECTED) {
+        const auto config=snapshot();
+        if (!g_switching && config.enabled && config.mode == WifiMode::Station)
+            state(WifiState::Connecting,ESP_OK,"Associated; waiting for DHCP address");
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
+        if (g_switching || !snapshot().enabled || snapshot().mode != WifiMode::Station) return;
+        auto *disconnected = static_cast<wifi_event_sta_disconnected_t *>(data);
+        state(WifiState::Disconnected, ESP_OK, disconnect_text(disconnected->reason));
+        xSemaphoreTake(g_mutex, portMAX_DELAY);
+        g_status.disconnect_reason = disconnected->reason;
+        xSemaphoreGive(g_mutex);
+        ESP_LOGW(TAG, "Disconnected: reason %u (%s)", disconnected->reason, disconnect_text(disconnected->reason));
+        g_reconnect = true;
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) {
+        if (!g_scanning) { esp_wifi_clear_ap_list(); return; }
+        g_scan_error = static_cast<wifi_event_sta_scan_done_t *>(data)->status;
+        g_scan_finished = true;
+    } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
+        if (g_switching || !snapshot().enabled || snapshot().mode != WifiMode::Station) return;
+        auto *got = static_cast<ip_event_got_ip_t *>(data);
+        wifi_ap_record_t ap{};
+        esp_wifi_sta_get_ap_info(&ap);
+        xSemaphoreTake(g_mutex, portMAX_DELAY);
+        g_status.state = WifiState::Connected;
+        g_status.rssi = ap.rssi;
+        g_status.disconnect_reason = 0;
+        g_status.last_error = 0;
+        g_status.message.fill(0);
+        std::snprintf(g_status.ip.data(), g_status.ip.size(), IPSTR, IP2STR(&got->ip_info.ip));
+        xSemaphoreGive(g_mutex);
+        g_reconnect = false;
+        const esp_err_t sync = esp_netif_sntp_start();
+        if (sync != ESP_OK) ESP_LOGW(TAG,"Could not start clock sync: %s",esp_err_to_name(sync));
+    }
+}
+// Process AP records on the worker's stack, not the smaller event-loop stack.
+void complete_scan() {
+    if (!g_scanning) return;
+    wifi_ap_record_t records[MAX_WIFI_NETWORKS]{};
+    uint16_t count = MAX_WIFI_NETWORKS;
+    esp_err_t err = g_scan_error.load() == 0 ? esp_wifi_scan_get_ap_records(&count, records) : ESP_FAIL;
+    if (err != ESP_OK) esp_wifi_clear_ap_list();
+    xSemaphoreTake(g_mutex, portMAX_DELAY);
+    g_scan.count = 0;
+    g_scan.last_error = err;
+    g_scan.state = err == ESP_OK ? WifiScanState::Complete : WifiScanState::Failed;
+    if (err == ESP_OK) for (uint16_t i = 0; i < count; ++i) {
+        if (!records[i].ssid[0]) continue; // Hidden SSIDs use manual entry.
+        bool duplicate = false;
+        for (size_t j=0; j<g_scan.count; ++j)
+            duplicate |= std::strcmp(g_scan.networks[j].ssid.data(), reinterpret_cast<char *>(records[i].ssid)) == 0;
+        if (duplicate) continue;
+        auto &network = g_scan.networks[g_scan.count++];
+        std::memcpy(network.ssid.data(), records[i].ssid, 32);
+        network.ssid.back() = 0;
+        network.rssi = records[i].rssi;
+        network.open = records[i].authmode == WIFI_AUTH_OPEN;
+    }
+    ++g_scan.generation;
+    xSemaphoreGive(g_mutex);
+    g_scanning = false;
+    if (snapshot().enabled && wifi_service_get_status().state != WifiState::Connected) g_reconnect = true;
+}
+bool configure(const WifiConfig &config) {
+    if (!ota_begin_network_change()) return false;
+    struct Guard { ~Guard() { ota_end_network_change(); } } guard;
+    g_switching = true;
+    g_reconnect = false;
+    if (g_scanning.exchange(false)) esp_wifi_scan_stop();
+    xSemaphoreTake(g_mutex, portMAX_DELAY);
+    if (g_scan.state == WifiScanState::Scanning) {
+        g_scan.state = WifiScanState::Failed; g_scan.last_error = ESP_ERR_INVALID_STATE; ++g_scan.generation;
+    }
+    xSemaphoreGive(g_mutex);
+    if (g_started) {
+        const esp_err_t err = esp_wifi_stop();
+        if (err != ESP_OK) { state(WifiState::Error, err, esp_err_to_name(err)); return false; }
+        g_started = false;
+    }
+    xSemaphoreTake(g_mutex, portMAX_DELAY);
+    g_config = config;
+    g_status = WifiStatus{};
+    g_status.ssid = config.mode == WifiMode::AccessPoint ? config.ap_ssid : config.ssid;
+    xSemaphoreGive(g_mutex);
+    g_retry_count = 0;
+    g_next_retry = 0;
+    const char *reason = nullptr;
+    if (!wifi_config_valid(config, &reason)) {
+        state(WifiState::CredentialsRequired, ESP_ERR_INVALID_ARG, reason);
+        return true; // Invalid user configuration is not a service init failure.
+    }
+    const bool ap = config.enabled && config.mode == WifiMode::AccessPoint;
+    esp_err_t err = esp_wifi_set_mode(ap ? WIFI_MODE_AP : WIFI_MODE_STA);
+    if (err == ESP_OK && ap) {
+        wifi_config_t cfg{};
+        std::memcpy(cfg.ap.ssid, config.ap_ssid.data(), strnlen(config.ap_ssid.data(),32));
+        cfg.ap.ssid_len = strnlen(config.ap_ssid.data(),32);
+        std::memcpy(cfg.ap.password, config.ap_password.data(), strnlen(config.ap_password.data(),64));
+        cfg.ap.channel = 1; cfg.ap.max_connection = 2; cfg.ap.authmode = WIFI_AUTH_WPA2_PSK;
+        err = esp_wifi_set_config(WIFI_IF_AP, &cfg);
+    } else if (err == ESP_OK) {
+        wifi_config_t cfg{};
+        std::memcpy(cfg.sta.ssid, config.ssid.data(), strnlen(config.ssid.data(),32));
+        if (!config.open_network) std::memcpy(cfg.sta.password, config.password.data(), strnlen(config.password.data(),64));
+        cfg.sta.threshold.authmode = config.open_network ? WIFI_AUTH_OPEN : WIFI_AUTH_WPA2_PSK;
+        cfg.sta.pmf_cfg.capable = true; cfg.sta.pmf_cfg.required = false;
+        err = esp_wifi_set_config(WIFI_IF_STA, &cfg);
+    }
+    if (err == ESP_OK) err = esp_wifi_start();
+    if (err != ESP_OK) { state(WifiState::Error, err, esp_err_to_name(err)); return false; }
+    g_started = true;
+    return true;
+}
+void scan() {
+    const auto config = snapshot();
+    // AP-only mode cannot scan. A disabled station may perform a one-shot scan.
+    esp_err_t err = config.enabled && config.mode == WifiMode::AccessPoint ? ESP_ERR_INVALID_STATE : ESP_OK;
+    if (err == ESP_OK && !g_started) {
+        // Start a station for this explicit scan without changing saved/runtime
+        // intent (including an enabled station awaiting credentials).
+        err = esp_wifi_set_mode(WIFI_MODE_STA);
+        if (err == ESP_OK) err = esp_wifi_start();
+        if (err == ESP_OK) g_started = true;
+    }
+    wifi_scan_config_t cfg{};
+    cfg.show_hidden = false;
+    cfg.scan_type = WIFI_SCAN_TYPE_ACTIVE;
+    cfg.scan_time.active.min = 30; cfg.scan_time.active.max = 80;
+    if (err == ESP_OK) { g_scanning = true; err = esp_wifi_scan_start(&cfg, false); }
+    if (err != ESP_OK) {
+        xSemaphoreTake(g_mutex, portMAX_DELAY);
+        g_scan.state = WifiScanState::Failed; g_scan.last_error = err; ++g_scan.generation;
+        xSemaphoreGive(g_mutex);
+        g_scanning = false;
+    }
+}
+void worker(void *) {
+    for (;;) {
+        Command command{};
+        if (xQueueReceive(g_commands, &command, pdMS_TO_TICKS(100)) == pdTRUE) {
+            if (command.type == CommandType::Apply) configure(command.config);
+            else scan();
         }
-
-        g_retry_count = 0;
-        ESP_LOGI(TAG, "Connected to %s, IP %s, RSSI %d dBm", config.ssid.data(), ip, rssi);
+        if (g_scan_finished.exchange(false)) complete_scan();
+        const auto st = wifi_service_get_status();
+        if (st.state == WifiState::Connected) { g_retry_count = 0; g_next_retry = 0; }
+        const int64_t now = esp_timer_get_time();
+        if (g_reconnect && !g_scanning && !g_switching) {
+            if (!g_next_retry) g_next_retry = now + std::min<int64_t>(1000000LL << std::min(g_retry_count++,5U),30000000LL);
+            if (now >= g_next_retry) { g_reconnect = false; g_next_retry = 0; connect(); }
+        }
     }
 }
 } // namespace
 
-bool wifi_service_start(const WifiConfig &config)
-{
-    if (g_initialized) {
-        wifi_service_apply_config(config);
-        return true;
-    }
-
-    if (!ensure_mutex()) return false;
-    store_config(config);
-
+bool wifi_service_start(const WifiConfig &config) {
+    if (g_initialized) return wifi_service_apply_config(config);
+    if (!wifi_service_prepare()) return false;
     esp_err_t err = esp_netif_init();
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        ESP_LOGE(TAG, "esp_netif_init failed: %s", esp_err_to_name(err));
-        set_state(WifiState::Error);
-        return false;
-    }
-
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return false;
     err = esp_event_loop_create_default();
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        ESP_LOGE(TAG, "event loop init failed: %s", esp_err_to_name(err));
-        set_state(WifiState::Error);
-        return false;
-    }
-
-    g_sta_netif = esp_netif_create_default_wifi_sta();
-    if (g_sta_netif == nullptr) {
-        ESP_LOGE(TAG, "Failed to create Wi-Fi station interface");
-        set_state(WifiState::Error);
-        return false;
-    }
-
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return false;
+    if (!esp_netif_create_default_wifi_sta()) return false;
+    g_ap_netif = esp_netif_create_default_wifi_ap();
+    if (!g_ap_netif) return false;
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
-    err = esp_wifi_init(&init);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "esp_wifi_init failed: %s", esp_err_to_name(err));
-        set_state(WifiState::Error);
-        return false;
-    }
-
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(
-        WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, nullptr, &g_wifi_handler));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(
-        IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, nullptr, &g_ip_handler));
-
-    esp_timer_create_args_t timer_args{};
-    timer_args.callback = reconnect_timer_cb;
-    timer_args.name = "wifi_reconnect";
-    ESP_ERROR_CHECK(esp_timer_create(&timer_args, &g_reconnect_timer));
-
-    if (!configure_station(config)) {
-        set_state(WifiState::Error);
-        return false;
-    }
-
-    err = esp_wifi_start();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "esp_wifi_start failed: %s", esp_err_to_name(err));
-        set_state(WifiState::Error);
-        return false;
-    }
-
+    if (esp_wifi_init(&init) != ESP_OK || esp_wifi_set_storage(WIFI_STORAGE_RAM) != ESP_OK) return false;
+    if (esp_event_handler_register(WIFI_EVENT,ESP_EVENT_ANY_ID,event,nullptr) != ESP_OK ||
+        esp_event_handler_register(IP_EVENT,IP_EVENT_STA_GOT_IP,event,nullptr) != ESP_OK) return false;
+    esp_sntp_config_t clock=ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+    clock.start=false;
+    if (esp_netif_sntp_init(&clock)!=ESP_OK) return false;
+    if (!configure(config)) return false;
+    if (xTaskCreate(worker,"wifi_worker",6144,nullptr,3,nullptr) != pdPASS) { vQueueDelete(g_commands); g_commands=nullptr; return false; }
     g_initialized = true;
-    if (!config.enabled || config.ssid[0] == '\0') {
-        set_state(WifiState::Disabled);
-    } else if (!credentials_available(config)) {
-        set_state(WifiState::CredentialsRequired);
-    } else {
-        set_state(WifiState::Connecting);
-    }
     return true;
 }
-
-void wifi_service_apply_config(const WifiConfig &config)
-{
-    if (!g_initialized) {
-        wifi_service_start(config);
-        return;
-    }
-
-    const WifiConfig previous = config_snapshot();
-    if (same_config(config, previous)) return;
-
-    store_config(config);
-    if (g_reconnect_timer != nullptr) esp_timer_stop(g_reconnect_timer);
-    esp_wifi_disconnect();
-    clear_link_details();
-    g_retry_count = 0;
-
-    if (!configure_station(config)) {
-        set_state(WifiState::Error);
-        return;
-    }
-
-    if (!config.enabled || config.ssid[0] == '\0') {
-        set_state(WifiState::Disabled);
-        return;
-    }
-
-    if (!credentials_available(config)) {
-        set_state(WifiState::CredentialsRequired);
-        return;
-    }
-
-    set_state(WifiState::Connecting);
-    const esp_err_t err = esp_wifi_connect();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "esp_wifi_connect failed: %s", esp_err_to_name(err));
-        set_state(WifiState::Error);
-    }
+bool wifi_service_apply_config(const WifiConfig &config) {
+    if (!g_initialized || ota_update_in_progress()) return false;
+    const auto current = snapshot();
+    if (current.enabled == config.enabled && current.mode == config.mode && current.open_network == config.open_network &&
+        current.ssid == config.ssid && current.password == config.password && current.ap_ssid == config.ap_ssid && current.ap_password == config.ap_password &&
+        wifi_service_get_status().state != WifiState::Error && wifi_service_get_status().state != WifiState::Disconnected) return true;
+    Command command{CommandType::Apply,config};
+    return xQueueSend(g_commands,&command,0) == pdTRUE;
 }
-
-WifiStatus wifi_service_get_status()
-{
-    WifiStatus copy{};
-    if (!ensure_mutex()) return copy;
-    if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-        copy = g_status;
-        xSemaphoreGive(g_mutex);
-    }
-    return copy;
+bool wifi_service_request_scan() {
+    if (!g_initialized || g_switching || ota_update_in_progress() || g_scanning.exchange(true)) return false;
+    xSemaphoreTake(g_mutex,portMAX_DELAY);
+    g_scan.state=WifiScanState::Scanning; g_scan.count=0; ++g_scan.generation;
+    xSemaphoreGive(g_mutex);
+    Command command{CommandType::Scan,{}};
+    if (xQueueSend(g_commands,&command,0) == pdTRUE) return true;
+    g_scanning = false;
+    xSemaphoreTake(g_mutex,portMAX_DELAY);
+    g_scan.state=WifiScanState::Failed; g_scan.last_error=ESP_ERR_NO_MEM; ++g_scan.generation;
+    xSemaphoreGive(g_mutex);
+    return false;
 }
-
-bool wifi_service_is_connected()
-{
-    return wifi_service_get_status().state == WifiState::Connected;
+WifiScanResults wifi_service_get_scan() {
+    if (!g_mutex) return {};
+    xSemaphoreTake(g_mutex,portMAX_DELAY); auto copy=g_scan; xSemaphoreGive(g_mutex); return copy;
 }
+WifiStatus wifi_service_get_status() {
+    if (!g_mutex) return {};
+    xSemaphoreTake(g_mutex,portMAX_DELAY); auto copy=g_status; xSemaphoreGive(g_mutex); return copy;
+}
+bool wifi_service_is_connected() { return wifi_service_get_status().state == WifiState::Connected; }
+
+bool wifi_service_prepare() {
+    if (!g_mutex) g_mutex=xSemaphoreCreateMutex();
+    if (!g_commands) g_commands=xQueueCreate(4,sizeof(Command));
+    return g_mutex && g_commands;
+}
+bool wifi_service_scan_active() {return g_scanning.load();}
