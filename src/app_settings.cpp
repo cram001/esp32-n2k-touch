@@ -287,3 +287,16 @@ bool settings_save(const AppSettings &settings)
     }
     return true;
 }
+
+bool settings_restore_brightness()
+{
+    nvs_handle_t handle;
+    esp_err_t err=nvs_open(NAMESPACE,NVS_READWRITE,&handle);
+    if(err!=ESP_OK)return false;
+    err=nvs_set_u8(handle,KEY_DAY_BRIGHTNESS,DEFAULT_DAY_BRIGHTNESS);
+    if(err==ESP_OK)err=nvs_set_u8(handle,KEY_NIGHT_BRIGHTNESS,DEFAULT_NIGHT_BRIGHTNESS);
+    if(err==ESP_OK)err=nvs_commit(handle);
+    nvs_close(handle);
+    if(err!=ESP_OK)ESP_LOGW(TAG,"Brightness recovery could not be saved: %s",esp_err_to_name(err));
+    return err==ESP_OK;
+}

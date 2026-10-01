@@ -7,6 +7,8 @@
 constexpr size_t MAX_SMARTSHUNTS = 4;
 constexpr size_t MAX_DATA_PAGES = 6;
 constexpr size_t MAX_DATA_FIELDS_PER_PAGE = 6;
+constexpr uint8_t DEFAULT_DAY_BRIGHTNESS = 80;
+constexpr uint8_t DEFAULT_NIGHT_BRIGHTNESS = 20;
 
 enum class DisplayTheme : uint8_t {
     Day = 0,
@@ -146,8 +148,8 @@ struct N2kInputConfig {
 
 struct AppSettings {
     DisplayTheme theme = DisplayTheme::Day;
-    uint8_t day_brightness = 80;
-    uint8_t night_brightness = 20;
+    uint8_t day_brightness = DEFAULT_DAY_BRIGHTNESS;
+    uint8_t night_brightness = DEFAULT_NIGHT_BRIGHTNESS;
     WifiConfig wifi{};
     UnitsSettings units{};
     N2kInputConfig n2k_input{};
@@ -158,3 +160,5 @@ struct AppSettings {
 bool settings_init();
 AppSettings settings_load();
 bool settings_save(const AppSettings &settings);
+// Recovery changes only the two brightness keys, preserving every other setting.
+bool settings_restore_brightness();
