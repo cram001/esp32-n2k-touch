@@ -23,7 +23,7 @@ PGNs fit within that limit; truncated instrument PGNs are rejected.
 
 The TCP client uses a dedicated worker, bounded queues and nonblocking sockets.
 It retries failed connections after five seconds, and reports silence after five
-seconds without bytes. Instrument values retain their existing five-second expiry.
+seconds without bytes. Instrument values expire at thirty seconds and show `--`.
 Only the selected input updates N2K instruments. Changing mode or endpoint clears
 cached N2K values and heading variation. Queued frames from previous settings are
 discarded. Gateway data is never retransmitted onto CAN. The existing SmartShunt
@@ -45,12 +45,10 @@ background; the boot text does not claim a BLE device is connected.
 
 ## Multiple instrument devices
 
-Within the chosen wired or wireless input, each metric currently displays its
-last received value. Two depth or wind devices can therefore alternate. Per-metric
-device selection is a subsequent increment: discover and track NMEA 2000 NAMEs,
-persist selected device identity, and show stale data when it stops reporting.
-Fallback to another device should be an explicit option rather than an automatic
-change. CAN addresses alone are unsuitable as persistent device identities.
+Within the chosen wired or wireless input, values now retain their selected source.
+Use the field device menu to select an identified device/instance; all GPS fields
+share one GPS selection. Automatic mode sticks to the first source and does not
+fall back or alternate. See [sources and depth setup](sources-instruments-depth.md).
 
 ## Bench acceptance
 

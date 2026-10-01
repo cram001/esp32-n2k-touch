@@ -13,6 +13,10 @@ struct InstrumentValue {
     HeadingReference heading_reference = HeadingReference::Unknown;
     bool variation_valid = false;
     double variation_radians = 0.0;
+    bool depth_offset_valid = false;
+    double depth_offset_m = 0.0;
+    uint8_t depth_reference = 0;
+    std::array<char, 33> text{};
 };
 
 // NMEA 2000 services publish canonical values here: metres, m/s, radians, kelvin.
@@ -20,10 +24,10 @@ void instrument_data_reset_nmea();
 void instrument_data_update_nmea(DataMetric metric, double value);
 void instrument_data_update_heading(double radians, HeadingReference reference);
 void instrument_data_update_variation(double radians);
-InstrumentValue instrument_data_get(const DataFieldSelection &selection);
+InstrumentValue instrument_data_get(const DataFieldSelection &selection, uint8_t field_id = 255);
 
 const char *instrument_metric_name(DataMetric metric);
-const char *instrument_source_name(const DataFieldSelection &selection, const AppSettings &settings);
+const char *instrument_source_name(const DataFieldSelection &selection, const AppSettings &settings, uint8_t field_id = 255);
 bool instrument_metric_supported(DataSourceType source, DataMetric metric);
 
 // Formats a value and unit independently so the UI can size them differently.

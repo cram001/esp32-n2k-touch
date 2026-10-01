@@ -36,8 +36,14 @@ jobs:
           /tmp/settings_test
           g++ -std=c++17 -Wall -Wextra -I tests/host/wifi -I tests/host -I src src/wifi_config.cpp tests/host/wifi_service_test.cpp -o /tmp/wifi_service_test
           /tmp/wifi_service_test
-          g++ -std=c++17 -Wall -Wextra -I tests/host/instrument -I src src/instrument_data.cpp tests/host/heading_test.cpp -o /tmp/heading_test
+          g++ -std=c++17 -Wall -Wextra -I tests/host/instrument -I tests/host -I src src/instrument_data.cpp src/n2k_sources.cpp tests/host/nvs_fake.cpp tests/host/heading_test.cpp -o /tmp/heading_test
           /tmp/heading_test
+          g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -I tests/host/instrument -I tests/host -I src tests/host/sources_test.cpp tests/host/nvs_fake.cpp -o /tmp/sources_test
+          /tmp/sources_test
+          g++ -std=c++17 -Wall -Wextra -I tests/host/instrument -I tests/host -I src src/instrument_data.cpp src/n2k_sources.cpp tests/host/nvs_fake.cpp tests/host/format_test.cpp -o /tmp/format_test
+          /tmp/format_test
+          g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -I src src/n2k_waypoints.cpp tests/host/waypoints_test.cpp -o /tmp/waypoints_test
+          /tmp/waypoints_test
           g++ -std=c++17 -Wall -Wextra -I src src/actisense_ascii.cpp tests/host/actisense_test.cpp -o /tmp/actisense_test
           /tmp/actisense_test
           g++ -std=c++17 -Wall -Wextra -I tests/host/gateway -I src src/n2k_input.cpp src/actisense_ascii.cpp tests/host/n2k_input_test.cpp -o /tmp/n2k_input_test
@@ -51,6 +57,13 @@ jobs:
 
       - name: Validate OTA partitions, rollback and firmware integrity
         run: python tools/validate_release.py --test
+
+      - name: Test actual NMEA2000 library PGNs through the gateway decoder
+        shell: bash
+        run: |
+          lib=.pio/libdeps/waveshare-touch-4/NMEA2000-library/src
+          g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -I tests/host/instrument -I tests/host -I src -I "$lib" src/n2k_sources.cpp src/n2k_instruments.cpp src/n2k_waypoints.cpp src/actisense_ascii.cpp "$lib/N2kMsg.cpp" "$lib/N2kMessages.cpp" "$lib/N2kStream.cpp" tests/host/nvs_fake.cpp tests/host/instruments_test.cpp -o /tmp/instruments_test
+          /tmp/instruments_test
 
       - name: Reject unknown Kconfig symbols
         if: always()

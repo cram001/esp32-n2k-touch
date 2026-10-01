@@ -19,7 +19,7 @@ void expect(HeadingReference target, const char *number, const char *unit) {
 int main() {
     instrument_data_update_heading(100*DEG,HeadingReference::Magnetic);
     expect(HeadingReference::Magnetic,"100","deg M");
-    expect(HeadingReference::True,"---","deg T");
+    expect(HeadingReference::True,"--","deg T");
     instrument_data_update_variation(15*DEG); // East variation.
     expect(HeadingReference::True,"115","deg T");
     instrument_data_update_heading(115*DEG,HeadingReference::True);
@@ -39,14 +39,14 @@ int main() {
     expect(HeadingReference::True,"359","deg T");
     fake_time_us+=61000000;
     instrument_data_update_heading(20*DEG,HeadingReference::True);
-    expect(HeadingReference::Magnetic,"---","deg M"); // Variation expired.
+    expect(HeadingReference::Magnetic,"--","deg M"); // Variation expired.
     expect(HeadingReference::True,"20","deg T");
     instrument_data_update_variation(4); // Invalid variation cannot revive cache.
-    expect(HeadingReference::Magnetic,"---","deg M");
-    fake_time_us+=6000000;
-    expect(HeadingReference::True,"---",""); // Heading expired.
+    expect(HeadingReference::Magnetic,"--","deg M");
+    fake_time_us+=30000000;
+    expect(HeadingReference::True,"--",""); // Heading expired.
     instrument_data_update_nmea(DataMetric::Heading,42*DEG);
-    expect(HeadingReference::True,"---","deg T"); // Unknown reference.
+    expect(HeadingReference::True,"--","deg T"); // Unknown reference.
     DataFieldSelection cog{}; cog.metric=DataMetric::CourseOverGround;
     instrument_data_update_nmea(cog.metric,42*DEG);
     UnitsSettings units{};units.heading_reference=HeadingReference::Magnetic;
@@ -57,6 +57,6 @@ int main() {
     instrument_data_update_variation(2*DEG);
     instrument_data_reset_nmea();
     assert(!instrument_data_get(cog).valid);
-    expect(HeadingReference::True,"---","");
+    expect(HeadingReference::True,"--","");
     std::puts("PASS: heading reference, signed conversion, wrap/rounding, missing/stale variation, heading expiry, source reset and unchanged COG");
 }

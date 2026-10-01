@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 
 #include "N2kMessages.h"
@@ -13,6 +14,7 @@
 #include "freertos/task.h"
 #include "instrument_data.hpp"
 #include "n2k_input.hpp"
+#include "n2k_instruments.hpp"
 #include "smartshunt_ble.hpp"
 
 namespace {
@@ -34,6 +36,12 @@ tNMEA2000_esp32xx g_nmea2000(CAN_TX, CAN_RX);
 bool g_started = false;
 // Read and changed only on the N2K task; gateway input never forwards to CAN.
 bool g_wireless_input = false;
+std::atomic<bool> g_discover_sources{false};
+const unsigned long RECEIVE_PGNS[] = {
+    127250,127258,127488,127489,127505,128259,128267,128275,
+    129025,129026,129029,129283,129284,129285,130074,
+    130306,130310,130311,130312,130313,130314,130316,0
+};
 
 AppSettings settings_snapshot()
 {
@@ -56,112 +64,7 @@ uint32_t unique_device_number()
     return folded & 0x1FFFFFU;
 }
 
-void publish_temperature(tN2kTempSource source, double actual)
-{
-    if (actual == N2kDoubleNA) return;
-    if (source == N2kts_SeaTemperature) instrument_data_update_nmea(DataMetric::WaterTemperature, actual);
-    else if (source == N2kts_OutsideTemperature) instrument_data_update_nmea(DataMetric::AirTemperature, actual);
-}
-
-void handle_nmea_message(const tN2kMsg &msg)
-{
-    // Library field parsers check PGN but do not require a complete payload.
-    // Reject truncated network messages before they can publish partial values.
-    const int minimum_length = msg.PGN == 129284 ? 34 : msg.PGN == 128275 ? 14 : 8;
-    if (msg.DataLen < minimum_length) return;
-    switch (msg.PGN) {
-    case 127250L: {
-        unsigned char sid; double heading, deviation, variation; tN2kHeadingReference ref;
-        if (ParseN2kPGN127250(msg, sid, heading, deviation, variation, ref)) {
-            if (variation != N2kDoubleNA) instrument_data_update_variation(variation);
-            if (heading != N2kDoubleNA && (ref == N2khr_true || ref == N2khr_magnetic)) {
-                instrument_data_update_heading(heading, ref == N2khr_true ? HeadingReference::True : HeadingReference::Magnetic);
-            }
-        }
-        break;
-    }
-    case 127258L: {
-        unsigned char sid; tN2kMagneticVariation source; uint16_t days; double variation;
-        if (ParseN2kPGN127258(msg, sid, source, days, variation) && variation != N2kDoubleNA) {
-            instrument_data_update_variation(variation);
-        }
-        break;
-    }
-    case 128259L: {
-        unsigned char sid; double water, ground; tN2kSpeedWaterReferenceType ref;
-        if (ParseN2kPGN128259(msg, sid, water, ground, ref) && water != N2kDoubleNA) {
-            instrument_data_update_nmea(DataMetric::BoatSpeed, water);
-        }
-        break;
-    }
-    case 128267L: {
-        unsigned char sid; double depth, offset, range;
-        if (ParseN2kPGN128267(msg, sid, depth, offset, range) && depth != N2kDoubleNA) {
-            instrument_data_update_nmea(DataMetric::Depth, depth);
-        }
-        break;
-    }
-    case 128275L: {
-        uint16_t days; double seconds; uint32_t log, trip;
-        if (ParseN2kPGN128275(msg, days, seconds, log, trip)) {
-            instrument_data_update_nmea(DataMetric::TripDistance, static_cast<double>(trip));
-        }
-        break;
-    }
-    case 129026L: {
-        unsigned char sid; tN2kHeadingReference ref; double cog, sog;
-        if (ParseN2kPGN129026(msg, sid, ref, cog, sog)) {
-            if (cog != N2kDoubleNA) instrument_data_update_nmea(DataMetric::CourseOverGround, cog);
-            if (sog != N2kDoubleNA) instrument_data_update_nmea(DataMetric::SpeedOverGround, sog);
-        }
-        break;
-    }
-    case 129284L: {
-        unsigned char sid;
-        double distance_to_waypoint, eta_time, bearing_origin, bearing_position;
-        double destination_latitude, destination_longitude, waypoint_closing_velocity;
-        tN2kHeadingReference bearing_reference;
-        bool perpendicular_crossed, arrival_circle_entered;
-        tN2kDistanceCalculationType calculation_type;
-        int16_t eta_date;
-        uint32_t origin_waypoint, destination_waypoint;
-        if (ParseN2kPGN129284(msg, sid, distance_to_waypoint, bearing_reference,
-                              perpendicular_crossed, arrival_circle_entered, calculation_type,
-                              eta_time, eta_date, bearing_origin, bearing_position,
-                              origin_waypoint, destination_waypoint, destination_latitude,
-                              destination_longitude, waypoint_closing_velocity) &&
-            distance_to_waypoint != N2kDoubleNA) {
-            instrument_data_update_nmea(DataMetric::DistanceToWaypoint, distance_to_waypoint);
-        }
-        break;
-    }
-    case 130306L: {
-        unsigned char sid; double speed, angle; tN2kWindReference ref;
-        if (ParseN2kPGN130306(msg, sid, speed, angle, ref)) {
-            if (ref == N2kWind_Apparent) {
-                if (speed != N2kDoubleNA) instrument_data_update_nmea(DataMetric::ApparentWindSpeed, speed);
-                if (angle != N2kDoubleNA) instrument_data_update_nmea(DataMetric::ApparentWindAngle, angle);
-            } else if (ref == N2kWind_True_boat || ref == N2kWind_True_water || ref == N2kWind_True_North || ref == N2kWind_Magnetic) {
-                if (speed != N2kDoubleNA) instrument_data_update_nmea(DataMetric::TrueWindSpeed, speed);
-                if (angle != N2kDoubleNA) instrument_data_update_nmea(DataMetric::TrueWindAngle, angle);
-            }
-        }
-        break;
-    }
-    case 130312L: {
-        unsigned char sid, instance; tN2kTempSource source; double actual, set;
-        if (ParseN2kPGN130312(msg, sid, instance, source, actual, set)) publish_temperature(source, actual);
-        break;
-    }
-    case 130316L: {
-        unsigned char sid, instance; tN2kTempSource source; double actual, set;
-        if (ParseN2kPGN130316(msg, sid, instance, source, actual, set)) publish_temperature(source, actual);
-        break;
-    }
-    default:
-        break;
-    }
-}
+void handle_nmea_message(const tN2kMsg &msg) { n2k_instruments_receive(msg); }
 
 void handle_wired_message(const tN2kMsg &msg) {
     if (!g_wireless_input) handle_nmea_message(msg);
@@ -212,10 +115,15 @@ void n2k_task(void *)
     for (;;) {
         const AppSettings settings = settings_snapshot();
         if (previous.mode != settings.n2k_input.mode || previous.ip != settings.n2k_input.ip || previous.port != settings.n2k_input.port) {
-            instrument_data_reset_nmea(); previous = settings.n2k_input;
+            instrument_data_reset_nmea(); n2k_instruments_reset(); previous = settings.n2k_input;
         }
         g_wireless_input = settings.n2k_input.mode == N2kInputMode::W2kTcp;
         g_nmea2000.ParseMessages();
+        if(g_discover_sources.exchange(false) && !g_wireless_input){
+            tN2kMsg request;
+            SetN2kPGNISORequest(request,255,60928);g_nmea2000.SendMsg(request);
+            SetN2kPGNISORequest(request,255,126996);g_nmea2000.SendMsg(request);
+        }
         ActisenseMessage received;
         for (unsigned i = 0; i < 16 && n2k_input_receive(received); ++i) {
             if (!g_wireless_input) continue;
@@ -256,6 +164,7 @@ bool n2k_bridge_start(const AppSettings &settings)
     g_nmea2000.SetMode(tNMEA2000::N2km_ListenAndNode, 40);
     g_nmea2000.EnableForward(false);
     g_nmea2000.SetMsgHandler(handle_wired_message);
+    g_nmea2000.ExtendReceiveMessages(RECEIVE_PGNS);
     g_nmea2000.SetN2kCANMsgBufSize(20);
     if (!g_nmea2000.Open()) { ESP_LOGE(TAG, "Failed to open NMEA 2000/TWAI interface"); return false; }
     if (!n2k_input_start(settings.n2k_input)) return false;
@@ -273,3 +182,5 @@ void n2k_bridge_apply_settings(const AppSettings &settings)
         xSemaphoreGive(g_settings_mutex);
     }
 }
+
+void n2k_bridge_request_sources(){g_discover_sources.store(true);}
