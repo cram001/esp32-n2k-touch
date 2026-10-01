@@ -221,6 +221,13 @@ void handle_victron_advertisement(const esp_ble_gap_cb_param_t::ble_scan_result_
     size_t payload_len = 0;
     const size_t raw_len = static_cast<size_t>(scan.adv_data_len) + static_cast<size_t>(scan.scan_rsp_len);
     const uint8_t *payload = find_manufacturer_payload(scan.ble_adv, raw_len, payload_len);
+
+    // Discovery is intentionally broader than telemetry decoding. A nearby
+    // Victron device should appear in the picker even when Instant Readout is
+    // disabled, uses a record type we do not decode yet, or its key is unknown.
+    // This also lets active scan responses contribute the configured device name.
+    if (payload != nullptr) update_discovery(scan);
+
     if (payload == nullptr || payload_len < VICTRON_HEADER_LEN) return;
     // Victron manufacturer payload after the 0x02E1 company ID:
     // [0] 0x10 product advertisement, [1..2] product ID (LE),
@@ -231,8 +238,6 @@ void handle_victron_advertisement(const esp_ble_gap_cb_param_t::ble_scan_result_
         payload[4] != VICTRON_BATTERY_MONITOR_RECORD) {
         return;
     }
-
-    update_discovery(scan);
 
     std::array<uint8_t, 6> incoming{};
     std::memcpy(incoming.data(), scan.bda, incoming.size());
@@ -340,7 +345,7 @@ bool smartshunt_ble_start(const AppSettings &settings)
 
     ESP_ERROR_CHECK(esp_ble_gap_register_callback(gap_callback));
     static esp_ble_scan_params_t scan_params{};
-    scan_params.scan_type = BLE_SCAN_TYPE_PASSIVE;
+    scan_params.scan_type = BLE_SCAN_TYPE_ACTIVE;
     scan_params.own_addr_type = BLE_ADDR_TYPE_PUBLIC;
     scan_params.scan_filter_policy = BLE_SCAN_FILTER_ALLOW_ALL;
     scan_params.scan_interval = 0x80;
@@ -348,7 +353,7 @@ bool smartshunt_ble_start(const AppSettings &settings)
     scan_params.scan_duplicate = BLE_SCAN_DUPLICATE_DISABLE;
     ESP_ERROR_CHECK(esp_ble_gap_set_scan_params(&scan_params));
     g_ble_initialized = true;
-    ESP_LOGI(TAG, "Passive multi-SmartShunt scanner started");
+    ESP_LOGI(TAG, "Active Victron BLE discovery / SmartShunt Instant Readout scanner started");
     return true;
 }
 
