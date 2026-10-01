@@ -13,6 +13,7 @@
 #include "instrument_data.hpp"
 #include "lvgl.h"
 #include "n2k_bridge.hpp"
+#include "n2k_input.hpp"
 #include "smartshunt_ble.hpp"
 #include "wifi_service.hpp"
 #include "ota.hpp"
@@ -40,6 +41,16 @@ size_t g_edit_shunt = 0;
 
 lv_obj_t *g_data_screen = nullptr;
 lv_obj_t *g_boot_screen = nullptr;
+lv_obj_t *g_boot_status = nullptr;
+lv_obj_t *g_input_screen = nullptr;
+lv_obj_t *g_input_mode = nullptr;
+lv_obj_t *g_input_ip = nullptr;
+lv_obj_t *g_input_port = nullptr;
+lv_obj_t *g_input_status = nullptr;
+lv_obj_t *g_input_keyboard = nullptr;
+N2kInputConfig g_input_draft{};
+bool g_input_feedback = false;
+void update_input_status();
 lv_obj_t *g_settings_screen = nullptr;
 lv_obj_t *g_page_setup_screen = nullptr;
 lv_obj_t *g_field_editor_screen = nullptr;
@@ -192,6 +203,7 @@ void apply_theme_to(lv_obj_t *screen)
 
 void apply_theme()
 {
+    apply_theme_to(g_input_screen);
     apply_theme_to(g_data_screen); apply_theme_to(g_settings_screen); apply_theme_to(g_page_setup_screen);
     apply_theme_to(g_field_editor_screen); apply_theme_to(g_units_screen); apply_theme_to(g_shunts_screen);
     apply_theme_to(g_shunt_edit_screen); apply_theme_to(g_shunt_picker_screen); apply_theme_to(g_wifi_screen); apply_theme_to(g_wifi_picker); apply_theme_to(g_ota_screen); apply_backlight();
@@ -297,7 +309,7 @@ void update_wifi_status()
     }
     lv_label_set_text(g_wifi_status,b);
 }
-void refresh_cb(lv_timer_t *){++g_ui_refreshes;g_ui_last_refresh_ms=static_cast<uint32_t>(esp_timer_get_time()/1000);render_active_page();update_wifi_status();update_wifi_scan();update_ota_status();}
+void refresh_cb(lv_timer_t *){++g_ui_refreshes;g_ui_last_refresh_ms=static_cast<uint32_t>(esp_timer_get_time()/1000);render_active_page();update_wifi_status();update_wifi_scan();update_ota_status();update_input_status();}
 void previous_page_cb(lv_event_t *){g_active_page=next_enabled_page(g_active_page,-1);render_active_page();}
 void next_page_cb(lv_event_t *){g_active_page=next_enabled_page(g_active_page,+1);render_active_page();}
 void data_screen_cb(lv_event_t *){render_active_page();lv_screen_load(g_data_screen);}
@@ -500,10 +512,114 @@ void shunt_picker_back_cb(lv_event_t *) { lv_screen_load(g_shunt_edit_screen); }
 void shunt_instance_down_cb(lv_event_t *){auto&c=g_settings.smartshunts[g_edit_shunt];if(c.battery_instance>0)--c.battery_instance;char b[12];std::snprintf(b,sizeof(b),"%u",c.battery_instance);lv_label_set_text(g_shunt_instance,b);persist();}void shunt_instance_up_cb(lv_event_t *){auto&c=g_settings.smartshunts[g_edit_shunt];if(c.battery_instance<252)++c.battery_instance;char b[12];std::snprintf(b,sizeof(b),"%u",c.battery_instance);lv_label_set_text(g_shunt_instance,b);persist();}
 void shunt_save_cb(lv_event_t *){auto&c=g_settings.smartshunts[g_edit_shunt];std::snprintf(c.name.data(),c.name.size(),"%s",lv_textarea_get_text(g_shunt_name));std::snprintf(c.bindkey.data(),c.bindkey.size(),"%s",lv_textarea_get_text(g_shunt_key));c.n2k_enabled=lv_obj_has_state(g_shunt_n2k,LV_STATE_CHECKED);persist();update_shunts_list();lv_screen_load(g_shunts_screen);}void keyboard_cb(lv_event_t *e){const auto code=lv_event_get_code(e);if(code==LV_EVENT_READY||code==LV_EVENT_CANCEL){lv_obj_add_flag(g_keyboard,LV_OBJ_FLAG_HIDDEN);lv_keyboard_set_textarea(g_keyboard,nullptr);}}void textarea_focus_cb(lv_event_t *e){lv_keyboard_set_textarea(g_keyboard,lv_event_get_target_obj(e));lv_obj_remove_flag(g_keyboard,LV_OBJ_FLAG_HIDDEN);lv_obj_move_foreground(g_keyboard);}
 
+void data_gesture_cb(lv_event_t *event)
+{
+    lv_indev_t *indev = lv_event_get_indev(event);
+    if (!indev || lv_screen_active() != g_data_screen) return;
+    // Consume the release before loading a different screen to prevent a click.
+    lv_indev_wait_release(indev);
+    switch (lv_indev_get_gesture_dir(indev)) {
+    case LV_DIR_LEFT: next_page_cb(nullptr); break;
+    case LV_DIR_RIGHT: previous_page_cb(nullptr); break;
+    case LV_DIR_TOP: settings_screen_cb(nullptr); break;
+    case LV_DIR_BOTTOM:
+        g_edit_page = g_active_page; page_setup_screen_cb(nullptr); break;
+    default: break;
+    }
+}
+void update_input_status()
+{
+    const N2kInputStatus input = n2k_input_status();
+    if (g_input_status && !g_input_feedback) {
+        lv_label_set_text_fmt(g_input_status, "%s\nMessages: %lu  Rejected: %lu  Dropped: %lu\nSocket error: %d",
+            input.message.data(), static_cast<unsigned long>(input.received),
+            static_cast<unsigned long>(input.rejected), static_cast<unsigned long>(input.dropped), input.socket_error);
+    }
+    if (g_boot_status) {
+        const WifiStatus wifi = wifi_service_get_status();
+        lv_label_set_text_fmt(g_boot_status, "Wi-Fi: %s\nN2K: %s\nSmartShunt BLE starting in background",
+            wifi.message.data(), input.message.data());
+    }
+}
+void input_keyboard_hide() {
+    lv_obj_add_flag(g_input_keyboard, LV_OBJ_FLAG_HIDDEN);
+    lv_keyboard_set_textarea(g_input_keyboard, nullptr);
+}
+void input_keyboard_cb(lv_event_t *event) {
+    if (lv_event_get_code(event) == LV_EVENT_READY || lv_event_get_code(event) == LV_EVENT_CANCEL) input_keyboard_hide();
+}
+void input_focus_cb(lv_event_t *event) {
+    lv_obj_t *target = lv_event_get_target_obj(event);
+    lv_keyboard_set_mode(g_input_keyboard, LV_KEYBOARD_MODE_NUMBER);
+    lv_keyboard_set_textarea(g_input_keyboard, target);
+    lv_obj_remove_flag(g_input_keyboard, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(g_input_keyboard);
+}
+void input_mode_cb(lv_event_t *) {
+    g_input_draft.mode = g_input_draft.mode == N2kInputMode::Wired ? N2kInputMode::W2kTcp : N2kInputMode::Wired;
+    lv_label_set_text(button_label(g_input_mode), g_input_draft.mode == N2kInputMode::Wired ? "INPUT: WIRED CAN" : "INPUT: W2K-1 TCP");
+}
+void input_screen_cb(lv_event_t *) {
+    g_input_feedback = false; g_input_draft = g_settings.n2k_input;
+    lv_label_set_text(button_label(g_input_mode), g_input_draft.mode == N2kInputMode::Wired ? "INPUT: WIRED CAN" : "INPUT: W2K-1 TCP");
+    lv_textarea_set_text(g_input_ip, g_input_draft.ip.data());
+    char port[8]; std::snprintf(port, sizeof(port), "%u", g_input_draft.port);
+    lv_textarea_set_text(g_input_port, port);
+    input_keyboard_hide(); update_input_status(); lv_screen_load(g_input_screen);
+}
+void input_back_cb(lv_event_t *) { input_keyboard_hide(); lv_screen_load(g_settings_screen); }
+void input_save_cb(lv_event_t *) {
+    input_keyboard_hide();
+    std::snprintf(g_input_draft.ip.data(), g_input_draft.ip.size(), "%s", lv_textarea_get_text(g_input_ip));
+    const char *text = lv_textarea_get_text(g_input_port); char *end = nullptr;
+    const unsigned long port = std::strtoul(text, &end, 10);
+    if (g_input_draft.mode == N2kInputMode::W2kTcp &&
+        (!*text || *end || port > 65535 || !n2k_endpoint_valid(g_input_draft.ip.data(), static_cast<uint16_t>(port)))) {
+        g_input_feedback = true; lv_label_set_text(g_input_status, "Enter a valid IPv4 address and port 1-65535"); return;
+    }
+    if (*text && !*end && port && port <= 65535) g_input_draft.port = static_cast<uint16_t>(port);
+    const N2kInputConfig previous = g_settings.n2k_input;
+    g_settings.n2k_input = g_input_draft;
+    // Keep a failed save visible, and do not switch the running source.
+    if (!settings_save(g_settings)) {
+        g_settings.n2k_input = previous;
+        g_input_feedback = true; lv_label_set_text(g_input_status, "Could not save input settings; please retry"); return;
+    }
+    g_input_feedback = false; n2k_bridge_apply_settings(g_settings); update_input_status();
+}
+void create_input_screen() {
+    g_input_screen = require_obj(lv_obj_create(nullptr), "NMEA input screen");
+    lv_obj_remove_flag(g_input_screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *title = lv_label_create(g_input_screen); lv_label_set_text(title, "NMEA 2000 Input");
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0); lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 18);
+    g_input_mode = make_button(g_input_screen, "INPUT: WIRED CAN", input_mode_cb, 300, 48);
+    lv_obj_align(g_input_mode, LV_ALIGN_TOP_MID, 0, 64);
+    auto field = [](const char *placeholder, int y, size_t max_length, const char *accepted) {
+        lv_obj_t *ta = require_obj(lv_textarea_create(g_input_screen), "gateway field");
+        lv_obj_set_size(ta, 400, 48); lv_obj_align(ta, LV_ALIGN_TOP_MID, 0, y);
+        lv_textarea_set_one_line(ta, true); lv_textarea_set_max_length(ta, max_length);
+        lv_textarea_set_placeholder_text(ta, placeholder); lv_textarea_set_accepted_chars(ta, accepted);
+        lv_obj_add_event_cb(ta, input_focus_cb, LV_EVENT_FOCUSED, nullptr); return ta;
+    };
+    g_input_ip = field("W2K-1 IP address", 124, 15, "0123456789.");
+    g_input_port = field("TCP port", 182, 5, "0123456789");
+    lv_obj_t *hint = lv_label_create(g_input_screen);
+    lv_label_set_text(hint, "Gateway data server: TCP / N2K ASCII / Transmit\nJoin the same Wi-Fi network first.");
+    lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 240);
+    g_input_status = lv_label_create(g_input_screen); lv_obj_set_width(g_input_status, 440);
+    lv_obj_set_style_text_align(g_input_status, LV_TEXT_ALIGN_CENTER, 0); lv_obj_align(g_input_status, LV_ALIGN_TOP_MID, 0, 294);
+    lv_obj_t *button = make_button(g_input_screen, "SAVE", input_save_cb, 150, 48);
+    lv_obj_align(button, LV_ALIGN_BOTTOM_RIGHT, -40, -22);
+    button = make_button(g_input_screen, "BACK", input_back_cb, 150, 48); lv_obj_align(button, LV_ALIGN_BOTTOM_LEFT, 40, -22);
+    g_input_keyboard = lv_keyboard_create(g_input_screen); lv_obj_set_size(g_input_keyboard, 460, 220);
+    lv_obj_align(g_input_keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_add_event_cb(g_input_keyboard, input_keyboard_cb, LV_EVENT_ALL, nullptr); input_keyboard_hide();
+}
 void create_data_screen()
 {
     g_data_screen=require_obj(lv_obj_create(nullptr),"screen root");
     lv_obj_remove_flag(g_data_screen,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(g_data_screen,data_gesture_cb,LV_EVENT_GESTURE,nullptr);
     lv_obj_set_style_bg_color(g_data_screen,ui_bg(),0);
     lv_obj_set_style_pad_all(g_data_screen,0,0);
 
@@ -552,9 +668,11 @@ void create_settings_screen()
     lv_obj_set_style_text_font(l,&lv_font_montserrat_24,0);
     lv_obj_align(l,LV_ALIGN_TOP_MID,0,18);
 
-    lv_obj_t*b=make_button(g_settings_screen,"Pages",page_setup_screen_cb,260,48);
-    lv_obj_align(b,LV_ALIGN_TOP_MID,0,62);
-    b=make_button(g_settings_screen,"UNITS",units_screen_cb,260,48);
+    lv_obj_t*b=make_button(g_settings_screen,"Pages",page_setup_screen_cb,200,48);
+    lv_obj_align(b,LV_ALIGN_TOP_LEFT,30,62);
+    b=make_button(g_settings_screen,"UNITS",units_screen_cb,200,48);
+    lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-30,62);
+    b=make_button(g_settings_screen,"NMEA Input",input_screen_cb,260,48);
     lv_obj_align(b,LV_ALIGN_TOP_MID,0,116);
     b=make_button(g_settings_screen,"Wi-Fi",wifi_screen_cb,260,48);
     lv_obj_align(b,LV_ALIGN_TOP_MID,0,170);
@@ -867,6 +985,7 @@ void ui_start(const AppSettings &initial_settings)
     g_active_page = first_enabled_page();
 
     create_data_screen();
+    create_input_screen();
     create_settings_screen();
     create_page_setup_screen();
     create_field_editor_screen();
@@ -886,19 +1005,29 @@ void ui_start(const AppSettings &initial_settings)
     apply_theme_to(g_boot_screen);
     lv_obj_t *identity = require_obj(lv_label_create(g_boot_screen), "boot firmware identity");
     const esp_app_desc_t *app = esp_app_get_description();
-    lv_label_set_text_fmt(identity, "ESP32 N2K TOUCH\n\nFirmware: %s\n\nBuilt: %s\n%s\n\nStarting services...",
+    lv_label_set_text_fmt(identity, "ESP32 N2K TOUCH\nFirmware: %s\nBuilt: %s %s",
                           app->version, app->date, app->time);
     lv_obj_set_width(identity, 440);
     lv_obj_set_style_text_font(identity, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_align(identity, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_center(identity);
+    lv_obj_align(identity, LV_ALIGN_TOP_MID, 0, 38);
+    lv_obj_t *hints = lv_label_create(g_boot_screen);
+    lv_label_set_text(hints, "Swipe left / right: change page\nSwipe down: edit current page\nSwipe up: open Settings\nButtons remain available");
+    lv_obj_set_style_text_font(hints, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_align(hints, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(hints, LV_ALIGN_TOP_MID, 0, 175);
+    g_boot_status = lv_label_create(g_boot_screen); lv_obj_set_width(g_boot_status, 440);
+    lv_obj_set_style_text_align(g_boot_status, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(g_boot_status, LV_ALIGN_TOP_MID, 0, 315);
+    update_input_status();
     lv_screen_load(g_boot_screen);
     // This callback runs on the LVGL task, retaining display/touch ownership.
     lv_timer_t *boot_timer = lv_timer_create([](lv_timer_t *) {
         lv_screen_load(g_data_screen);
+        g_boot_status = nullptr;
         lv_obj_delete(g_boot_screen);
         g_boot_screen = nullptr;
-    }, 5000, nullptr);
+    }, 8000, nullptr);
     if (!boot_timer) std::abort();
     lv_timer_set_repeat_count(boot_timer, 1);
     g_refresh_timer = lv_timer_create(refresh_cb, 500, nullptr);

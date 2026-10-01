@@ -16,6 +16,7 @@ struct InstrumentValue {
 };
 
 // NMEA 2000 services publish canonical values here: metres, m/s, radians, kelvin.
+void instrument_data_reset_nmea();
 void instrument_data_update_nmea(DataMetric metric, double value);
 void instrument_data_update_heading(double radians, HeadingReference reference);
 void instrument_data_update_variation(double radians);

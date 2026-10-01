@@ -5,6 +5,8 @@ idf_component_register(
         "smartshunt_ble.cpp"
         "instrument_data.cpp"
         "n2k_bridge.cpp"
+        "n2k_input.cpp"
+        "actisense_ascii.cpp"
         "third_party/nmea2000_esp32xx/NMEA2000_esp32xx.cpp"
         "wifi_service.cpp"
         "wifi_config.cpp"

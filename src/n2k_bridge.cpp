@@ -12,6 +12,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "instrument_data.hpp"
+#include "n2k_input.hpp"
 #include "smartshunt_ble.hpp"
 
 namespace {
@@ -31,6 +32,8 @@ SemaphoreHandle_t g_settings_mutex = nullptr;
 AppSettings g_settings;
 tNMEA2000_esp32xx g_nmea2000(CAN_TX, CAN_RX);
 bool g_started = false;
+// Read and changed only on the N2K task; gateway input never forwards to CAN.
+bool g_wireless_input = false;
 
 AppSettings settings_snapshot()
 {
@@ -62,6 +65,10 @@ void publish_temperature(tN2kTempSource source, double actual)
 
 void handle_nmea_message(const tN2kMsg &msg)
 {
+    // Library field parsers check PGN but do not require a complete payload.
+    // Reject truncated network messages before they can publish partial values.
+    const int minimum_length = msg.PGN == 129284 ? 34 : msg.PGN == 128275 ? 14 : 8;
+    if (msg.DataLen < minimum_length) return;
     switch (msg.PGN) {
     case 127250L: {
         unsigned char sid; double heading, deviation, variation; tN2kHeadingReference ref;
@@ -156,6 +163,10 @@ void handle_nmea_message(const tN2kMsg &msg)
     }
 }
 
+void handle_wired_message(const tN2kMsg &msg) {
+    if (!g_wireless_input) handle_nmea_message(msg);
+}
+
 void send_battery_status(const SmartShuntConfig &cfg, const SmartShuntData &data, uint8_t sid)
 {
     if (!data.voltage_valid && !data.current_valid && !data.temperature_valid) return;
@@ -197,9 +208,24 @@ void n2k_task(void *)
     std::array<uint32_t, MAX_SMARTSHUNTS> last_dc_ms{};
     std::array<uint8_t, MAX_SMARTSHUNTS> sid{};
 
+    N2kInputConfig previous{};
     for (;;) {
-        g_nmea2000.ParseMessages();
         const AppSettings settings = settings_snapshot();
+        if (previous.mode != settings.n2k_input.mode || previous.ip != settings.n2k_input.ip || previous.port != settings.n2k_input.port) {
+            instrument_data_reset_nmea(); previous = settings.n2k_input;
+        }
+        g_wireless_input = settings.n2k_input.mode == N2kInputMode::W2kTcp;
+        g_nmea2000.ParseMessages();
+        ActisenseMessage received;
+        for (unsigned i = 0; i < 16 && n2k_input_receive(received); ++i) {
+            if (!g_wireless_input) continue;
+            tN2kMsg message;
+            message.SetPGN(received.pgn);
+            message.Priority = received.priority; message.Source = received.source;
+            message.Destination = received.destination; message.DataLen = received.length;
+            std::copy_n(received.data.begin(), received.length, message.Data);
+            handle_nmea_message(message);
+        }
         const uint32_t now_ms = static_cast<uint32_t>(xTaskGetTickCount() * portTICK_PERIOD_MS);
 
         for (size_t i = 0; i < settings.smartshunts.size(); ++i) {
@@ -229,9 +255,10 @@ bool n2k_bridge_start(const AppSettings &settings)
     g_nmea2000.SetDeviceInformation(unique_device_number(), 170, 35, 2046);
     g_nmea2000.SetMode(tNMEA2000::N2km_ListenAndNode, 40);
     g_nmea2000.EnableForward(false);
-    g_nmea2000.SetMsgHandler(handle_nmea_message);
+    g_nmea2000.SetMsgHandler(handle_wired_message);
     g_nmea2000.SetN2kCANMsgBufSize(20);
     if (!g_nmea2000.Open()) { ESP_LOGE(TAG, "Failed to open NMEA 2000/TWAI interface"); return false; }
+    if (!n2k_input_start(settings.n2k_input)) return false;
     if (xTaskCreate(n2k_task, "n2k", 6144, nullptr, 5, nullptr) != pdPASS) return false;
     g_started = true;
     ESP_LOGI(TAG, "NMEA 2000 node active on TX GPIO6/RX GPIO0");
@@ -240,6 +267,7 @@ bool n2k_bridge_start(const AppSettings &settings)
 
 void n2k_bridge_apply_settings(const AppSettings &settings)
 {
+    n2k_input_apply(settings.n2k_input);
     if (g_settings_mutex != nullptr && xSemaphoreTake(g_settings_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
         g_settings = settings;
         xSemaphoreGive(g_settings_mutex);

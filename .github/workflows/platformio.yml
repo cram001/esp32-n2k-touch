@@ -38,6 +38,10 @@ jobs:
           /tmp/wifi_service_test
           g++ -std=c++17 -Wall -Wextra -I tests/host/instrument -I src src/instrument_data.cpp tests/host/heading_test.cpp -o /tmp/heading_test
           /tmp/heading_test
+          g++ -std=c++17 -Wall -Wextra -I src src/actisense_ascii.cpp tests/host/actisense_test.cpp -o /tmp/actisense_test
+          /tmp/actisense_test
+          g++ -std=c++17 -Wall -Wextra -I tests/host/gateway -I src src/n2k_input.cpp src/actisense_ascii.cpp tests/host/n2k_input_test.cpp -o /tmp/n2k_input_test
+          /tmp/n2k_input_test
 
       - name: Build firmware
         shell: bash

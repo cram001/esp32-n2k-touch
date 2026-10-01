@@ -100,6 +100,12 @@ InstrumentValue smartshunt_value(const DataFieldSelection &selection)
 }
 }
 
+void instrument_data_reset_nmea() {
+    portENTER_CRITICAL(&g_nmea_mux);
+    g_nmea = {}; g_variation = {};
+    portEXIT_CRITICAL(&g_nmea_mux);
+}
+
 void instrument_data_update_nmea(DataMetric metric, double value)
 {
     const size_t idx = metric_index(metric);
