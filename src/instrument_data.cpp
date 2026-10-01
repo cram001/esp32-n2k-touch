@@ -150,6 +150,21 @@ void instrument_data_update_variation(double radians)
 InstrumentValue instrument_data_get(const DataFieldSelection &selection, uint8_t field_id)
 {
     if (selection.source == DataSourceType::SmartShunt) return smartshunt_value(selection);
+    if (selection.metric == DataMetric::Position) {
+        InstrumentValue lat{}, lon{};
+        n2k_sources_get(DataMetric::Latitude, field_id, lat);
+        n2k_sources_get(DataMetric::Longitude, field_id, lon);
+        InstrumentValue out{};
+        out.valid = lat.valid && lon.valid;
+        out.stale = lat.stale || lon.stale;
+        out.age_ms = lat.age_ms > lon.age_ms ? lat.age_ms : lon.age_ms;
+        out.value = lat.value;
+        out.secondary_valid = lon.valid;
+        out.secondary_value = lon.value;
+        out.source_kind = lat.source_kind;
+        out.source_instance = lat.source_instance;
+        return out;
+    }
     InstrumentValue out{};
     if (n2k_sources_get(selection.metric,field_id,out)) return out;
     const size_t idx = metric_index(selection.metric);
@@ -216,6 +231,7 @@ const char *instrument_metric_name(DataMetric metric)
     case DataMetric::TankCapacity: return "Tank capacity";
     case DataMetric::Latitude: return "Latitude";
     case DataMetric::Longitude: return "Longitude";
+    case DataMetric::Position: return "Position";
     case DataMetric::Altitude: return "GNSS altitude";
     case DataMetric::WaypointBearing: return "Waypoint bearing";
     case DataMetric::WaypointVmg: return "Waypoint VMG";
@@ -248,6 +264,28 @@ bool instrument_metric_supported(DataSourceType source, DataMetric metric)
         return metric >= DataMetric::BatteryVoltage && metric <= DataMetric::BatteryTemperature;
     }
     return (metric > DataMetric::None && metric < DataMetric::BatteryVoltage) || (metric > DataMetric::BatteryTemperature && metric < DataMetric::Count);
+}
+
+void format_coordinate(double degrees, bool latitude, LatLonFormat format, char *out, size_t size)
+{
+    const char hemi = latitude ? (degrees < 0 ? 'S' : 'N') : (degrees < 0 ? 'W' : 'E');
+    const double a = std::abs(degrees);
+    const unsigned whole = static_cast<unsigned>(std::floor(a));
+    const double minutes_full = (a - whole) * 60.0;
+    const unsigned minutes = static_cast<unsigned>(std::floor(minutes_full));
+    const double seconds = (minutes_full - minutes) * 60.0;
+    switch (format) {
+    case LatLonFormat::DecimalDegrees:
+        std::snprintf(out, size, "%.5f %c", a, hemi);
+        break;
+    case LatLonFormat::DegreesMinutesSeconds:
+        std::snprintf(out, size, "%u %02u %04.1f %c", whole, minutes, seconds, hemi);
+        break;
+    case LatLonFormat::DegreesMinutes:
+    default:
+        std::snprintf(out, size, "%u %06.3f %c", whole, minutes_full, hemi);
+        break;
+    }
 }
 
 void instrument_format_value(const DataFieldSelection &selection,
@@ -288,9 +326,20 @@ void instrument_format_value(const DataFieldSelection &selection,
         std::snprintf(value_out, value_out_size, "%u", static_cast<unsigned>(std::lround(degrees)) % 360U);
     } else if (metric == DataMetric::WaypointName) {
         std::snprintf(value_out,value_out_size,"%s",v.text[0]?v.text.data():"--");
+    } else if (metric == DataMetric::Position) {
+        if (!v.secondary_valid) { std::snprintf(value_out,value_out_size,"--"); return; }
+        char lat[32]{}, lon[32]{};
+        format_coordinate(v.value, true, units.lat_lon_format, lat, sizeof(lat));
+        format_coordinate(v.secondary_value, false, units.lat_lon_format, lon, sizeof(lon));
+        std::snprintf(value_out, value_out_size, "%s\n%s", lat, lon);
+        std::snprintf(unit_out, unit_out_size, "%s",
+            units.lat_lon_format==LatLonFormat::DecimalDegrees?"DD":
+            units.lat_lon_format==LatLonFormat::DegreesMinutesSeconds?"DMS":"DM");
     } else if (metric == DataMetric::Latitude || metric == DataMetric::Longitude) {
-        std::snprintf(value_out,value_out_size,"%.5f",std::abs(v.value));
-        std::snprintf(unit_out,unit_out_size,"deg %s",metric==DataMetric::Latitude?(v.value<0?"S":"N"):(v.value<0?"W":"E"));
+        format_coordinate(v.value, metric==DataMetric::Latitude, units.lat_lon_format, value_out, value_out_size);
+        std::snprintf(unit_out, unit_out_size, "%s",
+            units.lat_lon_format==LatLonFormat::DecimalDegrees?"DD":
+            units.lat_lon_format==LatLonFormat::DegreesMinutesSeconds?"DMS":"DM");
     } else if (metric == DataMetric::EngineRpm) {
         std::snprintf(value_out,value_out_size,"%.0f",v.value);std::snprintf(unit_out,unit_out_size,"rpm");
     } else if (metric == DataMetric::TankLevel || metric == DataMetric::EngineLoad || metric == DataMetric::EngineTorque || metric == DataMetric::Humidity) {
