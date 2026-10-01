@@ -270,21 +270,24 @@ void format_coordinate(double degrees, bool latitude, LatLonFormat format, char 
 {
     const char hemi = latitude ? (degrees < 0 ? 'S' : 'N') : (degrees < 0 ? 'W' : 'E');
     const double a = std::abs(degrees);
-    const unsigned whole = static_cast<unsigned>(std::floor(a));
-    const double minutes_full = (a - whole) * 60.0;
-    const unsigned minutes = static_cast<unsigned>(std::floor(minutes_full));
-    const double seconds = (minutes_full - minutes) * 60.0;
     switch (format) {
     case LatLonFormat::DecimalDegrees:
         std::snprintf(out, size, "%.5f %c", a, hemi);
         break;
-    case LatLonFormat::DegreesMinutesSeconds:
-        std::snprintf(out, size, "%u %02u %04.1f %c", whole, minutes, seconds, hemi);
+    case LatLonFormat::DegreesMinutesSeconds: {
+        // Round the entire coordinate first, then split it. This carries a
+        // rounded 60 seconds/minutes into the next component automatically.
+        const unsigned ticks=static_cast<unsigned>(std::lround(a*36000.0));
+        std::snprintf(out, size, "%u %02u %04.1f %c", ticks/36000U,
+            (ticks%36000U)/600U,(ticks%600U)/10.0,hemi);
         break;
+    }
     case LatLonFormat::DegreesMinutes:
-    default:
-        std::snprintf(out, size, "%u %06.3f %c", whole, minutes_full, hemi);
+    default: {
+        const unsigned ticks=static_cast<unsigned>(std::lround(a*60000.0));
+        std::snprintf(out, size, "%u %06.3f %c", ticks/60000U,(ticks%60000U)/1000.0,hemi);
         break;
+    }
     }
 }
 

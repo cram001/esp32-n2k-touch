@@ -158,6 +158,7 @@ void ota_feedback(const char *text) {
 }
 void update_wifi_scan();
 void update_ota_status();
+void update_shunt_picker();
 
 const std::array<DataMetric, 47> NMEA_METRICS = {
     DataMetric::None,
@@ -403,7 +404,7 @@ void update_wifi_status()
     }
     lv_label_set_text(g_wifi_status,b);
 }
-void refresh_cb(lv_timer_t *){++g_ui_refreshes;g_ui_last_refresh_ms=static_cast<uint32_t>(esp_timer_get_time()/1000);render_active_page();update_wifi_status();update_wifi_scan();update_ota_status();update_input_status();}
+void refresh_cb(lv_timer_t *){++g_ui_refreshes;g_ui_last_refresh_ms=static_cast<uint32_t>(esp_timer_get_time()/1000);render_active_page();update_wifi_status();update_wifi_scan();update_ota_status();update_input_status();if(lv_screen_active()==g_shunt_picker_screen)update_shunt_picker();}
 void previous_page_cb(lv_event_t *){g_active_page=next_enabled_page(g_active_page,-1);render_active_page();}
 void next_page_cb(lv_event_t *){g_active_page=next_enabled_page(g_active_page,+1);render_active_page();}
 void data_screen_cb(lv_event_t *){render_active_page();lv_screen_load(g_data_screen);}
@@ -573,6 +574,10 @@ void update_shunts_list(){for(size_t i=0;i<MAX_SMARTSHUNTS;++i){char b[48];const
 void shunts_screen_cb(lv_event_t *){update_shunts_list();lv_screen_load(g_shunts_screen);}void shunt_slot_cb(lv_event_t *e){g_edit_shunt=static_cast<size_t>(reinterpret_cast<uintptr_t>(lv_event_get_user_data(e)));auto &c=g_settings.smartshunts[g_edit_shunt];lv_textarea_set_text(g_shunt_name,c.name.data());lv_textarea_set_text(g_shunt_key,c.bindkey.data());if(c.n2k_enabled)lv_obj_add_state(g_shunt_n2k,LV_STATE_CHECKED);else lv_obj_remove_state(g_shunt_n2k,LV_STATE_CHECKED);char b[12];std::snprintf(b,sizeof(b),"%u",c.battery_instance);lv_label_set_text(g_shunt_instance,b);lv_screen_load(g_shunt_edit_screen);}
 void update_shunt_picker()
 {
+    // Keep row identities unchanged throughout a press, so a refreshed list
+    // cannot select a different device when the finger is released.
+    for(lv_indev_t *input=lv_indev_get_next(nullptr);input;input=lv_indev_get_next(input))
+        if(lv_indev_get_state(input)==LV_INDEV_STATE_PRESSED)return;
     g_picker_devices = {};
     g_picker_count = smartshunt_ble_get_discovered(g_picker_devices);
     for (size_t i = 0; i < MAX_DISCOVERED_SMARTSHUNTS; ++i) {

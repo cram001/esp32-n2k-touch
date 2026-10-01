@@ -18,41 +18,41 @@ void expect(HeadingReference target, const char *number, const char *unit) {
 }
 int main() {
     instrument_data_update_heading(100*DEG,HeadingReference::Magnetic);
-    expect(HeadingReference::Magnetic,"100","deg M");
-    expect(HeadingReference::True,"--","deg T");
+    expect(HeadingReference::Magnetic,"100","°M");
+    expect(HeadingReference::True,"--","°T");
     instrument_data_update_variation(15*DEG); // East variation.
-    expect(HeadingReference::True,"115","deg T");
+    expect(HeadingReference::True,"115","°T");
     instrument_data_update_heading(115*DEG,HeadingReference::True);
-    expect(HeadingReference::Magnetic,"100","deg M");
+    expect(HeadingReference::Magnetic,"100","°M");
     instrument_data_update_variation(-20*DEG); // West variation.
-    expect(HeadingReference::Magnetic,"135","deg M");
+    expect(HeadingReference::Magnetic,"135","°M");
     instrument_data_update_heading(350*DEG,HeadingReference::Magnetic);
     instrument_data_update_variation(15*DEG);
-    expect(HeadingReference::True,"5","deg T");
+    expect(HeadingReference::True,"5","°T");
     instrument_data_update_heading(5*DEG,HeadingReference::True);
-    expect(HeadingReference::Magnetic,"350","deg M");
+    expect(HeadingReference::Magnetic,"350","°M");
     instrument_data_update_heading(359.8*DEG,HeadingReference::True);
-    expect(HeadingReference::True,"0","deg T");
+    expect(HeadingReference::True,"0","°T");
     instrument_data_update_heading(-1*DEG,HeadingReference::True);
-    expect(HeadingReference::True,"359","deg T");
+    expect(HeadingReference::True,"359","°T");
     instrument_data_update_heading(std::numeric_limits<double>::quiet_NaN(),HeadingReference::True);
-    expect(HeadingReference::True,"359","deg T");
+    expect(HeadingReference::True,"359","°T");
     fake_time_us+=61000000;
     instrument_data_update_heading(20*DEG,HeadingReference::True);
-    expect(HeadingReference::Magnetic,"--","deg M"); // Variation expired.
-    expect(HeadingReference::True,"20","deg T");
+    expect(HeadingReference::Magnetic,"--","°M"); // Variation expired.
+    expect(HeadingReference::True,"20","°T");
     instrument_data_update_variation(4); // Invalid variation cannot revive cache.
-    expect(HeadingReference::Magnetic,"--","deg M");
+    expect(HeadingReference::Magnetic,"--","°M");
     fake_time_us+=30000000;
     expect(HeadingReference::True,"--",""); // Heading expired.
     instrument_data_update_nmea(DataMetric::Heading,42*DEG);
-    expect(HeadingReference::True,"--","deg T"); // Unknown reference.
+    expect(HeadingReference::True,"--","°T"); // Unknown reference.
     DataFieldSelection cog{}; cog.metric=DataMetric::CourseOverGround;
     instrument_data_update_nmea(cog.metric,42*DEG);
     UnitsSettings units{};units.heading_reference=HeadingReference::Magnetic;
     char value[32], label[16];
     instrument_format_value(cog,units,instrument_data_get(cog),value,sizeof(value),label,sizeof(label));
-    assert(std::strcmp(value,"42")==0 && std::strcmp(label,"deg")==0);
+    assert(std::strcmp(value,"42")==0 && std::strcmp(label,"°")==0);
     instrument_data_update_heading(20*DEG,HeadingReference::True);
     instrument_data_update_variation(2*DEG);
     instrument_data_reset_nmea();
