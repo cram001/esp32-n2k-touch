@@ -2,6 +2,10 @@
 
 Marine touchscreen instrument for the Waveshare **ESP32-S3-Touch-LCD-4**.
 
+## First-time installation
+
+New to GitHub or VS Code? Start with the [step-by-step beginner installation guide](docs/beginner-installation.md). It covers the supported board, software downloads, cloning this repository, building, USB upload, first setup, updates and troubleshooting.
+
 ## 3D printed enclosure
 
 Wall mounted case 3D printed:  https://cults3d.com/en/3d-model/home/flush-mount-wall-case-for-waveshare-esp32-s3-touch-lcd-4-instrument-display
@@ -117,6 +121,8 @@ The [release plan](docs/release-plan.md) tracks completed work, heading referenc
 selection and the remaining wireless transport/gesture proposals.
 
 Install VS Code and the PlatformIO extension, clone the repository, and open the repository folder.
+
+For a walkthrough with every step explained, see [beginner installation](docs/beginner-installation.md).
 
 ```bash
 pio run
