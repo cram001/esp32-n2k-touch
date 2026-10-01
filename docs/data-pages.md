@@ -7,7 +7,12 @@ The display supports six user-configurable instrument pages. Each page can be en
 - 4 fields
 - 6 fields
 
-Disabled pages are skipped by the previous/next page controls. At least one page is always kept enabled.
+Disabled pages are skipped by left/right swipes. At least one page is always kept enabled.
+Navigation uses swipes: left/right changes enabled pages, down edits the current
+page and up opens Settings. The instrument screen has no bottom Setup or arrow
+buttons. Tiles use the released space; the page indicators remain at the bottom.
+Only Victron SmartShunt tiles display their source name. NMEA2000 source selection
+and identity remain available in the field editor.
 
 ## Field sources
 
@@ -19,16 +24,23 @@ Each tile stores three pieces of configuration:
 
 SmartShunt MAC addresses remain internal stable identifiers and are not part of normal field selection.
 
+NMEA2000 device selection is stored separately per field using unique NAME plus
+measurement instance/type. GPS fields share one device selection. The device
+button opens the source menu; automatic mode sticks to the first source without
+alternating or falling back.
+
 ## NMEA 2000 metrics
 
-The initial live decoder supports:
+The live decoder supports the original fields below, plus engines, tanks, position,
+navigation and environmental sensors documented in
+[sources and depth setup](sources-instruments-depth.md):
 
 - Depth — PGN 128267
 - Boat speed / speed through water — PGN 128259
 - SOG / COG — PGN 129026
 - Heading — PGN 127250; Units selects True or Magnetic. Conversion uses received
   magnetic variation (127250 or 127258); labels show `deg T` / `deg M`. Missing
-  variation shows `---` when conversion is required. COG remains unchanged.
+  variation shows `--` when conversion is required. COG remains unchanged.
 - Apparent wind speed/angle — PGN 130306
 - True wind speed/angle — PGN 130306
 - Water temperature — PGN 130312 and PGN 130316
@@ -68,4 +80,4 @@ Global unit settings currently include:
 - Short distance: metres / feet / yards
 - Short-distance threshold: default 0.20 NM, adjustable in 0.05 NM increments
 
-Values older than five seconds are shown as unavailable rather than leaving stale values frozen on screen.
+Values aged 30 seconds or more show `--`. This also applies to SmartShunt display values; its existing CAN safety cutoff remains five seconds.

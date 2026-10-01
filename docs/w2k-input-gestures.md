@@ -23,7 +23,7 @@ PGNs fit within that limit; truncated instrument PGNs are rejected.
 
 The TCP client uses a dedicated worker, bounded queues and nonblocking sockets.
 It retries failed connections after five seconds, and reports silence after five
-seconds without bytes. Instrument values retain their existing five-second expiry.
+seconds without bytes. Instrument values expire at thirty seconds and show `--`.
 Only the selected input updates N2K instruments. Changing mode or endpoint clears
 cached N2K values and heading variation. Queued frames from previous settings are
 discarded. Gateway data is never retransmitted onto CAN. The existing SmartShunt
@@ -34,7 +34,8 @@ Wi-Fi scanning remains on demand.
 
 On an instrument page, swipe left for the next enabled page and right for the
 previous enabled page. Swipe down to edit the page currently displayed. Swipe up
-to open Settings. Existing buttons remain available. Forms and keyboards do not
+to open Settings. Instrument pages use the bottom toolbar space for larger tiles;
+only the page indicators remain below the data. Forms and keyboards do not
 use these navigation gestures. A recognized gesture consumes the touch release
 before changing screens. Gesture callbacks and boot-screen updates run on LVGL's
 own task, under its existing ownership model.
@@ -45,12 +46,10 @@ background; the boot text does not claim a BLE device is connected.
 
 ## Multiple instrument devices
 
-Within the chosen wired or wireless input, each metric currently displays its
-last received value. Two depth or wind devices can therefore alternate. Per-metric
-device selection is a subsequent increment: discover and track NMEA 2000 NAMEs,
-persist selected device identity, and show stale data when it stops reporting.
-Fallback to another device should be an explicit option rather than an automatic
-change. CAN addresses alone are unsuitable as persistent device identities.
+Within the chosen wired or wireless input, values now retain their selected source.
+Use the field device menu to select an identified device/instance; all GPS fields
+share one GPS selection. Automatic mode sticks to the first source and does not
+fall back or alternate. See [sources and depth setup](sources-instruments-depth.md).
 
 ## Bench acceptance
 

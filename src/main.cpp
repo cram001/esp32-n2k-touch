@@ -1,5 +1,6 @@
 #include "app_settings.hpp"
 #include "n2k_bridge.hpp"
+#include "n2k_sources.hpp"
 #include "smartshunt_ble.hpp"
 #include "wifi_service.hpp"
 #include "ui.hpp"
@@ -89,6 +90,7 @@ extern "C" void app_main(void)
         ESP_LOGW(TAG, "Continuing with default settings because NVS initialization failed");
     }
     const AppSettings settings = settings_load();
+    const bool sources_ok = settings_ok && n2k_sources_init();
     ota_prepare();
     wifi_service_prepare();
 
@@ -129,7 +131,7 @@ extern "C" void app_main(void)
 
     // Confirm only after local services initialize. Router availability is not
     // a health requirement; Wi-Fi initialization itself must succeed.
-    if (settings_ok && wifi_ok && ble_ok && n2k_ok && ota_ok) {
+    if (settings_ok && sources_ok && wifi_ok && ble_ok && n2k_ok && ota_ok) {
         vTaskDelay(pdMS_TO_TICKS(5000));
         if (ui_is_healthy()) ota_confirm_running_image();
         else ota_reject_running_image();

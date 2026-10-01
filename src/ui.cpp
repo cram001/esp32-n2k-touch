@@ -14,6 +14,8 @@
 #include "lvgl.h"
 #include "n2k_bridge.hpp"
 #include "n2k_input.hpp"
+#include "n2k_sources.hpp"
+#include <cmath>
 #include "smartshunt_ble.hpp"
 #include "wifi_service.hpp"
 #include "ota.hpp"
@@ -43,6 +45,21 @@ lv_obj_t *g_data_screen = nullptr;
 lv_obj_t *g_boot_screen = nullptr;
 lv_obj_t *g_boot_status = nullptr;
 lv_obj_t *g_input_screen = nullptr;
+lv_obj_t *g_source_picker = nullptr, *g_source_list = nullptr, *g_source_status = nullptr;
+lv_obj_t *g_metric_picker = nullptr, *g_metric_list = nullptr;
+lv_obj_t *g_depth_screen = nullptr, *g_depth_mode = nullptr, *g_depth_keel = nullptr, *g_depth_waterline = nullptr;
+lv_obj_t *g_depth_keyboard = nullptr, *g_depth_status = nullptr;
+std::array<N2kSourceOption,16> g_source_options{};
+size_t g_source_count = 0;
+DepthConfig g_depth_draft{};
+N2kSourceChoice g_depth_source{};
+bool g_source_depth_picker=false;
+lv_obj_t *g_depth_source_button=nullptr;
+void source_picker_cb(lv_event_t *);
+void metric_picker_cb(lv_event_t *);
+void depth_screen_cb(lv_event_t *);
+uint8_t editing_field_id() {return static_cast<uint8_t>(g_edit_page*MAX_DATA_FIELDS_PER_PAGE+g_edit_field);}
+uint8_t editing_choice_id() {return n2k_sources_is_gps(g_settings.pages[g_edit_page].fields[g_edit_field].metric)?N2K_GPS_CHOICE:editing_field_id();}
 lv_obj_t *g_input_mode = nullptr;
 lv_obj_t *g_input_ip = nullptr;
 lv_obj_t *g_input_port = nullptr;
@@ -136,12 +153,53 @@ void ota_feedback(const char *text) {
 void update_wifi_scan();
 void update_ota_status();
 
-const std::array<DataMetric, 14> NMEA_METRICS = {
-    DataMetric::None, DataMetric::Depth, DataMetric::BoatSpeed, DataMetric::SpeedOverGround,
-    DataMetric::CourseOverGround, DataMetric::Heading, DataMetric::ApparentWindSpeed,
-    DataMetric::ApparentWindAngle, DataMetric::TrueWindSpeed, DataMetric::TrueWindAngle,
-    DataMetric::WaterTemperature, DataMetric::AirTemperature, DataMetric::DistanceToWaypoint,
-    DataMetric::TripDistance
+const std::array<DataMetric, 46> NMEA_METRICS = {
+    DataMetric::None,
+    DataMetric::Depth,
+    DataMetric::BoatSpeed,
+    DataMetric::SpeedOverGround,
+    DataMetric::CourseOverGround,
+    DataMetric::Heading,
+    DataMetric::ApparentWindSpeed,
+    DataMetric::ApparentWindAngle,
+    DataMetric::TrueWindSpeed,
+    DataMetric::TrueWindAngle,
+    DataMetric::WaterTemperature,
+    DataMetric::AirTemperature,
+    DataMetric::DistanceToWaypoint,
+    DataMetric::TripDistance,
+    DataMetric::EngineRpm,
+    DataMetric::EngineCoolantTemperature,
+    DataMetric::EngineOilPressure,
+    DataMetric::EngineOilTemperature,
+    DataMetric::EngineBoostPressure,
+    DataMetric::EngineAlternatorVoltage,
+    DataMetric::EngineFuelRate,
+    DataMetric::EngineHours,
+    DataMetric::EngineCoolantPressure,
+    DataMetric::EngineFuelPressure,
+    DataMetric::EngineLoad,
+    DataMetric::EngineTorque,
+    DataMetric::EngineExhaustTemperature,
+    DataMetric::TankLevel,
+    DataMetric::TankCapacity,
+    DataMetric::Latitude,
+    DataMetric::Longitude,
+    DataMetric::Altitude,
+    DataMetric::WaypointBearing,
+    DataMetric::WaypointVmg,
+    DataMetric::CrossTrackError,
+    DataMetric::WaypointName,
+    DataMetric::CabinTemperature,
+    DataMetric::EngineRoomTemperature,
+    DataMetric::EnvironmentalTemperature,
+    DataMetric::AtmosphericPressure,
+    DataMetric::Humidity,
+    DataMetric::MagneticVariation,
+    DataMetric::DepthTransducer,
+    DataMetric::DepthBelowKeel,
+    DataMetric::DepthWaterline,
+    DataMetric::DepthSensorOffset
 };
 const std::array<DataMetric, 6> SHUNT_METRICS = {
     DataMetric::BatteryVoltage, DataMetric::BatteryCurrent, DataMetric::BatterySoc,
@@ -203,6 +261,7 @@ void apply_theme_to(lv_obj_t *screen)
 
 void apply_theme()
 {
+    apply_theme_to(g_source_picker);apply_theme_to(g_metric_picker);apply_theme_to(g_depth_screen);
     apply_theme_to(g_input_screen);
     apply_theme_to(g_data_screen); apply_theme_to(g_settings_screen); apply_theme_to(g_page_setup_screen);
     apply_theme_to(g_field_editor_screen); apply_theme_to(g_units_screen); apply_theme_to(g_shunts_screen);
@@ -252,12 +311,17 @@ size_t next_enabled_page(size_t from,int direction)
 void position_tile(size_t index, PageLayout layout)
 {
     lv_obj_t *box=g_tile_boxes[index]; if(!box) return;
-    int x=10,y=48,w=460,h=326; const size_t count=layout_count(layout);
-    if(count==2){x=10;w=460;h=155;y=48+static_cast<int>(index)*161;}
-    else if(count==4){w=226;h=155;x=10+static_cast<int>(index%2)*234;y=48+static_cast<int>(index/2)*161;}
-    else if(count==6){w=226;h=101;x=10+static_cast<int>(index%2)*234;y=48+static_cast<int>(index/2)*107;}
+    // Gestures replace the bottom toolbar; reserve only the page indicator.
+    constexpr int top=48, area_height=410, gap=8;
+    const size_t count=layout_count(layout);
+    const int columns=count>=4?2:1;
+    const int rows=static_cast<int>(count)/columns;
+    const int w=columns==2?226:460;
+    const int h=(area_height-(rows-1)*gap)/rows;
+    const int x=10+static_cast<int>(index%columns)*(w+gap);
+    const int y=top+static_cast<int>(index/columns)*(h+gap);
     lv_obj_set_pos(box,x,y);lv_obj_set_size(box,w,h);lv_obj_set_style_pad_all(box,8,0);style_card(box);
-    const lv_font_t *vf=count==1?&lv_font_montserrat_48:(count<=4?&lv_font_montserrat_32:&lv_font_montserrat_24);
+    const lv_font_t *vf=count<=2?&lv_font_montserrat_48:&lv_font_montserrat_32;
     lv_obj_set_style_text_font(g_tile_values[index],vf,0);
     lv_obj_set_style_text_color(g_tile_titles[index], ui_muted(), 0);
     lv_obj_set_style_text_color(g_tile_values[index], ui_text(), 0);
@@ -266,6 +330,9 @@ void position_tile(size_t index, PageLayout layout)
     lv_obj_align(g_tile_titles[index],LV_ALIGN_TOP_LEFT,2,0);
     lv_obj_align(g_tile_values[index],LV_ALIGN_CENTER,-10,count==6?2:5);
     lv_obj_align_to(g_tile_units[index],g_tile_values[index],LV_ALIGN_OUT_RIGHT_MID,6,0);
+    lv_obj_set_width(g_tile_sources[index],w-20);
+    lv_label_set_long_mode(g_tile_sources[index],LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_style_text_align(g_tile_sources[index],LV_TEXT_ALIGN_RIGHT,0);
     lv_obj_align(g_tile_sources[index],LV_ALIGN_BOTTOM_RIGHT,-2,0);
 }
 
@@ -285,8 +352,24 @@ void render_active_page()
     for(size_t i=0;i<MAX_DATA_FIELDS_PER_PAGE;++i){
         if(i>=count){lv_obj_add_flag(g_tile_boxes[i],LV_OBJ_FLAG_HIDDEN);continue;}
         lv_obj_remove_flag(g_tile_boxes[i],LV_OBJ_FLAG_HIDDEN);position_tile(i,active.layout);
-        const auto &sel=active.fields[i];lv_label_set_text(g_tile_titles[i],instrument_metric_name(sel.metric));lv_label_set_text(g_tile_sources[i],instrument_source_name(sel,g_settings));
-        const InstrumentValue v=instrument_data_get(sel);char value[32],unit[12];instrument_format_value(sel,g_settings.units,v,value,sizeof(value),unit,sizeof(unit));
+        const auto &sel=active.fields[i];lv_label_set_text(g_tile_titles[i],instrument_metric_name(sel.metric));
+        if(sel.source==DataSourceType::SmartShunt){
+            lv_label_set_text(g_tile_sources[i],instrument_source_name(sel,g_settings,static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+i)));
+            lv_obj_remove_flag(g_tile_sources[i],LV_OBJ_FLAG_HIDDEN);
+        }else{
+            lv_obj_add_flag(g_tile_sources[i],LV_OBJ_FLAG_HIDDEN);
+        }
+        const InstrumentValue v=instrument_data_get(sel,static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+i));
+        if(sel.metric==DataMetric::Depth){
+            const char *depth_titles[]={"Depth (transducer)","Depth (sensor)","Depth (keel)","Depth (surface)"};
+            lv_label_set_text(g_tile_titles[i],depth_titles[v.depth_reference<4?v.depth_reference:0]);
+        }
+        if(sel.metric==DataMetric::WaypointName || sel.metric==DataMetric::Latitude || sel.metric==DataMetric::Longitude){
+            lv_obj_set_style_text_font(g_tile_values[i],count==1?&lv_font_montserrat_32:&lv_font_montserrat_20,0);
+            lv_obj_set_width(g_tile_values[i],lv_obj_get_width(g_tile_boxes[i])-90);
+            lv_label_set_long_mode(g_tile_values[i],LV_LABEL_LONG_MODE_DOTS);
+        }else{lv_obj_set_width(g_tile_values[i],LV_SIZE_CONTENT);lv_label_set_long_mode(g_tile_values[i],LV_LABEL_LONG_MODE_WRAP);}
+        char value[40],unit[12];instrument_format_value(sel,g_settings.units,v,value,sizeof(value),unit,sizeof(unit));
         lv_label_set_text(g_tile_values[i],value);lv_label_set_text(g_tile_units[i],unit);
     }
 }
@@ -320,11 +403,11 @@ void brightness_up_cb(lv_event_t *){uint8_t &v=g_settings.theme==DisplayTheme::D
 
 void update_page_setup()
 {
-    auto &p=g_settings.pages[g_edit_page];char b[48];std::snprintf(b,sizeof(b),"PAGE %u - %s",static_cast<unsigned>(g_edit_page+1),p.name.data());lv_label_set_text(g_page_setup_title,b);
+    auto &p=g_settings.pages[g_edit_page];char b[120];std::snprintf(b,sizeof(b),"PAGE %u - %s",static_cast<unsigned>(g_edit_page+1),p.name.data());lv_label_set_text(g_page_setup_title,b);
     if(p.enabled)lv_obj_add_state(g_page_enable_switch,LV_STATE_CHECKED);else lv_obj_remove_state(g_page_enable_switch,LV_STATE_CHECKED);
     std::snprintf(b,sizeof(b),"LAYOUT: %u",static_cast<unsigned>(layout_count(p.layout)));lv_label_set_text(g_layout_button_label,b);
     const size_t count=layout_count(p.layout);
-    for(size_t i=0;i<MAX_DATA_FIELDS_PER_PAGE;++i){if(i>=count){lv_obj_add_flag(g_field_buttons[i],LV_OBJ_FLAG_HIDDEN);continue;}lv_obj_remove_flag(g_field_buttons[i],LV_OBJ_FLAG_HIDDEN);const auto &f=p.fields[i];std::snprintf(b,sizeof(b),"%u. %s\n%s",static_cast<unsigned>(i+1),instrument_metric_name(f.metric),instrument_source_name(f,g_settings));lv_label_set_text(g_field_button_labels[i],b);}
+    for(size_t i=0;i<MAX_DATA_FIELDS_PER_PAGE;++i){if(i>=count){lv_obj_add_flag(g_field_buttons[i],LV_OBJ_FLAG_HIDDEN);continue;}lv_obj_remove_flag(g_field_buttons[i],LV_OBJ_FLAG_HIDDEN);const auto &f=p.fields[i];std::snprintf(b,sizeof(b),"%u. %s\n%s",static_cast<unsigned>(i+1),instrument_metric_name(f.metric),instrument_source_name(f,g_settings,static_cast<uint8_t>(g_edit_page*MAX_DATA_FIELDS_PER_PAGE+i)));lv_label_set_text(g_field_button_labels[i],b);}
 }
 void page_setup_screen_cb(lv_event_t *){update_page_setup();lv_screen_load(g_page_setup_screen);}
 void edit_prev_page_cb(lv_event_t *){g_edit_page=(g_edit_page+MAX_DATA_PAGES-1)%MAX_DATA_PAGES;update_page_setup();}
@@ -335,13 +418,14 @@ void layout_cb(lv_event_t *){auto &l=g_settings.pages[g_edit_page].layout;if(l==
 void update_field_editor()
 {
     auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];lv_label_set_text(g_field_source_label,f.source==DataSourceType::Nmea2000?"NMEA 2000":"SMARTSHUNT");lv_label_set_text(g_field_metric_label,instrument_metric_name(f.metric));
-    if(f.source==DataSourceType::SmartShunt){lv_obj_remove_flag(g_field_device_button,LV_OBJ_FLAG_HIDDEN);lv_label_set_text(g_field_device_label,instrument_source_name(f,g_settings));}else lv_obj_add_flag(g_field_device_button,LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(g_field_device_button,LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(g_field_device_label,instrument_source_name(f,g_settings,editing_field_id()));
 }
 void open_field_editor_cb(lv_event_t *e){g_edit_field=static_cast<size_t>(reinterpret_cast<uintptr_t>(lv_event_get_user_data(e)));update_field_editor();lv_screen_load(g_field_editor_screen);}
-void field_source_cb(lv_event_t *){auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];f.source=f.source==DataSourceType::Nmea2000?DataSourceType::SmartShunt:DataSourceType::Nmea2000;f.metric=f.source==DataSourceType::Nmea2000?DataMetric::Depth:DataMetric::BatteryVoltage;persist();update_field_editor();}
-void field_metric_step(int direction){auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];if(f.source==DataSourceType::Nmea2000){int pos=0;for(size_t i=0;i<NMEA_METRICS.size();++i)if(NMEA_METRICS[i]==f.metric){pos=static_cast<int>(i);break;}const int n=static_cast<int>(NMEA_METRICS.size());pos=(pos+direction+n)%n;f.metric=NMEA_METRICS[static_cast<size_t>(pos)];}else{int pos=0;for(size_t i=0;i<SHUNT_METRICS.size();++i)if(SHUNT_METRICS[i]==f.metric){pos=static_cast<int>(i);break;}const int n=static_cast<int>(SHUNT_METRICS.size());pos=(pos+direction+n)%n;f.metric=SHUNT_METRICS[static_cast<size_t>(pos)];}persist();update_field_editor();}
+void field_source_cb(lv_event_t *){if(!n2k_sources_save_choice(editing_field_id(),N2kSourceChoice{}))return;auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];f.source=f.source==DataSourceType::Nmea2000?DataSourceType::SmartShunt:DataSourceType::Nmea2000;f.metric=f.source==DataSourceType::Nmea2000?DataMetric::Depth:DataMetric::BatteryVoltage;persist();update_field_editor();}
+void field_metric_step(int direction){auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];if(f.source==DataSourceType::Nmea2000){if(!n2k_sources_save_choice(editing_field_id(),N2kSourceChoice{}))return;int pos=0;for(size_t i=0;i<NMEA_METRICS.size();++i)if(NMEA_METRICS[i]==f.metric){pos=static_cast<int>(i);break;}const int n=static_cast<int>(NMEA_METRICS.size());pos=(pos+direction+n)%n;f.metric=NMEA_METRICS[static_cast<size_t>(pos)];}else{int pos=0;for(size_t i=0;i<SHUNT_METRICS.size();++i)if(SHUNT_METRICS[i]==f.metric){pos=static_cast<int>(i);break;}const int n=static_cast<int>(SHUNT_METRICS.size());pos=(pos+direction+n)%n;f.metric=SHUNT_METRICS[static_cast<size_t>(pos)];}persist();update_field_editor();}
 void field_metric_prev_cb(lv_event_t *){field_metric_step(-1);}void field_metric_next_cb(lv_event_t *){field_metric_step(1);}
-void field_device_cb(lv_event_t *){auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];for(size_t step=1;step<=MAX_SMARTSHUNTS;++step){size_t idx=(f.source_index+step)%MAX_SMARTSHUNTS;if(g_settings.smartshunts[idx].configured){f.source_index=idx;break;}}persist();update_field_editor();}
+void field_device_cb(lv_event_t *){auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];if(f.source==DataSourceType::Nmea2000){g_source_depth_picker=false;n2k_bridge_request_sources();source_picker_cb(nullptr);return;}for(size_t step=1;step<=MAX_SMARTSHUNTS;++step){size_t idx=(f.source_index+step)%MAX_SMARTSHUNTS;if(g_settings.smartshunts[idx].configured){f.source_index=idx;break;}}persist();update_field_editor();}
 void field_done_cb(lv_event_t *){update_page_setup();lv_screen_load(g_page_setup_screen);}
 
 const char *depth_name(){return g_settings.units.depth==DepthUnit::Metres?"METRES":"FEET";}const char *temp_name(){return g_settings.units.temperature==TemperatureUnit::Celsius?"CELSIUS":"FAHRENHEIT";}const char *speed_name(SpeedUnit u){return u==SpeedUnit::Knots?"KNOTS":(u==SpeedUnit::KilometresPerHour?"KM/H":"M/S");}const char *distance_name(){return g_settings.units.distance==DistanceUnit::NauticalMiles?"NM":"KM";}const char *short_name(){return g_settings.units.short_distance==ShortDistanceUnit::Metres?"METRES":(g_settings.units.short_distance==ShortDistanceUnit::Feet?"FEET":"YARDS");}
@@ -587,6 +671,122 @@ void input_save_cb(lv_event_t *) {
     }
     g_input_feedback = false; n2k_bridge_apply_settings(g_settings); update_input_status();
 }
+void source_choice_cb(lv_event_t *event) {
+    const size_t item=reinterpret_cast<uintptr_t>(lv_event_get_user_data(event));
+    const N2kSourceChoice choice=item?g_source_options[item-1].choice:N2kSourceChoice{};
+    if(g_source_depth_picker){
+        g_depth_source=choice;
+        lv_label_set_text(button_label(g_depth_source_button),item?g_source_options[item-1].label.data():"DEFAULT FOR UNCONFIGURED SENSORS");
+        depth_screen_cb(nullptr);return;
+    }
+    if(!n2k_sources_save_choice(editing_choice_id(),choice)){lv_label_set_text(g_source_status,"Could not save selection; please retry");return;}
+    update_field_editor();lv_screen_load(g_field_editor_screen);
+}
+void source_back_cb(lv_event_t *) {
+    if(lv_screen_active()==g_source_picker && g_source_depth_picker){lv_screen_load(g_depth_screen);return;}
+    update_field_editor();lv_screen_load(g_field_editor_screen);
+}
+void source_refresh_cb(lv_event_t *) {n2k_bridge_request_sources();source_picker_cb(nullptr);}
+void source_picker_cb(lv_event_t *) {
+    const auto &field=g_settings.pages[g_edit_page].fields[g_edit_field];
+    lv_obj_clean(g_source_list);
+    const DataMetric metric=g_source_depth_picker?DataMetric::Depth:field.metric;
+    g_source_count=n2k_sources_options(metric,g_source_options.data(),g_source_options.size());
+    lv_label_set_text(g_source_status,n2k_sources_is_gps(metric)?"One GPS for position, altitude, speed and course":"Selection stays locked; missing data shows --");
+    lv_obj_t *button=make_button(g_source_list,g_source_depth_picker?"DEFAULT FOR UNCONFIGURED SENSORS":"AUTOMATIC: FIRST SOURCE (NO FALLBACK)",source_choice_cb,410,54);
+    lv_obj_set_pos(button,0,0);
+    for(size_t i=0;i<g_source_count;++i){
+        char text[110];std::snprintf(text,sizeof(text),"%s%s",g_source_options[i].label.data(),g_source_options[i].stale?" / stale":"");
+        button=make_button(g_source_list,text,source_choice_cb,410,74,reinterpret_cast<void *>(i+1));
+        lv_obj_set_width(button_label(button),390);lv_label_set_long_mode(button_label(button),LV_LABEL_LONG_MODE_WRAP);
+        lv_obj_set_pos(button,0,static_cast<int>(60+i*80));
+    }
+    if(!g_source_count)lv_label_set_text(g_source_status,"No sources received yet. Wait for data, then Refresh.");
+    lv_screen_load(g_source_picker);
+}
+void metric_choice_cb(lv_event_t *event) {
+    const auto metric=static_cast<DataMetric>(reinterpret_cast<uintptr_t>(lv_event_get_user_data(event)));
+    auto &field=g_settings.pages[g_edit_page].fields[g_edit_field];
+    if(field.source==DataSourceType::Nmea2000 && field.metric!=metric && !n2k_sources_save_choice(editing_field_id(),N2kSourceChoice{}))return;
+    field.metric=metric;persist();update_field_editor();lv_screen_load(g_field_editor_screen);
+}
+void metric_picker_cb(lv_event_t *) {
+    lv_obj_clean(g_metric_list);
+    const bool nmea=g_settings.pages[g_edit_page].fields[g_edit_field].source==DataSourceType::Nmea2000;
+    size_t row=0;
+    for(unsigned i=0;i<static_cast<unsigned>(DataMetric::Count);++i){
+        const auto metric=static_cast<DataMetric>(i);
+        if(metric!=DataMetric::None && !instrument_metric_supported(nmea?DataSourceType::Nmea2000:DataSourceType::SmartShunt,metric))continue;
+        lv_obj_t *button=make_button(g_metric_list,instrument_metric_name(metric),metric_choice_cb,410,48,reinterpret_cast<void *>(i));
+        lv_obj_set_pos(button,0,static_cast<int>(row++*54));
+    }
+    lv_screen_load(g_metric_picker);
+}
+const char *depth_reference_name(DepthReference ref) {
+    switch(ref){case DepthReference::SensorOffset:return "SENSOR-PROVIDED OFFSET";case DepthReference::Keel:return "BELOW KEEL";
+    case DepthReference::Waterline:return "BELOW WATER SURFACE";default:return "BELOW TRANSDUCER";}
+}
+void depth_keyboard_hide(){lv_obj_add_flag(g_depth_keyboard,LV_OBJ_FLAG_HIDDEN);lv_keyboard_set_textarea(g_depth_keyboard,nullptr);}
+void depth_keyboard_cb(lv_event_t *event){if(lv_event_get_code(event)==LV_EVENT_READY||lv_event_get_code(event)==LV_EVENT_CANCEL)depth_keyboard_hide();}
+void depth_focus_cb(lv_event_t *event){lv_keyboard_set_mode(g_depth_keyboard,LV_KEYBOARD_MODE_NUMBER);lv_keyboard_set_textarea(g_depth_keyboard,lv_event_get_target_obj(event));lv_obj_remove_flag(g_depth_keyboard,LV_OBJ_FLAG_HIDDEN);lv_obj_move_foreground(g_depth_keyboard);}
+void depth_mode_cb(lv_event_t *) {g_depth_draft.reference=static_cast<DepthReference>((static_cast<unsigned>(g_depth_draft.reference)+1)%4);lv_label_set_text(button_label(g_depth_mode),depth_reference_name(g_depth_draft.reference));}
+void depth_screen_cb(lv_event_t *) {
+    g_depth_draft=n2k_sources_depth(&g_depth_source);depth_keyboard_hide();
+    lv_label_set_text(button_label(g_depth_mode),depth_reference_name(g_depth_draft.reference));
+    char value[20];std::snprintf(value,sizeof(value),"%.3f",g_depth_draft.transducer_to_keel_m);lv_textarea_set_text(g_depth_keel,g_depth_draft.keel_set?value:"");
+    std::snprintf(value,sizeof(value),"%.3f",g_depth_draft.transducer_to_waterline_m);lv_textarea_set_text(g_depth_waterline,g_depth_draft.waterline_set?value:"");
+    lv_label_set_text(g_depth_status,"Sensor offset is used once; local modes use raw depth.");lv_screen_load(g_depth_screen);
+}
+void depth_back_cb(lv_event_t *) {depth_keyboard_hide();lv_screen_load(g_settings_screen);}
+bool depth_distance(lv_obj_t *field,float &value,bool &set) {
+    const char *text=lv_textarea_get_text(field);set=*text;
+    if(!set){value=0;return true;}
+    char *end=nullptr;value=std::strtof(text,&end);return end && !*end && std::isfinite(value) && value>=0 && value<=100;
+}
+void depth_save_cb(lv_event_t *) {
+    depth_keyboard_hide();
+    if(g_depth_source.mode==SourceChoiceMode::Automatic && (g_depth_draft.reference==DepthReference::Keel || g_depth_draft.reference==DepthReference::Waterline || *lv_textarea_get_text(g_depth_keel) || *lv_textarea_get_text(g_depth_waterline))){
+        lv_label_set_text(g_depth_status,"Select the depth sensor before entering installation distances.");return;
+    }
+    if(!depth_distance(g_depth_keel,g_depth_draft.transducer_to_keel_m,g_depth_draft.keel_set) ||
+       !depth_distance(g_depth_waterline,g_depth_draft.transducer_to_waterline_m,g_depth_draft.waterline_set) ||
+       (g_depth_draft.reference==DepthReference::Keel&&!g_depth_draft.keel_set) ||
+       (g_depth_draft.reference==DepthReference::Waterline&&!g_depth_draft.waterline_set)){
+        lv_label_set_text(g_depth_status,"Enter the required distance in metres (0-100).");return;
+    }
+    lv_label_set_text(g_depth_status,n2k_sources_save_depth(g_depth_draft,&g_depth_source)?"Depth settings saved":"Could not save depth settings; please retry");render_active_page();
+}
+void depth_source_cb(lv_event_t *) {depth_keyboard_hide();g_source_depth_picker=true;n2k_bridge_request_sources();source_picker_cb(nullptr);}
+void create_source_depth_screens() {
+    auto picker=[](const char *title,lv_obj_t *&list){
+        lv_obj_t *screen=require_obj(lv_obj_create(nullptr),"source/metric screen");lv_obj_remove_flag(screen,LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_t *label=lv_label_create(screen);lv_label_set_text(label,title);lv_obj_align(label,LV_ALIGN_TOP_MID,0,18);
+        list=lv_obj_create(screen);lv_obj_set_size(list,440,305);lv_obj_align(list,LV_ALIGN_TOP_MID,0,78);lv_obj_set_scroll_dir(list,LV_DIR_VER);
+        lv_obj_t *back=make_button(screen,"BACK",source_back_cb,150,48);lv_obj_align(back,LV_ALIGN_BOTTOM_LEFT,35,-18);return screen;
+    };
+    g_source_picker=picker("SELECT NMEA SOURCE",g_source_list);
+    g_source_status=lv_label_create(g_source_picker);lv_obj_set_width(g_source_status,440);lv_obj_set_style_text_align(g_source_status,LV_TEXT_ALIGN_CENTER,0);lv_obj_align(g_source_status,LV_ALIGN_TOP_MID,0,45);
+    lv_obj_t *button=make_button(g_source_picker,"REFRESH",source_refresh_cb,150,48);lv_obj_align(button,LV_ALIGN_BOTTOM_RIGHT,-35,-18);
+    g_metric_picker=picker("SELECT DATA FIELD",g_metric_list);
+    g_depth_screen=require_obj(lv_obj_create(nullptr),"depth screen");lv_obj_remove_flag(g_depth_screen,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t *label=lv_label_create(g_depth_screen);lv_label_set_text(label,"DEPTH SETUP");lv_obj_set_style_text_font(label,&lv_font_montserrat_24,0);lv_obj_align(label,LV_ALIGN_TOP_MID,0,18);
+    g_depth_source_button=make_button(g_depth_screen,"DEFAULT FOR UNCONFIGURED SENSORS",depth_source_cb,410,54);
+    lv_obj_set_width(button_label(g_depth_source_button),390);lv_label_set_long_mode(button_label(g_depth_source_button),LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_align(g_depth_source_button,LV_ALIGN_TOP_MID,0,56);
+    g_depth_mode=make_button(g_depth_screen,"BELOW TRANSDUCER",depth_mode_cb,380,48);lv_obj_align(g_depth_mode,LV_ALIGN_TOP_MID,0,120);
+    auto field=[](const char *text,int y){
+        lv_obj_t *label=lv_label_create(g_depth_screen);lv_label_set_text(label,text);lv_obj_align(label,LV_ALIGN_TOP_LEFT,25,y);
+        lv_obj_t *ta=lv_textarea_create(g_depth_screen);lv_obj_set_size(ta,175,48);lv_obj_align(ta,LV_ALIGN_TOP_RIGHT,-25,y-14);
+        lv_textarea_set_one_line(ta,true);lv_textarea_set_max_length(ta,8);lv_textarea_set_accepted_chars(ta,"0123456789.");lv_obj_add_event_cb(ta,depth_focus_cb,LV_EVENT_FOCUSED,nullptr);return ta;
+    };
+    g_depth_keel=field("Transducer to keel (m)",190);g_depth_waterline=field("Transducer to surface (m)",248);
+    label=lv_label_create(g_depth_screen);lv_obj_set_width(label,430);
+    lv_label_set_text(label,"Distances belong to the selected transducer.\nKeel: raw minus distance; surface: raw plus distance.\nDepth >1000m and 30s-old values show --.");lv_obj_align(label,LV_ALIGN_TOP_MID,0,288);
+    g_depth_status=lv_label_create(g_depth_screen);lv_obj_set_width(g_depth_status,430);lv_obj_set_style_text_align(g_depth_status,LV_TEXT_ALIGN_CENTER,0);lv_obj_align(g_depth_status,LV_ALIGN_TOP_MID,0,365);
+    button=make_button(g_depth_screen,"SAVE",depth_save_cb,150,48);lv_obj_align(button,LV_ALIGN_BOTTOM_RIGHT,-35,-18);
+    button=make_button(g_depth_screen,"BACK",depth_back_cb,150,48);lv_obj_align(button,LV_ALIGN_BOTTOM_LEFT,35,-18);
+    g_depth_keyboard=lv_keyboard_create(g_depth_screen);lv_obj_set_size(g_depth_keyboard,460,220);lv_obj_align(g_depth_keyboard,LV_ALIGN_BOTTOM_MID,0,0);lv_obj_add_event_cb(g_depth_keyboard,depth_keyboard_cb,LV_EVENT_ALL,nullptr);depth_keyboard_hide();
+}
 void create_input_screen() {
     g_input_screen = require_obj(lv_obj_create(nullptr), "NMEA input screen");
     lv_obj_remove_flag(g_input_screen, LV_OBJ_FLAG_SCROLLABLE);
@@ -642,13 +842,6 @@ void create_data_screen()
         lv_obj_set_style_text_font(g_tile_sources[i],&lv_font_montserrat_14,0);
     }
 
-    lv_obj_t *b=make_button(g_data_screen,"<",previous_page_cb,58,40);
-    lv_obj_align(b,LV_ALIGN_BOTTOM_LEFT,12,-9);
-    b=make_button(g_data_screen,"SETUP",settings_screen_cb,96,40);
-    lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-9);
-    b=make_button(g_data_screen,">",next_page_cb,58,40);
-    lv_obj_align(b,LV_ALIGN_BOTTOM_RIGHT,-12,-9);
-
     for(size_t i=0;i<MAX_DATA_PAGES;++i){
         g_page_dots[i]=lv_obj_create(g_data_screen);
         lv_obj_remove_flag(g_page_dots[i],LV_OBJ_FLAG_SCROLLABLE);
@@ -656,7 +849,7 @@ void create_data_screen()
         lv_obj_set_style_radius(g_page_dots[i],LV_RADIUS_CIRCLE,0);
         lv_obj_set_style_border_width(g_page_dots[i],0,0);
         lv_obj_set_style_pad_all(g_page_dots[i],0,0);
-        lv_obj_set_pos(g_page_dots[i],216+static_cast<int>(i)*14,421);
+        lv_obj_set_pos(g_page_dots[i],201+static_cast<int>(i)*14,466);
     }
 }
 void create_settings_screen()
@@ -672,8 +865,10 @@ void create_settings_screen()
     lv_obj_align(b,LV_ALIGN_TOP_LEFT,30,62);
     b=make_button(g_settings_screen,"UNITS",units_screen_cb,200,48);
     lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-30,62);
-    b=make_button(g_settings_screen,"NMEA Input",input_screen_cb,260,48);
-    lv_obj_align(b,LV_ALIGN_TOP_MID,0,116);
+    b=make_button(g_settings_screen,"NMEA Input",input_screen_cb,200,48);
+    lv_obj_align(b,LV_ALIGN_TOP_LEFT,30,116);
+    b=make_button(g_settings_screen,"Depth Setup",depth_screen_cb,200,48);
+    lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-30,116);
     b=make_button(g_settings_screen,"Wi-Fi",wifi_screen_cb,260,48);
     lv_obj_align(b,LV_ALIGN_TOP_MID,0,170);
     b=make_button(g_settings_screen,"SmartShunts",shunts_screen_cb,260,48);
@@ -762,7 +957,7 @@ void create_field_editor_screen()
     lv_obj_align(l, LV_ALIGN_TOP_LEFT, 40, 175);
     b = make_button(g_field_editor_screen, "<", field_metric_prev_cb, 55, 50);
     lv_obj_align(b, LV_ALIGN_TOP_LEFT, 130, 157);
-    b = make_button(g_field_editor_screen, "", field_metric_next_cb, 190, 50);
+    b = make_button(g_field_editor_screen, "", metric_picker_cb, 190, 50);
     g_field_metric_label = button_label(b);
     lv_obj_align(b, LV_ALIGN_TOP_MID, 55, 157);
     b = make_button(g_field_editor_screen, ">", field_metric_next_cb, 55, 50);
@@ -771,7 +966,9 @@ void create_field_editor_screen()
     l = require_obj(lv_label_create(g_field_editor_screen), "field device label");
     lv_label_set_text(l, "Device");
     lv_obj_align(l, LV_ALIGN_TOP_LEFT, 40, 250);
-    g_field_device_button = make_button(g_field_editor_screen, "", field_device_cb, 250, 52);
+    g_field_device_button = make_button(g_field_editor_screen, "", field_device_cb, 320, 100);
+    lv_obj_set_width(button_label(g_field_device_button),300);
+    lv_label_set_long_mode(button_label(g_field_device_button),LV_LABEL_LONG_MODE_WRAP);
     g_field_device_label = button_label(g_field_device_button);
     lv_obj_align(g_field_device_button, LV_ALIGN_TOP_RIGHT, -40, 232);
 
@@ -985,6 +1182,7 @@ void ui_start(const AppSettings &initial_settings)
     g_active_page = first_enabled_page();
 
     create_data_screen();
+    create_source_depth_screens();
     create_input_screen();
     create_settings_screen();
     create_page_setup_screen();

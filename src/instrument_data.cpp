@@ -8,10 +8,11 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "smartshunt_ble.hpp"
+#include "n2k_sources.hpp"
 
 namespace {
-constexpr uint32_t NMEA_STALE_MS = 5000;
-constexpr int64_t VARIATION_STALE_US = 60000000;
+constexpr uint32_t NMEA_STALE_MS = 30000;
+constexpr int64_t VARIATION_STALE_US = 30000000;
 constexpr double MPS_TO_KNOTS = 1.94384449244;
 constexpr double MPS_TO_KPH = 3.6;
 constexpr double M_TO_FT = 3.280839895;
@@ -19,7 +20,7 @@ constexpr double M_TO_YD = 1.093613298;
 constexpr double M_TO_NM = 1.0 / 1852.0;
 constexpr double M_TO_KM = 0.001;
 constexpr double RAD_TO_DEG = 57.29577951308232;
-constexpr size_t METRIC_COUNT = static_cast<size_t>(DataMetric::BatteryTemperature) + 1U;
+constexpr size_t METRIC_COUNT = static_cast<size_t>(DataMetric::Count);
 
 struct CachedValue {
     bool valid = false;
@@ -37,7 +38,7 @@ size_t metric_index(DataMetric metric) { return static_cast<size_t>(metric); }
 bool is_angle(DataMetric metric)
 {
     return metric == DataMetric::CourseOverGround || metric == DataMetric::Heading ||
-           metric == DataMetric::ApparentWindAngle || metric == DataMetric::TrueWindAngle;
+           metric == DataMetric::ApparentWindAngle || metric == DataMetric::TrueWindAngle || metric == DataMetric::WaypointBearing || metric == DataMetric::MagneticVariation;
 }
 
 bool is_wind_speed(DataMetric metric)
@@ -47,13 +48,13 @@ bool is_wind_speed(DataMetric metric)
 
 bool is_vessel_speed(DataMetric metric)
 {
-    return metric == DataMetric::BoatSpeed || metric == DataMetric::SpeedOverGround;
+    return metric == DataMetric::BoatSpeed || metric == DataMetric::SpeedOverGround || metric == DataMetric::WaypointVmg;
 }
 
 bool is_temperature(DataMetric metric)
 {
     return metric == DataMetric::WaterTemperature || metric == DataMetric::AirTemperature ||
-           metric == DataMetric::BatteryTemperature;
+           metric == DataMetric::BatteryTemperature || metric == DataMetric::EngineCoolantTemperature || metric == DataMetric::EngineOilTemperature || metric == DataMetric::EngineExhaustTemperature || metric == DataMetric::CabinTemperature || metric == DataMetric::EngineRoomTemperature || metric == DataMetric::EnvironmentalTemperature;
 }
 
 bool is_distance(DataMetric metric)
@@ -85,7 +86,8 @@ InstrumentValue smartshunt_value(const DataFieldSelection &selection)
     InstrumentValue out{};
     if (selection.source_index >= MAX_SMARTSHUNTS) return out;
     const SmartShuntData d = smartshunt_ble_get_data(selection.source_index);
-    out.stale = d.stale;
+    // CAN bridge retains its five-second safety cutoff; display keeps values for 30 seconds.
+    out.stale = d.age_ms >= 30000;
     out.age_ms = d.age_ms;
     switch (selection.metric) {
     case DataMetric::BatteryVoltage: out.valid = d.voltage_valid; out.value = d.voltage_v; break;
@@ -101,6 +103,7 @@ InstrumentValue smartshunt_value(const DataFieldSelection &selection)
 }
 
 void instrument_data_reset_nmea() {
+    n2k_sources_reset();
     portENTER_CRITICAL(&g_nmea_mux);
     g_nmea = {}; g_variation = {};
     portEXIT_CRITICAL(&g_nmea_mux);
@@ -144,10 +147,11 @@ void instrument_data_update_variation(double radians)
     portEXIT_CRITICAL(&g_nmea_mux);
 }
 
-InstrumentValue instrument_data_get(const DataFieldSelection &selection)
+InstrumentValue instrument_data_get(const DataFieldSelection &selection, uint8_t field_id)
 {
     if (selection.source == DataSourceType::SmartShunt) return smartshunt_value(selection);
     InstrumentValue out{};
+    if (n2k_sources_get(selection.metric,field_id,out)) return out;
     const size_t idx = metric_index(selection.metric);
     if (idx >= g_nmea.size()) return out;
 
@@ -162,9 +166,9 @@ InstrumentValue instrument_data_get(const DataFieldSelection &selection)
     out.valid = true;
     out.value = cached.value;
     out.age_ms = static_cast<uint32_t>((esp_timer_get_time() - cached.updated_us) / 1000);
-    out.stale = out.age_ms > NMEA_STALE_MS;
+    out.stale = out.age_ms >= NMEA_STALE_MS;
     out.heading_reference = cached.heading_reference;
-    out.variation_valid = variation.valid && esp_timer_get_time() - variation.updated_us <= VARIATION_STALE_US;
+    out.variation_valid = variation.valid && esp_timer_get_time() - variation.updated_us < VARIATION_STALE_US;
     out.variation_radians = variation.value;
     return out;
 }
@@ -191,13 +195,48 @@ const char *instrument_metric_name(DataMetric metric)
     case DataMetric::BatteryConsumedAh: return "Consumed Ah";
     case DataMetric::BatteryTimeToGo: return "Time to go";
     case DataMetric::BatteryTemperature: return "Battery temp";
+    case DataMetric::DepthTransducer: return "Depth: transducer";
+    case DataMetric::DepthBelowKeel: return "Depth: keel";
+    case DataMetric::DepthWaterline: return "Depth: surface";
+    case DataMetric::DepthSensorOffset: return "Depth: sensor offset";
+    case DataMetric::EngineRpm: return "Engine RPM";
+    case DataMetric::EngineCoolantTemperature: return "Coolant temp";
+    case DataMetric::EngineOilPressure: return "Oil pressure";
+    case DataMetric::EngineOilTemperature: return "Oil temp";
+    case DataMetric::EngineBoostPressure: return "Boost pressure";
+    case DataMetric::EngineAlternatorVoltage: return "Alternator V";
+    case DataMetric::EngineFuelRate: return "Fuel rate";
+    case DataMetric::EngineHours: return "Engine hours";
+    case DataMetric::EngineCoolantPressure: return "Coolant pressure";
+    case DataMetric::EngineFuelPressure: return "Fuel pressure";
+    case DataMetric::EngineLoad: return "Engine load";
+    case DataMetric::EngineTorque: return "Engine torque";
+    case DataMetric::EngineExhaustTemperature: return "Exhaust temp";
+    case DataMetric::TankLevel: return "Tank level";
+    case DataMetric::TankCapacity: return "Tank capacity";
+    case DataMetric::Latitude: return "Latitude";
+    case DataMetric::Longitude: return "Longitude";
+    case DataMetric::Altitude: return "GNSS altitude";
+    case DataMetric::WaypointBearing: return "Waypoint bearing";
+    case DataMetric::WaypointVmg: return "Waypoint VMG";
+    case DataMetric::CrossTrackError: return "Cross track";
+    case DataMetric::WaypointName: return "Waypoint name";
+    case DataMetric::CabinTemperature: return "Cabin temp";
+    case DataMetric::EngineRoomTemperature: return "Engine room temp";
+    case DataMetric::EnvironmentalTemperature: return "Sensor temp";
+    case DataMetric::AtmosphericPressure: return "Air pressure";
+    case DataMetric::Humidity: return "Humidity";
+    case DataMetric::MagneticVariation: return "Mag variation";
     default: return "None";
     }
 }
 
-const char *instrument_source_name(const DataFieldSelection &selection, const AppSettings &settings)
+const char *instrument_source_name(const DataFieldSelection &selection, const AppSettings &settings, uint8_t field_id)
 {
-    if (selection.source == DataSourceType::Nmea2000) return "NMEA 2000";
+    if (selection.source == DataSourceType::Nmea2000) {
+        // Called only by the LVGL task; live source data is copied under its own lock.
+        static char label[80];n2k_sources_label(selection.metric,field_id,label,sizeof(label));return label;
+    }
     if (selection.source_index >= settings.smartshunts.size()) return "SmartShunt";
     const auto &cfg = settings.smartshunts[selection.source_index];
     return cfg.name[0] ? cfg.name.data() : "SmartShunt";
@@ -208,7 +247,7 @@ bool instrument_metric_supported(DataSourceType source, DataMetric metric)
     if (source == DataSourceType::SmartShunt) {
         return metric >= DataMetric::BatteryVoltage && metric <= DataMetric::BatteryTemperature;
     }
-    return metric > DataMetric::None && metric < DataMetric::BatteryVoltage;
+    return (metric > DataMetric::None && metric < DataMetric::BatteryVoltage) || (metric > DataMetric::BatteryTemperature && metric < DataMetric::Count);
 }
 
 void instrument_format_value(const DataFieldSelection &selection,
@@ -221,10 +260,11 @@ void instrument_format_value(const DataFieldSelection &selection,
 {
     if (!value_out || !unit_out || value_out_size == 0 || unit_out_size == 0) return;
     value_out[0] = '\0'; unit_out[0] = '\0';
-    if (!v.valid || v.stale) { std::snprintf(value_out, value_out_size, "---"); return; }
+    if (!v.valid || v.stale) { std::snprintf(value_out, value_out_size, "--"); return; }
 
     const DataMetric metric = selection.metric;
-    if (metric == DataMetric::Depth) {
+    if (n2k_sources_is_depth(metric) && (v.value > 1000 || !std::isfinite(v.value))) { std::snprintf(value_out,value_out_size,"--");return; }
+    if (n2k_sources_is_depth(metric) || metric == DataMetric::Altitude || metric == DataMetric::CrossTrackError) {
         if (units.depth == DepthUnit::Feet) { std::snprintf(value_out, value_out_size, "%.1f", v.value * M_TO_FT); std::snprintf(unit_out, unit_out_size, "ft"); }
         else { std::snprintf(value_out, value_out_size, "%.1f", v.value); std::snprintf(unit_out, unit_out_size, "m"); }
     } else if (is_wind_speed(metric)) {
@@ -235,7 +275,7 @@ void instrument_format_value(const DataFieldSelection &selection,
         std::snprintf(unit_out, unit_out_size, "deg %s", units.heading_reference == HeadingReference::Magnetic ? "M" : "T");
         if (v.heading_reference == HeadingReference::Unknown ||
             (v.heading_reference != units.heading_reference && !v.variation_valid)) {
-            std::snprintf(value_out, value_out_size, "---");
+            std::snprintf(value_out, value_out_size, "--");
             return;
         }
         double radians = v.value;
@@ -246,9 +286,29 @@ void instrument_format_value(const DataFieldSelection &selection,
         double degrees = std::fmod(radians * RAD_TO_DEG, 360.0);
         if (degrees < 0) degrees += 360.0;
         std::snprintf(value_out, value_out_size, "%u", static_cast<unsigned>(std::lround(degrees)) % 360U);
+    } else if (metric == DataMetric::WaypointName) {
+        std::snprintf(value_out,value_out_size,"%s",v.text[0]?v.text.data():"--");
+    } else if (metric == DataMetric::Latitude || metric == DataMetric::Longitude) {
+        std::snprintf(value_out,value_out_size,"%.5f",std::abs(v.value));
+        std::snprintf(unit_out,unit_out_size,"deg %s",metric==DataMetric::Latitude?(v.value<0?"S":"N"):(v.value<0?"W":"E"));
+    } else if (metric == DataMetric::EngineRpm) {
+        std::snprintf(value_out,value_out_size,"%.0f",v.value);std::snprintf(unit_out,unit_out_size,"rpm");
+    } else if (metric == DataMetric::TankLevel || metric == DataMetric::EngineLoad || metric == DataMetric::EngineTorque || metric == DataMetric::Humidity) {
+        std::snprintf(value_out,value_out_size,"%.1f",v.value);std::snprintf(unit_out,unit_out_size,"%%");
+    } else if (metric == DataMetric::TankCapacity || metric == DataMetric::EngineFuelRate) {
+        std::snprintf(value_out,value_out_size,"%.1f",v.value);std::snprintf(unit_out,unit_out_size,"%s",metric==DataMetric::TankCapacity?"L":"L/h");
+    } else if (metric == DataMetric::EngineHours) {
+        std::snprintf(value_out,value_out_size,"%.1f",v.value/3600);std::snprintf(unit_out,unit_out_size,"h");
+    } else if (metric == DataMetric::EngineOilPressure || metric == DataMetric::EngineBoostPressure || metric == DataMetric::EngineCoolantPressure || metric == DataMetric::EngineFuelPressure || metric == DataMetric::AtmosphericPressure) {
+        std::snprintf(value_out,value_out_size,"%.2f",v.value/(metric==DataMetric::AtmosphericPressure?100:100000));
+        std::snprintf(unit_out,unit_out_size,"%s",metric==DataMetric::AtmosphericPressure?"hPa":"bar");
+    } else if (metric == DataMetric::EngineAlternatorVoltage) {
+        std::snprintf(value_out,value_out_size,"%.2f",v.value);std::snprintf(unit_out,unit_out_size,"V");
     } else if (is_angle(metric)) {
         std::snprintf(value_out, value_out_size, "%.0f", v.value * RAD_TO_DEG);
-        std::snprintf(unit_out, unit_out_size, "deg");
+        if((metric==DataMetric::CourseOverGround || metric==DataMetric::WaypointBearing) && v.heading_reference!=HeadingReference::Unknown)
+            std::snprintf(unit_out, unit_out_size, "deg %s",v.heading_reference==HeadingReference::True?"T":"M");
+        else std::snprintf(unit_out, unit_out_size, "deg");
     } else if (is_temperature(metric)) {
         const double c = v.value - 273.15;
         if (units.temperature == TemperatureUnit::Fahrenheit) { std::snprintf(value_out, value_out_size, "%.1f", c * 9.0 / 5.0 + 32.0); std::snprintf(unit_out, unit_out_size, "F"); }
