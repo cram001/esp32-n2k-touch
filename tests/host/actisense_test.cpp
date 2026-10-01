@@ -39,6 +39,8 @@ int main() {
     decoder.reset(); assert(decoder.rejected() == 0);
     // Invalid IPs cannot silently connect to another endpoint or truncate a port.
     assert(n2k_endpoint_valid("192.168.4.1", 60001));
+    assert(n2k_endpoint_valid("192.168.4.255", 60001)); // Unicast host on 192.168.4.0/23.
+    assert(n2k_endpoint_valid("10.0.1.0", 60001)); // Final .0 may also be a host on a wider subnet.
     assert(n2k_endpoint_valid("10.0.0.4", 65535));
     for (const char *ip : {"", "192.168.4", "256.0.0.1", "192.168.4.1extra", "0.0.0.0", "255.255.255.255", "224.0.0.1", "127.0.0.1", "192.168.004.1", "192..4.1"}) assert(!n2k_endpoint_valid(ip, 60001));
     assert(!n2k_endpoint_valid("192.168.4.1", 0));

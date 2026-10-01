@@ -81,6 +81,6 @@ bool n2k_endpoint_valid(const char *ip, uint16_t port) {
         if (i < 3) { if (*ip++ != '.') return false; }
         else if (*ip) return false;
     }
-    return octets[0] > 0 && octets[0] < 224 && octets[0] != 127 &&
-           (octets[0] != 255) && (octets[3] != 255);
+    // Without a subnet mask, the final octet cannot identify a broadcast address.
+    return octets[0] > 0 && octets[0] < 224 && octets[0] != 127;
 }
