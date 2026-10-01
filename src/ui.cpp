@@ -113,6 +113,7 @@ lv_obj_t *g_units_wind = nullptr;
 lv_obj_t *g_units_vessel = nullptr;
 lv_obj_t *g_units_distance = nullptr;
 lv_obj_t *g_units_short = nullptr;
+lv_obj_t *g_units_latlon = nullptr;
 lv_obj_t *g_units_threshold = nullptr;
 
 std::array<lv_obj_t *, MAX_SMARTSHUNTS> g_shunt_slot_labels{};
@@ -158,7 +159,7 @@ void ota_feedback(const char *text) {
 void update_wifi_scan();
 void update_ota_status();
 
-const std::array<DataMetric, 46> NMEA_METRICS = {
+const std::array<DataMetric, 47> NMEA_METRICS = {
     DataMetric::None,
     DataMetric::Depth,
     DataMetric::BoatSpeed,
@@ -190,6 +191,7 @@ const std::array<DataMetric, 46> NMEA_METRICS = {
     DataMetric::TankCapacity,
     DataMetric::Latitude,
     DataMetric::Longitude,
+    DataMetric::Position,
     DataMetric::Altitude,
     DataMetric::WaypointBearing,
     DataMetric::WaypointVmg,
@@ -326,7 +328,7 @@ void position_tile(size_t index, PageLayout layout)
     const int x=10+static_cast<int>(index%columns)*(w+gap);
     const int y=top+static_cast<int>(index/columns)*(h+gap);
     lv_obj_set_pos(box,x,y);lv_obj_set_size(box,w,h);lv_obj_set_style_pad_all(box,8,0);style_card(box);
-    const lv_font_t *vf=count<=2?&lv_font_montserrat_48:&lv_font_montserrat_32;
+    const lv_font_t *vf=count<=4?&lv_font_montserrat_48:&lv_font_montserrat_32;
     lv_obj_set_style_text_font(g_tile_values[index],vf,0);
     lv_obj_set_style_text_color(g_tile_titles[index], ui_muted(), 0);
     lv_obj_set_style_text_color(g_tile_values[index], ui_text(), 0);
@@ -358,23 +360,27 @@ void render_active_page()
         if(i>=count){lv_obj_add_flag(g_tile_boxes[i],LV_OBJ_FLAG_HIDDEN);continue;}
         lv_obj_remove_flag(g_tile_boxes[i],LV_OBJ_FLAG_HIDDEN);position_tile(i,active.layout);
         const auto &sel=active.fields[i];lv_label_set_text(g_tile_titles[i],instrument_metric_name(sel.metric));
+        const InstrumentValue v=instrument_data_get(sel,static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+i));
         if(sel.source==DataSourceType::SmartShunt){
             lv_label_set_text(g_tile_sources[i],instrument_source_name(sel,g_settings,static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+i)));
+            lv_obj_remove_flag(g_tile_sources[i],LV_OBJ_FLAG_HIDDEN);
+        }else if(sel.metric==DataMetric::TankLevel || sel.metric==DataMetric::TankCapacity){
+            const char *fluid[]={"Fuel","Water","Grey water","Live well","Oil","Sewage","Gasoline"};
+            lv_label_set_text(g_tile_sources[i],v.source_kind<7?fluid[v.source_kind]:"Tank");
             lv_obj_remove_flag(g_tile_sources[i],LV_OBJ_FLAG_HIDDEN);
         }else{
             lv_obj_add_flag(g_tile_sources[i],LV_OBJ_FLAG_HIDDEN);
         }
-        const InstrumentValue v=instrument_data_get(sel,static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+i));
         if(sel.metric==DataMetric::Depth){
             const char *depth_titles[]={"Depth (transducer)","Depth (sensor)","Depth (keel)","Depth (surface)"};
             lv_label_set_text(g_tile_titles[i],depth_titles[v.depth_reference<4?v.depth_reference:0]);
         }
-        if(sel.metric==DataMetric::WaypointName || sel.metric==DataMetric::Latitude || sel.metric==DataMetric::Longitude){
-            lv_obj_set_style_text_font(g_tile_values[i],count==1?&lv_font_montserrat_32:&lv_font_montserrat_20,0);
+        if(sel.metric==DataMetric::WaypointName || sel.metric==DataMetric::Latitude || sel.metric==DataMetric::Longitude || sel.metric==DataMetric::Position){
+            lv_obj_set_style_text_font(g_tile_values[i],count==1?&lv_font_montserrat_48:&lv_font_montserrat_24,0);
             lv_obj_set_width(g_tile_values[i],lv_obj_get_width(g_tile_boxes[i])-90);
             lv_label_set_long_mode(g_tile_values[i],LV_LABEL_LONG_MODE_DOTS);
         }else{lv_obj_set_width(g_tile_values[i],LV_SIZE_CONTENT);lv_label_set_long_mode(g_tile_values[i],LV_LABEL_LONG_MODE_WRAP);}
-        char value[40],unit[12];instrument_format_value(sel,g_settings.units,v,value,sizeof(value),unit,sizeof(unit));
+        char value[80],unit[16];instrument_format_value(sel,g_settings.units,v,value,sizeof(value),unit,sizeof(unit));
         lv_label_set_text(g_tile_values[i],value);lv_label_set_text(g_tile_units[i],unit);
     }
 }
@@ -434,8 +440,10 @@ void field_device_cb(lv_event_t *){auto &f=g_settings.pages[g_edit_page].fields[
 void field_done_cb(lv_event_t *){update_page_setup();lv_screen_load(g_page_setup_screen);}
 
 const char *depth_name(){return g_settings.units.depth==DepthUnit::Metres?"METRES":"FEET";}const char *temp_name(){return g_settings.units.temperature==TemperatureUnit::Celsius?"CELSIUS":"FAHRENHEIT";}const char *speed_name(SpeedUnit u){return u==SpeedUnit::Knots?"KNOTS":(u==SpeedUnit::KilometresPerHour?"KM/H":"M/S");}const char *distance_name(){return g_settings.units.distance==DistanceUnit::NauticalMiles?"NM":"KM";}const char *short_name(){return g_settings.units.short_distance==ShortDistanceUnit::Metres?"METRES":(g_settings.units.short_distance==ShortDistanceUnit::Feet?"FEET":"YARDS");}
-void update_units(){lv_label_set_text(g_units_heading,g_settings.units.heading_reference==HeadingReference::True?"TRUE":"MAGNETIC");lv_label_set_text(g_units_depth,depth_name());lv_label_set_text(g_units_temp,temp_name());lv_label_set_text(g_units_wind,speed_name(g_settings.units.wind_speed));lv_label_set_text(g_units_vessel,speed_name(g_settings.units.vessel_speed));lv_label_set_text(g_units_distance,distance_name());lv_label_set_text(g_units_short,short_name());char b[24];std::snprintf(b,sizeof(b),"< %.2f NM",g_settings.units.short_distance_threshold_nm);lv_label_set_text(g_units_threshold,b);}
+const char *latlon_name(){switch(g_settings.units.lat_lon_format){case LatLonFormat::DecimalDegrees:return "DECIMAL";case LatLonFormat::DegreesMinutesSeconds:return "DMS";default:return "DEG + MIN";}}
+void update_units(){lv_label_set_text(g_units_heading,g_settings.units.heading_reference==HeadingReference::True?"TRUE":"MAGNETIC");lv_label_set_text(g_units_depth,depth_name());lv_label_set_text(g_units_temp,temp_name());lv_label_set_text(g_units_wind,speed_name(g_settings.units.wind_speed));lv_label_set_text(g_units_vessel,speed_name(g_settings.units.vessel_speed));lv_label_set_text(g_units_distance,distance_name());lv_label_set_text(g_units_short,short_name());lv_label_set_text(g_units_latlon,latlon_name());char b[24];std::snprintf(b,sizeof(b),"< %.2f NM",g_settings.units.short_distance_threshold_nm);lv_label_set_text(g_units_threshold,b);}
 void unit_heading_cb(lv_event_t *){g_settings.units.heading_reference=g_settings.units.heading_reference==HeadingReference::True?HeadingReference::Magnetic:HeadingReference::True;persist();update_units();}
+void unit_latlon_cb(lv_event_t *){auto &f=g_settings.units.lat_lon_format;f=f==LatLonFormat::DecimalDegrees?LatLonFormat::DegreesMinutes:(f==LatLonFormat::DegreesMinutes?LatLonFormat::DegreesMinutesSeconds:LatLonFormat::DecimalDegrees);persist();update_units();}
 void units_screen_cb(lv_event_t *){update_units();lv_screen_load(g_units_screen);}void unit_depth_cb(lv_event_t *){g_settings.units.depth=g_settings.units.depth==DepthUnit::Metres?DepthUnit::Feet:DepthUnit::Metres;persist();update_units();}void unit_temp_cb(lv_event_t *){g_settings.units.temperature=g_settings.units.temperature==TemperatureUnit::Celsius?TemperatureUnit::Fahrenheit:TemperatureUnit::Celsius;persist();update_units();}
 SpeedUnit next_speed(SpeedUnit u){return u==SpeedUnit::Knots?SpeedUnit::KilometresPerHour:(u==SpeedUnit::KilometresPerHour?SpeedUnit::MetresPerSecond:SpeedUnit::Knots);}void unit_wind_cb(lv_event_t *){g_settings.units.wind_speed=next_speed(g_settings.units.wind_speed);persist();update_units();}void unit_vessel_cb(lv_event_t *){g_settings.units.vessel_speed=next_speed(g_settings.units.vessel_speed);persist();update_units();}void unit_distance_cb(lv_event_t *){g_settings.units.distance=g_settings.units.distance==DistanceUnit::NauticalMiles?DistanceUnit::Kilometres:DistanceUnit::NauticalMiles;persist();update_units();}void unit_short_cb(lv_event_t *){auto&u=g_settings.units.short_distance;u=u==ShortDistanceUnit::Metres?ShortDistanceUnit::Feet:(u==ShortDistanceUnit::Feet?ShortDistanceUnit::Yards:ShortDistanceUnit::Metres);persist();update_units();}void unit_threshold_down_cb(lv_event_t *){auto&t=g_settings.units.short_distance_threshold_nm;if(t>0.05f)t-=0.05f;persist();update_units();}void unit_threshold_up_cb(lv_event_t *){auto&t=g_settings.units.short_distance_threshold_nm;if(t<1.0f)t+=0.05f;persist();update_units();}
 
@@ -862,7 +870,7 @@ void create_data_screen()
     lv_obj_set_style_pad_all(g_data_screen,0,0);
 
     g_page_title=lv_label_create(g_data_screen);
-    lv_obj_set_style_text_font(g_page_title,&lv_font_montserrat_20,0);
+    lv_obj_set_style_text_font(g_page_title,&lv_font_montserrat_24,0);
     lv_obj_set_style_text_color(g_page_title,ui_text(),0);
     lv_obj_align(g_page_title,LV_ALIGN_TOP_MID,0,12);
 
@@ -872,10 +880,10 @@ void create_data_screen()
         style_card(g_tile_boxes[i]);
 
         g_tile_titles[i]=lv_label_create(g_tile_boxes[i]);
-        lv_obj_set_style_text_font(g_tile_titles[i],&lv_font_montserrat_14,0);
+        lv_obj_set_style_text_font(g_tile_titles[i],&lv_font_montserrat_20,0);
         g_tile_values[i]=lv_label_create(g_tile_boxes[i]);
         g_tile_units[i]=lv_label_create(g_tile_boxes[i]);
-        lv_obj_set_style_text_font(g_tile_units[i],&lv_font_montserrat_14,0);
+        lv_obj_set_style_text_font(g_tile_units[i],&lv_font_montserrat_20,0);
         g_tile_sources[i]=lv_label_create(g_tile_boxes[i]);
         lv_obj_set_style_text_font(g_tile_sources[i],&lv_font_montserrat_14,0);
     }
@@ -1024,33 +1032,34 @@ void create_units_screen()
     lv_obj_set_style_text_font(l, &lv_font_montserrat_24, 0);
     lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 18);
 
-    const char *names[] = {"Heading", "Depth", "Temperature", "Wind speed", "Boat speed", "Distance", "Short distance"};
+    const char *names[] = {"Heading", "Depth", "Temperature", "Wind speed", "Boat speed", "Distance", "Short distance", "Lat / long"};
     lv_obj_t **vals[] = {&g_units_heading, &g_units_depth, &g_units_temp, &g_units_wind,
-                         &g_units_vessel, &g_units_distance, &g_units_short};
+                         &g_units_vessel, &g_units_distance, &g_units_short, &g_units_latlon};
     lv_event_cb_t cbs[] = {unit_heading_cb, unit_depth_cb, unit_temp_cb, unit_wind_cb,
-                           unit_vessel_cb, unit_distance_cb, unit_short_cb};
+                           unit_vessel_cb, unit_distance_cb, unit_short_cb, unit_latlon_cb};
 
-    for (int i = 0; i < 7; ++i) {
+    for (int i = 0; i < 8; ++i) {
         l = require_obj(lv_label_create(g_units_screen), "unit row label");
         lv_label_set_text(l, names[i]);
-        lv_obj_align(l, LV_ALIGN_TOP_LEFT, 32, 64 + i * 43);
+        lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);
+        lv_obj_align(l, LV_ALIGN_TOP_LEFT, 32, 58 + i * 38);
 
-        lv_obj_t *b = make_button(g_units_screen, "", cbs[i], 170, 40);
+        lv_obj_t *b = make_button(g_units_screen, "", cbs[i], 170, 36);
         *vals[i] = button_label(b);
-        lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -32, 54 + i * 43);
+        lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -32, 48 + i * 38);
     }
 
     l = require_obj(lv_label_create(g_units_screen), "short-distance threshold label");
     lv_label_set_text(l, "Short if");
-    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 32, 376);
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 32, 366);
 
-    lv_obj_t *b = make_button(g_units_screen, "-", unit_threshold_down_cb, 48, 38);
-    lv_obj_align(b, LV_ALIGN_TOP_LEFT, 145, 365);
-    b = make_button(g_units_screen, "", unit_threshold_up_cb, 125, 38);
+    lv_obj_t *b = make_button(g_units_screen, "-", unit_threshold_down_cb, 48, 36);
+    lv_obj_align(b, LV_ALIGN_TOP_LEFT, 145, 354);
+    b = make_button(g_units_screen, "", unit_threshold_up_cb, 125, 36);
     g_units_threshold = button_label(b);
-    lv_obj_align(b, LV_ALIGN_TOP_MID, 60, 365);
-    b = make_button(g_units_screen, "+", unit_threshold_up_cb, 48, 38);
-    lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -32, 365);
+    lv_obj_align(b, LV_ALIGN_TOP_MID, 60, 354);
+    b = make_button(g_units_screen, "+", unit_threshold_up_cb, 48, 36);
+    lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -32, 354);
 
     b = make_button(g_units_screen, "BACK", settings_screen_cb, 120, 46);
     lv_obj_align(b, LV_ALIGN_BOTTOM_MID, 0, -12);
@@ -1176,11 +1185,11 @@ void create_shunt_edit_screen()
     lv_obj_set_style_text_color(g_shunt_key, ui_text(), 0);
     lv_obj_set_style_border_color(g_shunt_key, ui_border(), 0);
     lv_obj_set_style_radius(g_shunt_key, 8, 0);
-    lv_obj_set_size(g_shunt_key, 300, 42);
+    lv_obj_set_size(g_shunt_key, 360, 42);
     lv_textarea_set_one_line(g_shunt_key, true);
-    lv_textarea_set_password_mode(g_shunt_key, true);
+    lv_textarea_set_password_mode(g_shunt_key, false);
     lv_textarea_set_max_length(g_shunt_key, 32);
-    lv_obj_align(g_shunt_key, LV_ALIGN_TOP_RIGHT, -30, 155);
+    lv_obj_align(g_shunt_key, LV_ALIGN_TOP_RIGHT, -20, 155);
     lv_obj_add_event_cb(g_shunt_key, textarea_focus_cb, LV_EVENT_FOCUSED, nullptr);
 
     l = require_obj(lv_label_create(g_shunt_edit_screen), "NMEA bridge label");
