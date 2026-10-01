@@ -7,7 +7,12 @@ The display supports six user-configurable instrument pages. Each page can be en
 - 4 fields
 - 6 fields
 
-Disabled pages are skipped by the previous/next page controls. At least one page is always kept enabled.
+Disabled pages are skipped by left/right swipes. At least one page is always kept enabled.
+Navigation uses swipes: left/right changes enabled pages, down edits the current
+page and up opens Settings. The instrument screen has no bottom Setup or arrow
+buttons. Tiles use the released space; the page indicators remain at the bottom.
+Only Victron SmartShunt tiles display their source name. NMEA2000 source selection
+and identity remain available in the field editor.
 
 ## Field sources
 

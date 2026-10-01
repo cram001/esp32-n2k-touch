@@ -311,12 +311,17 @@ size_t next_enabled_page(size_t from,int direction)
 void position_tile(size_t index, PageLayout layout)
 {
     lv_obj_t *box=g_tile_boxes[index]; if(!box) return;
-    int x=10,y=48,w=460,h=326; const size_t count=layout_count(layout);
-    if(count==2){x=10;w=460;h=155;y=48+static_cast<int>(index)*161;}
-    else if(count==4){w=226;h=155;x=10+static_cast<int>(index%2)*234;y=48+static_cast<int>(index/2)*161;}
-    else if(count==6){w=226;h=101;x=10+static_cast<int>(index%2)*234;y=48+static_cast<int>(index/2)*107;}
+    // Gestures replace the bottom toolbar; reserve only the page indicator.
+    constexpr int top=48, area_height=410, gap=8;
+    const size_t count=layout_count(layout);
+    const int columns=count>=4?2:1;
+    const int rows=static_cast<int>(count)/columns;
+    const int w=columns==2?226:460;
+    const int h=(area_height-(rows-1)*gap)/rows;
+    const int x=10+static_cast<int>(index%columns)*(w+gap);
+    const int y=top+static_cast<int>(index/columns)*(h+gap);
     lv_obj_set_pos(box,x,y);lv_obj_set_size(box,w,h);lv_obj_set_style_pad_all(box,8,0);style_card(box);
-    const lv_font_t *vf=count==1?&lv_font_montserrat_48:(count<=4?&lv_font_montserrat_32:&lv_font_montserrat_24);
+    const lv_font_t *vf=count<=2?&lv_font_montserrat_48:&lv_font_montserrat_32;
     lv_obj_set_style_text_font(g_tile_values[index],vf,0);
     lv_obj_set_style_text_color(g_tile_titles[index], ui_muted(), 0);
     lv_obj_set_style_text_color(g_tile_values[index], ui_text(), 0);
@@ -347,7 +352,13 @@ void render_active_page()
     for(size_t i=0;i<MAX_DATA_FIELDS_PER_PAGE;++i){
         if(i>=count){lv_obj_add_flag(g_tile_boxes[i],LV_OBJ_FLAG_HIDDEN);continue;}
         lv_obj_remove_flag(g_tile_boxes[i],LV_OBJ_FLAG_HIDDEN);position_tile(i,active.layout);
-        const auto &sel=active.fields[i];lv_label_set_text(g_tile_titles[i],instrument_metric_name(sel.metric));lv_label_set_text(g_tile_sources[i],instrument_source_name(sel,g_settings,static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+i)));
+        const auto &sel=active.fields[i];lv_label_set_text(g_tile_titles[i],instrument_metric_name(sel.metric));
+        if(sel.source==DataSourceType::SmartShunt){
+            lv_label_set_text(g_tile_sources[i],instrument_source_name(sel,g_settings,static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+i)));
+            lv_obj_remove_flag(g_tile_sources[i],LV_OBJ_FLAG_HIDDEN);
+        }else{
+            lv_obj_add_flag(g_tile_sources[i],LV_OBJ_FLAG_HIDDEN);
+        }
         const InstrumentValue v=instrument_data_get(sel,static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+i));
         if(sel.metric==DataMetric::Depth){
             const char *depth_titles[]={"Depth (transducer)","Depth (sensor)","Depth (keel)","Depth (surface)"};
@@ -831,13 +842,6 @@ void create_data_screen()
         lv_obj_set_style_text_font(g_tile_sources[i],&lv_font_montserrat_14,0);
     }
 
-    lv_obj_t *b=make_button(g_data_screen,"<",previous_page_cb,58,40);
-    lv_obj_align(b,LV_ALIGN_BOTTOM_LEFT,12,-9);
-    b=make_button(g_data_screen,"SETUP",settings_screen_cb,96,40);
-    lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-9);
-    b=make_button(g_data_screen,">",next_page_cb,58,40);
-    lv_obj_align(b,LV_ALIGN_BOTTOM_RIGHT,-12,-9);
-
     for(size_t i=0;i<MAX_DATA_PAGES;++i){
         g_page_dots[i]=lv_obj_create(g_data_screen);
         lv_obj_remove_flag(g_page_dots[i],LV_OBJ_FLAG_SCROLLABLE);
@@ -845,7 +849,7 @@ void create_data_screen()
         lv_obj_set_style_radius(g_page_dots[i],LV_RADIUS_CIRCLE,0);
         lv_obj_set_style_border_width(g_page_dots[i],0,0);
         lv_obj_set_style_pad_all(g_page_dots[i],0,0);
-        lv_obj_set_pos(g_page_dots[i],216+static_cast<int>(i)*14,421);
+        lv_obj_set_pos(g_page_dots[i],201+static_cast<int>(i)*14,466);
     }
 }
 void create_settings_screen()

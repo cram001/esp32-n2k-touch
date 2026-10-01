@@ -34,7 +34,8 @@ Wi-Fi scanning remains on demand.
 
 On an instrument page, swipe left for the next enabled page and right for the
 previous enabled page. Swipe down to edit the page currently displayed. Swipe up
-to open Settings. Existing buttons remain available. Forms and keyboards do not
+to open Settings. Instrument pages use the bottom toolbar space for larger tiles;
+only the page indicators remain below the data. Forms and keyboards do not
 use these navigation gestures. A recognized gesture consumes the touch release
 before changing screens. Gesture callbacks and boot-screen updates run on LVGL's
 own task, under its existing ownership model.
