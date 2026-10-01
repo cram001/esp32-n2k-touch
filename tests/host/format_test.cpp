@@ -51,5 +51,18 @@ int main(){
     InstrumentValue pos{};pos.valid=true;pos.stale=false;pos.value=48.12345;pos.secondary_valid=true;pos.secondary_value=-123.12345;
     instrument_format_value(position,units,pos,text,sizeof(text),suffix,sizeof(suffix));
     assert(std::strcmp(text,"48 07.407 N\n123 07.407 W")==0 && std::strcmp(suffix,"DM")==0);
-    std::puts("PASS: 30s NMEA/BLE display timeout, depth limit, position formats, signed keel clearance and instrument units");
+
+    DataFieldSelection dir{};dir.metric=DataMetric::CourseOverGround;
+    InstrumentValue bearing{};bearing.valid=true;bearing.stale=false;bearing.value=1.0;bearing.heading_reference=HeadingReference::True;
+    instrument_format_value(dir,units,bearing,text,sizeof(text),suffix,sizeof(suffix));
+    assert(std::strcmp(suffix,"°T")==0);
+    bearing.heading_reference=HeadingReference::Magnetic;
+    instrument_format_value(dir,units,bearing,text,sizeof(text),suffix,sizeof(suffix));
+    assert(std::strcmp(suffix,"°M")==0);
+    dir.metric=DataMetric::WaypointBearing;
+    bearing.heading_reference=HeadingReference::True;
+    instrument_format_value(dir,units,bearing,text,sizeof(text),suffix,sizeof(suffix));
+    assert(std::strcmp(suffix,"°T")==0);
+
+    std::puts("PASS: 30s NMEA/BLE display timeout, depth limit, position formats, directional references, signed keel clearance and instrument units");
 }
