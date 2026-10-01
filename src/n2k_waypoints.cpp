@@ -35,7 +35,14 @@ bool n2k_decode_waypoints(uint32_t pgn,const uint8_t *data,size_t length,N2kWayp
     count=0;if(!data||!out||length<10||(pgn!=129285&&pgn!=130074))return false;
     const uint16_t items=u16(data+2);if(items>32)return false;
     size_t at=10;
-    if(pgn==129285){at=9;std::array<char,33> route{};if(!text(data,length,at,route)||at>=length)return false;++at;}
+    if(pgn==129285){
+        at=9;std::array<char,33> route{};
+        if(!text(data,length,at,route)||at>=length)return false;
+        // PGN 129285 field 9 is a separate 8-bit Reserved field AFTER Route Name.
+        // Byte 8 also contains three reserved bits, but is a different field.
+        // CANboat's PGN definition and NMEA2000 SetN2kPGN129285 agree on this.
+        ++at;
+    }
     for(unsigned i=0;i<items;++i){
         if(at+2>length){count=0;return false;}
         N2kWaypoint item;item.id=u16(data+at);at+=2;

@@ -5,6 +5,22 @@
 #include <cstring>
 #include <vector>
 int main(){
+    // Hand-authored standard PGN 129285: fields 1-7 (9 bytes), Route Name,
+    // the separate field-9 reserved byte, then WP ID/name/latitude/longitude.
+    // This fixture is independent of the NMEA2000 library encoder.
+    const uint8_t route[]={0,0,1,0,1,0,1,0,0xe0,7,1,'R','o','u','t','e',0xff,
+        42,0,6,1,'H','o','m','e',0,0,0,0,0,0,0,0};
+    std::array<N2kWaypoint,16> route_out{};size_t route_count=0;
+    assert(n2k_decode_waypoints(129285,route,sizeof(route),route_out.data(),route_out.size(),route_count));
+    assert(route_count==1 && route_out[0].id==42 && !std::strcmp(route_out[0].name.data(),"Home"));
+    for(size_t length=0;length<sizeof(route);++length){
+        assert(!n2k_decode_waypoints(129285,route,length,route_out.data(),route_out.size(),route_count));assert(!route_count);
+    }
+    std::vector<uint8_t> missing_reserved(route,route+sizeof(route));missing_reserved.erase(missing_reserved.begin()+16);
+    assert(!n2k_decode_waypoints(129285,missing_reserved.data(),missing_reserved.size(),route_out.data(),route_out.size(),route_count));
+    std::array<uint8_t,sizeof(route)> high_id{};std::memcpy(high_id.data(),route,sizeof(route));high_id[17]=255;
+    assert(n2k_decode_waypoints(129285,high_id.data(),high_id.size(),route_out.data(),route_out.size(),route_count));
+    assert(route_out[0].id==255); // Do not confuse an ID ending in ff with the reserved byte.
     std::vector<uint8_t> packet(10,0);packet[2]=1;
     packet.insert(packet.end(),{42,0,6,1,'H','o','m','e'});packet.resize(packet.size()+8,0);
     std::array<N2kWaypoint,16> out{};size_t count=0;

@@ -59,6 +59,10 @@ their received reference; Units' heading setting applies to heading only.
 Waypoint names require route/list metadata from the selected navigation device;
 a target change without a matching name displays `--`. Unicode metadata is
 validated and stored as bounded UTF-8; display glyph availability depends on the font.
+PGN 129285 has a separate 8-bit reserved field after the route-name string, before
+the first waypoint ID, in addition to the reserved bits in byte 8. The decoder
+retains this byte. Its layout is checked with an independent hand-authored fixture
+as well as the library encoder; see [CANboat's PGN definitions](https://canboat.github.io/).
 
 Pressure uses bar (engine) or hPa (atmosphere), tank capacity litres, fuel rate
 litres/hour, engine time hours and level/load/torque/humidity percent. Existing

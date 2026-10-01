@@ -63,5 +63,9 @@ int main(){
     assert(name_count==2 && names[1].choice.name==2);
     assert(n2k_sources_save_choice(5,names[1].choice));
     assert(n2k_sources_get(DataMetric::WaypointName,5,name)&&!name.text[0]); // Reused address does not inherit the previous device's name.
+    SetN2kPGN129285(message,0,1,1,N2kdir_forward,"Route");assert(AppendN2kPGN129285(message,42,"Third",48,-123));send(message);
+    assert(n2k_sources_get(DataMetric::WaypointName,5,name)&&!name.stale&&!std::strcmp(name.text.data(),"Third"));
+    fake_time_us+=30000000;send(message);
+    assert(n2k_sources_get(DataMetric::WaypointName,5,name)&&name.stale); // Periodic route lists cannot refresh an expired navigation target.
     std::puts("PASS: actual N2K library PGNs through wireless framing, depth/SID, two engines, tank types, GPS, navigation/name and environmental sensors");
 }

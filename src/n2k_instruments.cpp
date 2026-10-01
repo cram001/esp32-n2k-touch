@@ -6,11 +6,13 @@
 #include "N2kMessages.h"
 #include "n2k_sources.hpp"
 #include "n2k_waypoints.hpp"
+#include "esp_timer.h"
 
 namespace {
 struct Waypoint { bool used=false;uint8_t source=255;N2kWaypoint item; };
 std::array<Waypoint,32> waypoints{};
 std::array<uint64_t,254> names{};
+std::array<int64_t,254> navigation_updated{};
 std::array<uint32_t,254> targets = [] {std::array<uint32_t,254> t{};t.fill(UINT32_MAX);return t;}();
 void publish(const tN2kMsg &msg,DataMetric metric,double value,uint8_t instance=255,uint8_t kind=255,HeadingReference reference=HeadingReference::Unknown) {
     if(value!=N2kDoubleNA && std::isfinite(value))n2k_sources_publish(metric,msg.Source,instance,kind,value,reference);
@@ -31,6 +33,9 @@ void temperature(const tN2kMsg &msg,tN2kTempSource source,uint8_t instance,doubl
     publish(msg,metric,value,instance,static_cast<uint8_t>(source));
 }
 void waypoint_name(const tN2kMsg &msg) {
+    // Route lists can continue after navigation stops. They must not keep an
+    // obsolete active target alive beyond the display's 30-second deadline.
+    if(!navigation_updated[msg.Source] || esp_timer_get_time()-navigation_updated[msg.Source]>=30000000)return;
     for(const auto &w:waypoints)if(w.used && w.source==msg.Source && w.item.id==targets[msg.Source] && w.item.name[0]){
         n2k_sources_publish(DataMetric::WaypointName,msg.Source,255,255,0,HeadingReference::Unknown,false,0,w.item.name.data());return;
     }
@@ -38,7 +43,7 @@ void waypoint_name(const tN2kMsg &msg) {
     n2k_sources_publish(DataMetric::WaypointName,msg.Source,255,255,0,HeadingReference::Unknown,false,0,"");
 }
 }
-void n2k_instruments_reset(){waypoints={};names={};targets.fill(UINT32_MAX);}
+void n2k_instruments_reset(){waypoints={};names={};navigation_updated={};targets.fill(UINT32_MAX);}
 void n2k_instruments_receive(const tN2kMsg &msg) {
     if(msg.Source>=254)return;
     if(msg.PGN==60928 && msg.DataLen==8){
@@ -47,6 +52,7 @@ void n2k_instruments_receive(const tN2kMsg &msg) {
         if(names[msg.Source]!=name){
             for(auto &w:waypoints)if(w.used && w.source==msg.Source)w={};
             targets[msg.Source]=UINT32_MAX;
+            navigation_updated[msg.Source]=0;
             names[msg.Source]=name;
         }
         n2k_sources_name(msg.Source,name);return;
@@ -124,7 +130,7 @@ void n2k_instruments_receive(const tN2kMsg &msg) {
     case 129284:{unsigned char sid;double distance,eta,origin_bearing,bearing,lat,lon,vmg;tN2kHeadingReference ref;bool crossed,arrived;tN2kDistanceCalculationType calc;int16_t date;uint32_t origin,destination;
         if(ParseN2kPGN129284(msg,sid,distance,ref,crossed,arrived,calc,eta,date,origin_bearing,bearing,origin,destination,lat,lon,vmg)){
             publish(msg,DataMetric::DistanceToWaypoint,distance);publish(msg,DataMetric::WaypointBearing,bearing,255,255,reference(ref));publish(msg,DataMetric::WaypointVmg,vmg);
-            targets[msg.Source]=destination;waypoint_name(msg);
+            targets[msg.Source]=destination;navigation_updated[msg.Source]=esp_timer_get_time();waypoint_name(msg);
         }break;
     }
     case 130306:{unsigned char sid;double speed,angle;tN2kWindReference ref;
