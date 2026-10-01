@@ -80,6 +80,7 @@ enum class DataMetric : uint8_t {
     DepthBelowKeel,
     DepthWaterline,
     DepthSensorOffset,
+    Position,
     Count,
 };
 
@@ -89,6 +90,11 @@ enum class SpeedUnit : uint8_t { Knots = 0, KilometresPerHour = 1, MetresPerSeco
 enum class DistanceUnit : uint8_t { NauticalMiles = 0, Kilometres = 1 };
 enum class ShortDistanceUnit : uint8_t { Metres = 0, Feet = 1, Yards = 2 };
 enum class HeadingReference : uint8_t { True = 0, Magnetic = 1, Unknown = 255 };
+enum class LatLonFormat : uint8_t {
+    DecimalDegrees = 0,      // 49.12345 N
+    DegreesMinutes = 1,      // 49° 07.407' N
+    DegreesMinutesSeconds = 2, // 49° 07' 24.4" N
+};
 
 struct UnitsSettings {
     DepthUnit depth = DepthUnit::Metres;
@@ -99,6 +105,8 @@ struct UnitsSettings {
     ShortDistanceUnit short_distance = ShortDistanceUnit::Metres;
     // Stored separately in NVS; this byte occupies former ABI padding.
     HeadingReference heading_reference = HeadingReference::True;
+    // Uses the former padding byte so the persisted UnitsSettings ABI remains 12 bytes.
+    LatLonFormat lat_lon_format = LatLonFormat::DegreesMinutes;
     // Distances below this threshold use short_distance. Stored in nautical miles.
     float short_distance_threshold_nm = 0.2f;
 };
