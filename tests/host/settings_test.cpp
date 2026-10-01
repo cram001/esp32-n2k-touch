@@ -96,6 +96,12 @@ int main(){
     expected.units.heading_reference=HeadingReference::True;
     assert(settings_save(expected));assert(settings_load().units.heading_reference==HeadingReference::True);
 
+    expected.pages[0].fields[0].metric=DataMetric::EngineRpm;
+    expected.pages[0].fields[1].metric=DataMetric::DepthBelowKeel;
+    assert(settings_save(expected));reboot=settings_load();
+    assert(reboot.pages[0].fields[0].metric==DataMetric::EngineRpm);
+    assert(reboot.pages[0].fields[1].metric==DataMetric::DepthBelowKeel);
+
     auto config=expected.wifi;assert(wifi_config_valid(config,&reason));
     config.ap_password.fill(0);assert(!wifi_config_valid(config,&reason));
     std::strcpy(config.ap_password.data(),"1234567");assert(!wifi_config_valid(config,&reason));

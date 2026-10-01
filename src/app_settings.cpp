@@ -115,7 +115,7 @@ void sanitize_display_settings(AppSettings &settings)
         if (!valid_layout(page.layout)) page.layout = PageLayout::Four;
         for (auto &field : page.fields) {
             if (static_cast<uint8_t>(field.source) > static_cast<uint8_t>(DataSourceType::SmartShunt)) field.source = DataSourceType::Nmea2000;
-            if (static_cast<uint8_t>(field.metric) > static_cast<uint8_t>(DataMetric::BatteryTemperature)) field.metric = DataMetric::None;
+            if (static_cast<uint8_t>(field.metric) > static_cast<uint8_t>(DataMetric::Count) - 1) field.metric = DataMetric::None;
             if (field.source_index >= MAX_SMARTSHUNTS) field.source_index = 0;
         }
     }
