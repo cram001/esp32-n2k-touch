@@ -624,7 +624,7 @@ void boot_touch_cb(lv_event_t *event)
         g_boot_indev=lv_event_get_indev(event);
         g_boot_recovery.press(lv_tick_get());
     }else if(code==LV_EVENT_RELEASED || code==LV_EVENT_PRESS_LOST){
-        g_boot_recovery.release();
+        g_boot_recovery.release(lv_tick_get());
     }
 }
 void boot_timer_cb(lv_timer_t *timer)
@@ -632,6 +632,7 @@ void boot_timer_cb(lv_timer_t *timer)
     const uint32_t now=lv_tick_get();
     if(g_boot_recovery.restore_due(now)){
         const bool saved=settings_restore_brightness();
+        g_boot_recovery.attempt_completed(saved,lv_tick_get());
         // Restore visibility even if NVS fails; a new hold can retry the save.
         g_settings.day_brightness=DEFAULT_DAY_BRIGHTNESS;
         g_settings.night_brightness=DEFAULT_NIGHT_BRIGHTNESS;
@@ -1217,7 +1218,6 @@ void ui_start(const AppSettings &initial_settings)
 {
     g_settings = initial_settings;
     g_boot_brightness_override=true;
-    g_boot_recovery.begin(lv_tick_get());
     g_active_page = first_enabled_page();
 
     create_data_screen();

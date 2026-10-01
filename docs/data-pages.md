@@ -26,8 +26,10 @@ brightness. Normal startup applies the saved brightness after the boot screen.
 
 Only the two brightness NVS keys are changed; Wi-Fi, pages, sources, calibration,
 theme and SmartShunt settings are retained. If the save fails, visibility is
-restored for the current boot and a message offers another hold to retry. The
-boot screen remains readable on the next restart regardless of the saved value.
+restored for the current boot and a message offers another hold to retry.
+The retry window remains open for eight seconds after releasing the failed hold.
+Starting another hold suspends the window until the hold completes. The boot
+screen remains readable on the next restart regardless of the saved value.
 
 ## Field sources
 

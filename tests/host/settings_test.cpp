@@ -45,12 +45,20 @@ static_assert(sizeof(LegacyWifi)==40,"Migration fixture ABI");
 int main(){
     BootBrightnessRecovery recovery;recovery.begin(0);recovery.press(100);
     assert(!recovery.restore_due(3099));assert(recovery.restore_due(3100));
-    assert(!recovery.restore_due(3101));recovery.release();assert(!recovery.can_finish(7999));assert(recovery.can_finish(8000));
-    recovery.begin(0);recovery.press(100);recovery.release();recovery.press(2900);
+    assert(!recovery.restore_due(3101));recovery.attempt_completed(true,3101);recovery.release(3200);assert(!recovery.can_finish(7999));assert(recovery.can_finish(8000));
+    recovery.begin(0);recovery.press(100);recovery.release(200);recovery.press(2900);
     assert(!recovery.restore_due(3100));assert(recovery.restore_due(5900)); // Separate touches do not accumulate.
     recovery.begin(0);recovery.press(7900);assert(!recovery.can_finish(8000));
     assert(!recovery.restore_due(10899));assert(recovery.restore_due(10900));
-    recovery.release();assert(!recovery.can_finish(12899));assert(recovery.can_finish(12900)); // Late hold and readable confirmation.
+    recovery.attempt_completed(true,10900);recovery.release(11000);assert(!recovery.can_finish(12899));assert(recovery.can_finish(12900)); // Late hold and readable confirmation.
+    recovery.begin(0);recovery.press(7900);assert(recovery.restore_due(10900));
+    recovery.attempt_completed(false,11000);assert(!recovery.can_finish(30000));
+    recovery.release(30000); // User held while reading the failure; retry starts on release.
+    BootBrightnessRecovery retry=recovery;
+    assert(!recovery.can_finish(30000));assert(!recovery.can_finish(37999));assert(recovery.can_finish(38000));
+    retry.press(37999);assert(!retry.can_finish(38000));assert(retry.restore_due(40999));
+    retry.attempt_completed(true,41050);retry.release(41100);
+    assert(!retry.can_finish(43049));assert(retry.can_finish(43050)); // Retry succeeds and confirmation follows completion.
     recovery.begin(UINT32_MAX-1000);recovery.press(UINT32_MAX-1000);
     assert(!recovery.restore_due(1998));assert(recovery.restore_due(1999)); // Tick wrap.
     reset();assert(settings_init());auto defaults=settings_load();
