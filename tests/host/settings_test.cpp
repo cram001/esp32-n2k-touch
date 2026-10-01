@@ -1,4 +1,5 @@
 #include "app_settings.hpp"
+#include "boot_brightness.hpp"
 #include "wifi_service.hpp"
 #include "nvs.h"
 #include <cassert>
@@ -42,6 +43,16 @@ template<class T> void fixture(const char *key,const T &value){
 struct LegacyWifi {uint32_t schema=2;bool enabled=true;bool open=false;std::array<char,33> ssid{"BoatWiFi"};};
 static_assert(sizeof(LegacyWifi)==40,"Migration fixture ABI");
 int main(){
+    BootBrightnessRecovery recovery;recovery.begin(0);recovery.press(100);
+    assert(!recovery.restore_due(3099));assert(recovery.restore_due(3100));
+    assert(!recovery.restore_due(3101));recovery.release();assert(!recovery.can_finish(7999));assert(recovery.can_finish(8000));
+    recovery.begin(0);recovery.press(100);recovery.release();recovery.press(2900);
+    assert(!recovery.restore_due(3100));assert(recovery.restore_due(5900)); // Separate touches do not accumulate.
+    recovery.begin(0);recovery.press(7900);assert(!recovery.can_finish(8000));
+    assert(!recovery.restore_due(10899));assert(recovery.restore_due(10900));
+    recovery.release();assert(!recovery.can_finish(12899));assert(recovery.can_finish(12900)); // Late hold and readable confirmation.
+    recovery.begin(UINT32_MAX-1000);recovery.press(UINT32_MAX-1000);
+    assert(!recovery.restore_due(1998));assert(recovery.restore_due(1999)); // Tick wrap.
     reset();assert(settings_init());auto defaults=settings_load();
     assert(!defaults.wifi.enabled && defaults.pages[0].enabled && commits==0);
     assert(defaults.units.heading_reference==HeadingReference::True);
@@ -102,6 +113,16 @@ int main(){
     assert(reboot.pages[0].fields[0].metric==DataMetric::EngineRpm);
     assert(reboot.pages[0].fields[1].metric==DataMetric::DepthBelowKeel);
 
+    expected.day_brightness=1;expected.night_brightness=1;assert(settings_save(expected));
+    const uint8_t source_settings[]={1,2,3,4};fixture("sources_v1",source_settings);
+    const uint8_t depth_calibration[]={5,6,7,8};fixture("depth_src_v1",depth_calibration);
+    const auto before_brightness_reset=durable;
+    fail_commit=true;assert(!settings_restore_brightness());assert(durable==before_brightness_reset);
+    fail_commit=false;assert(settings_restore_brightness());reboot=settings_load();
+    assert(reboot.day_brightness==80 && reboot.night_brightness==20);
+    for(const auto &item:before_brightness_reset)
+        if(item.first!="day_br" && item.first!="night_br")assert(durable.at(item.first)==item.second);
+
     auto config=expected.wifi;assert(wifi_config_valid(config,&reason));
     config.ap_password.fill(0);assert(!wifi_config_valid(config,&reason));
     std::strcpy(config.ap_password.data(),"1234567");assert(!wifi_config_valid(config,&reason));
@@ -118,5 +139,5 @@ int main(){
     reset();namespace_exists=true;durable["wifi_v3"]=Bytes(204,0xff);
     const auto unknown=durable["wifi_v3"];reboot=settings_load();
     assert(!reboot.wifi.enabled && reboot.wifi.password[0]==0 && durable["wifi_v3"]==unknown);
-    std::puts("PASS: defaults, legacy protected/open migration, retry, reboot credentials, AP/station separation, SmartShunt/page preservation, password bounds, invalid schema");
+    std::puts("PASS: brightness hold timing, recovery/reboot/failed-save preservation, defaults, migration, Wi-Fi credentials, AP/station, SmartShunts/pages, password bounds and invalid schema");
 }

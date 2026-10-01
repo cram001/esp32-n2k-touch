@@ -14,6 +14,21 @@ buttons. Tiles use the released space; the page indicators remain at the bottom.
 Only Victron SmartShunt tiles display their source name. NMEA2000 source selection
 and identity remain available in the field editor.
 
+## Brightness recovery
+
+Every boot displays the startup screen at 80% brightness, even when saved day or
+night brightness is too low to read. The screen instructs:
+**TOUCH SCREEN FOR 3 SECONDS TO RESTORE BRIGHTNESS**.
+Touch and hold anywhere continuously for three seconds to restore Day 80% and
+Night 20%. A confirmation is shown; release to continue. A hold started near the
+end of the eight-second boot screen is allowed to finish. Short taps do not reset
+brightness. Normal startup applies the saved brightness after the boot screen.
+
+Only the two brightness NVS keys are changed; Wi-Fi, pages, sources, calibration,
+theme and SmartShunt settings are retained. If the save fails, visibility is
+restored for the current boot and a message offers another hold to retry. The
+boot screen remains readable on the next restart regardless of the saved value.
+
 ## Field sources
 
 Each tile stores three pieces of configuration:

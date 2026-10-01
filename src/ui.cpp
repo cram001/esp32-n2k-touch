@@ -1,4 +1,5 @@
 #include "ui.hpp"
+#include "boot_brightness.hpp"
 
 #include <array>
 #include <atomic>
@@ -44,6 +45,10 @@ size_t g_edit_shunt = 0;
 lv_obj_t *g_data_screen = nullptr;
 lv_obj_t *g_boot_screen = nullptr;
 lv_obj_t *g_boot_status = nullptr;
+lv_obj_t *g_boot_recovery_status = nullptr;
+BootBrightnessRecovery g_boot_recovery;
+lv_indev_t *g_boot_indev = nullptr;
+bool g_boot_brightness_override = false;
 lv_obj_t *g_input_screen = nullptr;
 lv_obj_t *g_source_picker = nullptr, *g_source_list = nullptr, *g_source_status = nullptr;
 lv_obj_t *g_metric_picker = nullptr, *g_metric_list = nullptr;
@@ -243,7 +248,7 @@ void style_card(lv_obj_t *card)
 
 void apply_backlight()
 {
-    const esp_err_t err = bsp_display_brightness_set(active_brightness());
+    const esp_err_t err = bsp_display_brightness_set(g_boot_brightness_override?DEFAULT_DAY_BRIGHTNESS:active_brightness());
     if (err != ESP_OK) ESP_LOGW(TAG, "Unable to set brightness: %s", esp_err_to_name(err));
 }
 
@@ -610,6 +615,38 @@ void data_gesture_cb(lv_event_t *event)
         g_edit_page = g_active_page; page_setup_screen_cb(nullptr); break;
     default: break;
     }
+}
+void boot_touch_cb(lv_event_t *event)
+{
+    if(lv_screen_active()!=g_boot_screen)return;
+    const auto code=lv_event_get_code(event);
+    if(code==LV_EVENT_PRESSED){
+        g_boot_indev=lv_event_get_indev(event);
+        g_boot_recovery.press(lv_tick_get());
+    }else if(code==LV_EVENT_RELEASED || code==LV_EVENT_PRESS_LOST){
+        g_boot_recovery.release();
+    }
+}
+void boot_timer_cb(lv_timer_t *timer)
+{
+    const uint32_t now=lv_tick_get();
+    if(g_boot_recovery.restore_due(now)){
+        const bool saved=settings_restore_brightness();
+        // Restore visibility even if NVS fails; a new hold can retry the save.
+        g_settings.day_brightness=DEFAULT_DAY_BRIGHTNESS;
+        g_settings.night_brightness=DEFAULT_NIGHT_BRIGHTNESS;
+        lv_label_set_text(g_boot_recovery_status,saved?
+            "BRIGHTNESS RESTORED: DAY 80% / NIGHT 20%":
+            "Brightness restored for this boot; save failed.\nRelease and hold again to retry.");
+    }
+    if(!g_boot_recovery.can_finish(now))return;
+    if(g_boot_indev)lv_indev_wait_release(g_boot_indev);
+    lv_screen_load(g_data_screen);
+    g_boot_brightness_override=false;
+    apply_backlight();
+    g_boot_status=nullptr;g_boot_recovery_status=nullptr;
+    lv_obj_delete(g_boot_screen);g_boot_screen=nullptr;g_boot_indev=nullptr;
+    lv_timer_delete(timer);
 }
 void update_input_status()
 {
@@ -1179,6 +1216,8 @@ void create_shunt_edit_screen()
 void ui_start(const AppSettings &initial_settings)
 {
     g_settings = initial_settings;
+    g_boot_brightness_override=true;
+    g_boot_recovery.begin(lv_tick_get());
     g_active_page = first_enabled_page();
 
     create_data_screen();
@@ -1200,6 +1239,8 @@ void ui_start(const AppSettings &initial_settings)
     update_shunts_list();
     g_boot_screen = require_obj(lv_obj_create(nullptr), "boot screen");
     lv_obj_remove_flag(g_boot_screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(g_boot_screen,LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(g_boot_screen,boot_touch_cb,LV_EVENT_ALL,nullptr);
     apply_theme_to(g_boot_screen);
     lv_obj_t *identity = require_obj(lv_label_create(g_boot_screen), "boot firmware identity");
     const esp_app_desc_t *app = esp_app_get_description();
@@ -1208,26 +1249,37 @@ void ui_start(const AppSettings &initial_settings)
     lv_obj_set_width(identity, 440);
     lv_obj_set_style_text_font(identity, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_align(identity, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(identity, LV_ALIGN_TOP_MID, 0, 38);
+    lv_obj_align(identity, LV_ALIGN_TOP_MID, 0, 18);
     lv_obj_t *hints = lv_label_create(g_boot_screen);
-    lv_label_set_text(hints, "Swipe left / right: change page\nSwipe down: edit current page\nSwipe up: open Settings\nButtons remain available");
+    lv_label_set_text(hints, "Swipe left / right: change page\nSwipe down: edit current page\nSwipe up: open Settings");
     lv_obj_set_style_text_font(hints, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_align(hints, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(hints, LV_ALIGN_TOP_MID, 0, 175);
+    lv_obj_align(hints, LV_ALIGN_TOP_MID, 0, 112);
+    lv_obj_t *recovery=require_obj(lv_label_create(g_boot_screen),"brightness recovery hint");
+    lv_label_set_text(recovery,"TOUCH SCREEN FOR 3 SECONDS\nTO RESTORE BRIGHTNESS");
+    lv_obj_set_width(recovery,440);
+    lv_obj_set_style_text_font(recovery,&lv_font_montserrat_20,0);
+    lv_obj_set_style_text_align(recovery,LV_TEXT_ALIGN_CENTER,0);
+    lv_obj_align(recovery,LV_ALIGN_TOP_MID,0,215);
+    g_boot_recovery_status=require_obj(lv_label_create(g_boot_screen),"brightness recovery status");
+    lv_label_set_text(g_boot_recovery_status,"");lv_obj_set_width(g_boot_recovery_status,440);
+    lv_obj_set_style_text_font(g_boot_recovery_status,&lv_font_montserrat_14,0);
+    lv_obj_set_style_text_align(g_boot_recovery_status,LV_TEXT_ALIGN_CENTER,0);
+    lv_obj_align(g_boot_recovery_status,LV_ALIGN_TOP_MID,0,275);
     g_boot_status = lv_label_create(g_boot_screen); lv_obj_set_width(g_boot_status, 440);
     lv_obj_set_style_text_align(g_boot_status, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(g_boot_status, LV_ALIGN_TOP_MID, 0, 315);
+    lv_obj_set_style_text_font(g_boot_status,&lv_font_montserrat_14,0);
+    lv_obj_set_height(g_boot_status,100);lv_label_set_long_mode(g_boot_status,LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_align(g_boot_status, LV_ALIGN_TOP_MID, 0, 335);
+    // Decorative labels must not intercept a hold anywhere on the boot screen.
+    for(uint32_t i=0;i<lv_obj_get_child_count(g_boot_screen);++i)
+        lv_obj_remove_flag(lv_obj_get_child(g_boot_screen,i),LV_OBJ_FLAG_CLICKABLE);
     update_input_status();
     lv_screen_load(g_boot_screen);
     // This callback runs on the LVGL task, retaining display/touch ownership.
-    lv_timer_t *boot_timer = lv_timer_create([](lv_timer_t *) {
-        lv_screen_load(g_data_screen);
-        g_boot_status = nullptr;
-        lv_obj_delete(g_boot_screen);
-        g_boot_screen = nullptr;
-    }, 8000, nullptr);
+    g_boot_recovery.begin(lv_tick_get());
+    lv_timer_t *boot_timer = lv_timer_create(boot_timer_cb,50,nullptr);
     if (!boot_timer) std::abort();
-    lv_timer_set_repeat_count(boot_timer, 1);
     g_refresh_timer = lv_timer_create(refresh_cb, 500, nullptr);
     if (g_refresh_timer == nullptr) {
         ESP_LOGE(TAG, "LVGL allocation failed for refresh timer");
