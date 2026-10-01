@@ -18,6 +18,7 @@ constexpr const char *KEY_NIGHT_BRIGHTNESS = "night_br";
 constexpr const char *KEY_SHUNTS = "shunts_v2";
 constexpr const char *KEY_DISPLAY = "display_v1";
 constexpr const char *KEY_HEADING_REFERENCE = "heading_ref";
+constexpr const char *KEY_LAT_LON_FORMAT = "latlon_fmt";
 constexpr const char *KEY_WIFI = "wifi_v3";
 constexpr const char *KEY_WIFI_LEGACY = "wifi_v1";
 constexpr uint32_t SHUNTS_SCHEMA = 2;
@@ -55,7 +56,8 @@ static_assert(sizeof(SmartShuntConfig) == 80, "SmartShuntConfig ABI changed; bum
 static_assert(sizeof(PersistedSmartShunts) == 324, "PersistedSmartShunts ABI changed; bump SHUNTS_SCHEMA and migrate");
 static_assert(sizeof(UnitsSettings) == 12, "UnitsSettings ABI changed; bump DISPLAY_SCHEMA and migrate");
 static_assert(offsetof(UnitsSettings, short_distance_threshold_nm) == 8, "Legacy unit layout changed");
-static_assert(offsetof(UnitsSettings, heading_reference) == 6, "Heading must occupy former padding");
+static_assert(offsetof(UnitsSettings, heading_reference) == 6, "Heading layout changed");
+static_assert(offsetof(UnitsSettings, lat_lon_format) == 7, "Lat/lon format must occupy legacy padding");
 static_assert(sizeof(DataPageConfig) == 37, "DataPageConfig ABI changed; bump DISPLAY_SCHEMA and migrate");
 static_assert(sizeof(PersistedDisplayConfig) == 240, "PersistedDisplayConfig ABI changed; bump DISPLAY_SCHEMA and migrate");
 static_assert(sizeof(LegacyWifiConfig) == 40, "Legacy Wi-Fi ABI changed");
@@ -102,6 +104,7 @@ void sanitize_display_settings(AppSettings &settings)
     if (static_cast<uint8_t>(settings.units.vessel_speed) > static_cast<uint8_t>(SpeedUnit::MetresPerSecond)) settings.units.vessel_speed = SpeedUnit::Knots;
     if (static_cast<uint8_t>(settings.units.distance) > static_cast<uint8_t>(DistanceUnit::Kilometres)) settings.units.distance = DistanceUnit::NauticalMiles;
     if (static_cast<uint8_t>(settings.units.short_distance) > static_cast<uint8_t>(ShortDistanceUnit::Yards)) settings.units.short_distance = ShortDistanceUnit::Metres;
+    if (static_cast<uint8_t>(settings.units.lat_lon_format) > static_cast<uint8_t>(LatLonFormat::DegreesMinutesSeconds)) settings.units.lat_lon_format = LatLonFormat::DegreesMinutes;
     if (settings.units.short_distance_threshold_nm < 0.01f || settings.units.short_distance_threshold_nm > 1.0f) {
         settings.units.short_distance_threshold_nm = 0.2f;
     }
@@ -227,6 +230,13 @@ AppSettings settings_load()
     if (nvs_get_u8(handle, KEY_HEADING_REFERENCE, &value) == ESP_OK && value <= 1) {
         settings.units.heading_reference = static_cast<HeadingReference>(value);
     }
+    // Byte 7 was padding in the original display_v1 blob, so never trust it
+    // when loading old settings. Persist the user's explicit choice separately.
+    settings.units.lat_lon_format = LatLonFormat::DegreesMinutes;
+    if (nvs_get_u8(handle, KEY_LAT_LON_FORMAT, &value) == ESP_OK &&
+        value <= static_cast<uint8_t>(LatLonFormat::DegreesMinutesSeconds)) {
+        settings.units.lat_lon_format = static_cast<LatLonFormat>(value);
+    }
 
     nvs_close(handle);
     if (migrate_wifi) {
@@ -272,6 +282,8 @@ bool settings_save(const AppSettings &settings)
     err = nvs_set_u8(handle, KEY_THEME, static_cast<uint8_t>(settings.theme));
     if (err == ESP_OK) err = nvs_set_u8(handle, KEY_HEADING_REFERENCE,
         settings.units.heading_reference == HeadingReference::Magnetic ? 1 : 0);
+    if (err == ESP_OK) err = nvs_set_u8(handle, KEY_LAT_LON_FORMAT,
+        static_cast<uint8_t>(settings.units.lat_lon_format));
     if (err == ESP_OK) err = nvs_set_u8(handle, KEY_DAY_BRIGHTNESS, clamp_brightness(settings.day_brightness));
     if (err == ESP_OK) err = nvs_set_u8(handle, KEY_NIGHT_BRIGHTNESS, clamp_brightness(settings.night_brightness));
     if (err == ESP_OK) err = nvs_set_blob(handle, KEY_SHUNTS, &persisted_shunts, sizeof(persisted_shunts));
