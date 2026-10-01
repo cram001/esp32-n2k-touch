@@ -146,7 +146,8 @@ bool persist(const Preferences &next) {
 }
 }
 bool n2k_sources_is_gps(DataMetric m) {
-    return m==DataMetric::Latitude || m==DataMetric::Longitude || m==DataMetric::Altitude || m==DataMetric::SpeedOverGround || m==DataMetric::CourseOverGround;
+    return m==DataMetric::Latitude || m==DataMetric::Longitude || m==DataMetric::Position ||
+           m==DataMetric::Altitude || m==DataMetric::SpeedOverGround || m==DataMetric::CourseOverGround;
 }
 bool n2k_sources_is_depth(DataMetric m) {
     return m==DataMetric::Depth || m==DataMetric::DepthTransducer || m==DataMetric::DepthBelowKeel || m==DataMetric::DepthWaterline || m==DataMetric::DepthSensorOffset;
@@ -245,6 +246,7 @@ bool n2k_depth_adjust(const DepthConfig &c,double raw,bool valid,double offset,d
     return std::isfinite(result) && result<=1000;
 }
 bool n2k_sources_get(DataMetric metric,uint8_t field,InstrumentValue &out) {
+    if(metric==DataMetric::Position) metric=DataMetric::Latitude;
     const int64_t now=esp_timer_get_time();Record copy;DepthConfig depth;bool handled=false;Record variation;
     portENTER_CRITICAL(&mux);
     const uint16_t i=selected(metric,field);
@@ -264,6 +266,7 @@ bool n2k_sources_get(DataMetric metric,uint8_t field,InstrumentValue &out) {
     else if(metric==DataMetric::DepthWaterline)depth.reference=DepthReference::Waterline;
     else if(metric==DataMetric::DepthSensorOffset)depth.reference=DepthReference::SensorOffset;
     out=copy.value;out.depth_reference=static_cast<uint8_t>(depth.reference);
+    out.source_kind=copy.source.kind;out.source_instance=copy.source.instance;
     if(!copy.used)return handled;
     out.age_ms=static_cast<uint32_t>(std::max<int64_t>(0,now-copy.updated)/1000);
     out.stale=out.age_ms>=30000;
@@ -273,6 +276,7 @@ bool n2k_sources_get(DataMetric metric,uint8_t field,InstrumentValue &out) {
     return true;
 }
 size_t n2k_sources_options(DataMetric metric,N2kSourceOption *out,size_t capacity) {
+    if(metric==DataMetric::Position)metric=DataMetric::Latitude;
     if(n2k_sources_is_depth(metric))metric=DataMetric::Depth;
     if(!out)return 0;
     const int64_t now=esp_timer_get_time();size_t count=0;
@@ -285,6 +289,7 @@ size_t n2k_sources_options(DataMetric metric,N2kSourceOption *out,size_t capacit
     portEXIT_CRITICAL(&mux);return count;
 }
 void n2k_sources_label(DataMetric metric,uint8_t field,char *out,size_t capacity) {
+    if(metric==DataMetric::Position)metric=DataMetric::Latitude;
     if(n2k_sources_is_depth(metric))metric=DataMetric::Depth;
     if(!out || !capacity)return;
     portENTER_CRITICAL(&mux);const uint16_t i=selected(metric,field);const uint8_t id=choice_id(metric,field);
