@@ -310,7 +310,7 @@ void instrument_format_value(const DataFieldSelection &selection,
     } else if (is_vessel_speed(metric)) {
         format_speed(v.value, units.vessel_speed, value_out, value_out_size, unit_out, unit_out_size);
     } else if (metric == DataMetric::Heading) {
-        std::snprintf(unit_out, unit_out_size, "deg %s", units.heading_reference == HeadingReference::Magnetic ? "M" : "T");
+        std::snprintf(unit_out, unit_out_size, "°%s", units.heading_reference == HeadingReference::Magnetic ? "M" : "T");
         if (v.heading_reference == HeadingReference::Unknown ||
             (v.heading_reference != units.heading_reference && !v.variation_valid)) {
             std::snprintf(value_out, value_out_size, "--");
@@ -356,8 +356,8 @@ void instrument_format_value(const DataFieldSelection &selection,
     } else if (is_angle(metric)) {
         std::snprintf(value_out, value_out_size, "%.0f", v.value * RAD_TO_DEG);
         if((metric==DataMetric::CourseOverGround || metric==DataMetric::WaypointBearing) && v.heading_reference!=HeadingReference::Unknown)
-            std::snprintf(unit_out, unit_out_size, "deg %s",v.heading_reference==HeadingReference::True?"T":"M");
-        else std::snprintf(unit_out, unit_out_size, "deg");
+            std::snprintf(unit_out, unit_out_size, "°%s",v.heading_reference==HeadingReference::True?"T":"M");
+        else std::snprintf(unit_out, unit_out_size, "°");
     } else if (is_temperature(metric)) {
         const double c = v.value - 273.15;
         if (units.temperature == TemperatureUnit::Fahrenheit) { std::snprintf(value_out, value_out_size, "%.1f", c * 9.0 / 5.0 + 32.0); std::snprintf(unit_out, unit_out_size, "F"); }
