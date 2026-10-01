@@ -113,6 +113,9 @@ This project targets the Waveshare ESP32-S3-Touch-LCD-4 and follows Waveshare's 
 
 ## Build
 
+The [release plan](docs/release-plan.md) tracks completed work, heading reference
+selection and the remaining wireless transport/gesture proposals.
+
 Install VS Code and the PlatformIO extension, clone the repository, and open the repository folder.
 
 ```bash

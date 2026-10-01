@@ -36,6 +36,8 @@ jobs:
           /tmp/settings_test
           g++ -std=c++17 -Wall -Wextra -I tests/host/wifi -I tests/host -I src src/wifi_config.cpp tests/host/wifi_service_test.cpp -o /tmp/wifi_service_test
           /tmp/wifi_service_test
+          g++ -std=c++17 -Wall -Wextra -I tests/host/instrument -I src src/instrument_data.cpp tests/host/heading_test.cpp -o /tmp/heading_test
+          /tmp/heading_test
 
       - name: Build firmware
         shell: bash

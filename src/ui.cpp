@@ -73,6 +73,7 @@ lv_obj_t *g_field_metric_label = nullptr;
 lv_obj_t *g_field_device_label = nullptr;
 lv_obj_t *g_field_device_button = nullptr;
 
+lv_obj_t *g_units_heading = nullptr;
 lv_obj_t *g_units_depth = nullptr;
 lv_obj_t *g_units_temp = nullptr;
 lv_obj_t *g_units_wind = nullptr;
@@ -332,7 +333,8 @@ void field_device_cb(lv_event_t *){auto &f=g_settings.pages[g_edit_page].fields[
 void field_done_cb(lv_event_t *){update_page_setup();lv_screen_load(g_page_setup_screen);}
 
 const char *depth_name(){return g_settings.units.depth==DepthUnit::Metres?"METRES":"FEET";}const char *temp_name(){return g_settings.units.temperature==TemperatureUnit::Celsius?"CELSIUS":"FAHRENHEIT";}const char *speed_name(SpeedUnit u){return u==SpeedUnit::Knots?"KNOTS":(u==SpeedUnit::KilometresPerHour?"KM/H":"M/S");}const char *distance_name(){return g_settings.units.distance==DistanceUnit::NauticalMiles?"NM":"KM";}const char *short_name(){return g_settings.units.short_distance==ShortDistanceUnit::Metres?"METRES":(g_settings.units.short_distance==ShortDistanceUnit::Feet?"FEET":"YARDS");}
-void update_units(){lv_label_set_text(g_units_depth,depth_name());lv_label_set_text(g_units_temp,temp_name());lv_label_set_text(g_units_wind,speed_name(g_settings.units.wind_speed));lv_label_set_text(g_units_vessel,speed_name(g_settings.units.vessel_speed));lv_label_set_text(g_units_distance,distance_name());lv_label_set_text(g_units_short,short_name());char b[24];std::snprintf(b,sizeof(b),"< %.2f NM",g_settings.units.short_distance_threshold_nm);lv_label_set_text(g_units_threshold,b);}
+void update_units(){lv_label_set_text(g_units_heading,g_settings.units.heading_reference==HeadingReference::True?"TRUE":"MAGNETIC");lv_label_set_text(g_units_depth,depth_name());lv_label_set_text(g_units_temp,temp_name());lv_label_set_text(g_units_wind,speed_name(g_settings.units.wind_speed));lv_label_set_text(g_units_vessel,speed_name(g_settings.units.vessel_speed));lv_label_set_text(g_units_distance,distance_name());lv_label_set_text(g_units_short,short_name());char b[24];std::snprintf(b,sizeof(b),"< %.2f NM",g_settings.units.short_distance_threshold_nm);lv_label_set_text(g_units_threshold,b);}
+void unit_heading_cb(lv_event_t *){g_settings.units.heading_reference=g_settings.units.heading_reference==HeadingReference::True?HeadingReference::Magnetic:HeadingReference::True;persist();update_units();}
 void units_screen_cb(lv_event_t *){update_units();lv_screen_load(g_units_screen);}void unit_depth_cb(lv_event_t *){g_settings.units.depth=g_settings.units.depth==DepthUnit::Metres?DepthUnit::Feet:DepthUnit::Metres;persist();update_units();}void unit_temp_cb(lv_event_t *){g_settings.units.temperature=g_settings.units.temperature==TemperatureUnit::Celsius?TemperatureUnit::Fahrenheit:TemperatureUnit::Celsius;persist();update_units();}
 SpeedUnit next_speed(SpeedUnit u){return u==SpeedUnit::Knots?SpeedUnit::KilometresPerHour:(u==SpeedUnit::KilometresPerHour?SpeedUnit::MetresPerSecond:SpeedUnit::Knots);}void unit_wind_cb(lv_event_t *){g_settings.units.wind_speed=next_speed(g_settings.units.wind_speed);persist();update_units();}void unit_vessel_cb(lv_event_t *){g_settings.units.vessel_speed=next_speed(g_settings.units.vessel_speed);persist();update_units();}void unit_distance_cb(lv_event_t *){g_settings.units.distance=g_settings.units.distance==DistanceUnit::NauticalMiles?DistanceUnit::Kilometres:DistanceUnit::NauticalMiles;persist();update_units();}void unit_short_cb(lv_event_t *){auto&u=g_settings.units.short_distance;u=u==ShortDistanceUnit::Metres?ShortDistanceUnit::Feet:(u==ShortDistanceUnit::Feet?ShortDistanceUnit::Yards:ShortDistanceUnit::Metres);persist();update_units();}void unit_threshold_down_cb(lv_event_t *){auto&t=g_settings.units.short_distance_threshold_nm;if(t>0.05f)t-=0.05f;persist();update_units();}void unit_threshold_up_cb(lv_event_t *){auto&t=g_settings.units.short_distance_threshold_nm;if(t<1.0f)t+=0.05f;persist();update_units();}
 
@@ -669,33 +671,33 @@ void create_units_screen()
     lv_obj_set_style_text_font(l, &lv_font_montserrat_24, 0);
     lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 18);
 
-    const char *names[] = {"Depth", "Temperature", "Wind speed", "Boat speed", "Distance", "Short distance"};
-    lv_obj_t **vals[] = {&g_units_depth, &g_units_temp, &g_units_wind,
+    const char *names[] = {"Heading", "Depth", "Temperature", "Wind speed", "Boat speed", "Distance", "Short distance"};
+    lv_obj_t **vals[] = {&g_units_heading, &g_units_depth, &g_units_temp, &g_units_wind,
                          &g_units_vessel, &g_units_distance, &g_units_short};
-    lv_event_cb_t cbs[] = {unit_depth_cb, unit_temp_cb, unit_wind_cb,
+    lv_event_cb_t cbs[] = {unit_heading_cb, unit_depth_cb, unit_temp_cb, unit_wind_cb,
                            unit_vessel_cb, unit_distance_cb, unit_short_cb};
 
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < 7; ++i) {
         l = require_obj(lv_label_create(g_units_screen), "unit row label");
         lv_label_set_text(l, names[i]);
-        lv_obj_align(l, LV_ALIGN_TOP_LEFT, 32, 64 + i * 48);
+        lv_obj_align(l, LV_ALIGN_TOP_LEFT, 32, 64 + i * 43);
 
         lv_obj_t *b = make_button(g_units_screen, "", cbs[i], 170, 40);
         *vals[i] = button_label(b);
-        lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -32, 54 + i * 48);
+        lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -32, 54 + i * 43);
     }
 
     l = require_obj(lv_label_create(g_units_screen), "short-distance threshold label");
     lv_label_set_text(l, "Short if");
-    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 32, 355);
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 32, 376);
 
     lv_obj_t *b = make_button(g_units_screen, "-", unit_threshold_down_cb, 48, 38);
-    lv_obj_align(b, LV_ALIGN_TOP_LEFT, 145, 344);
+    lv_obj_align(b, LV_ALIGN_TOP_LEFT, 145, 365);
     b = make_button(g_units_screen, "", unit_threshold_up_cb, 125, 38);
     g_units_threshold = button_label(b);
-    lv_obj_align(b, LV_ALIGN_TOP_MID, 60, 344);
+    lv_obj_align(b, LV_ALIGN_TOP_MID, 60, 365);
     b = make_button(g_units_screen, "+", unit_threshold_up_cb, 48, 38);
-    lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -32, 344);
+    lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -32, 365);
 
     b = make_button(g_units_screen, "BACK", settings_screen_cb, 120, 46);
     lv_obj_align(b, LV_ALIGN_BOTTOM_MID, 0, -12);

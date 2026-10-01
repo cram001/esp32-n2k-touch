@@ -66,7 +66,17 @@ void handle_nmea_message(const tN2kMsg &msg)
     case 127250L: {
         unsigned char sid; double heading, deviation, variation; tN2kHeadingReference ref;
         if (ParseN2kPGN127250(msg, sid, heading, deviation, variation, ref)) {
-            instrument_data_update_nmea(DataMetric::Heading, heading);
+            if (variation != N2kDoubleNA) instrument_data_update_variation(variation);
+            if (heading != N2kDoubleNA && (ref == N2khr_true || ref == N2khr_magnetic)) {
+                instrument_data_update_heading(heading, ref == N2khr_true ? HeadingReference::True : HeadingReference::Magnetic);
+            }
+        }
+        break;
+    }
+    case 127258L: {
+        unsigned char sid; tN2kMagneticVariation source; uint16_t days; double variation;
+        if (ParseN2kPGN127258(msg, sid, source, days, variation) && variation != N2kDoubleNA) {
+            instrument_data_update_variation(variation);
         }
         break;
     }

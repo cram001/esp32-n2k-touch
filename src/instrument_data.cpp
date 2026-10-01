@@ -11,6 +11,7 @@
 
 namespace {
 constexpr uint32_t NMEA_STALE_MS = 5000;
+constexpr int64_t VARIATION_STALE_US = 60000000;
 constexpr double MPS_TO_KNOTS = 1.94384449244;
 constexpr double MPS_TO_KPH = 3.6;
 constexpr double M_TO_FT = 3.280839895;
@@ -24,9 +25,11 @@ struct CachedValue {
     bool valid = false;
     double value = 0.0;
     int64_t updated_us = 0;
+    HeadingReference heading_reference = HeadingReference::Unknown;
 };
 
 std::array<CachedValue, METRIC_COUNT> g_nmea{};
+CachedValue g_variation{};
 portMUX_TYPE g_nmea_mux = portMUX_INITIALIZER_UNLOCKED;
 
 size_t metric_index(DataMetric metric) { return static_cast<size_t>(metric); }
@@ -106,6 +109,32 @@ void instrument_data_update_nmea(DataMetric metric, double value)
     g_nmea[idx].valid = true;
     g_nmea[idx].value = value;
     g_nmea[idx].updated_us = now;
+    // Generic heading updates have no trustworthy reference.
+    g_nmea[idx].heading_reference = HeadingReference::Unknown;
+    portEXIT_CRITICAL(&g_nmea_mux);
+}
+
+void instrument_data_update_heading(double radians, HeadingReference reference)
+{
+    if (!std::isfinite(radians) || (reference != HeadingReference::True && reference != HeadingReference::Magnetic)) return;
+    const int64_t now = esp_timer_get_time();
+    portENTER_CRITICAL(&g_nmea_mux);
+    auto &heading = g_nmea[metric_index(DataMetric::Heading)];
+    heading.valid = true;
+    heading.value = radians;
+    heading.updated_us = now;
+    heading.heading_reference = reference;
+    portEXIT_CRITICAL(&g_nmea_mux);
+}
+
+void instrument_data_update_variation(double radians)
+{
+    if (!std::isfinite(radians) || std::abs(radians) > 3.141592653589793) return;
+    const int64_t now = esp_timer_get_time();
+    portENTER_CRITICAL(&g_nmea_mux);
+    g_variation.valid = true;
+    g_variation.value = radians;
+    g_variation.updated_us = now;
     portEXIT_CRITICAL(&g_nmea_mux);
 }
 
@@ -117,8 +146,10 @@ InstrumentValue instrument_data_get(const DataFieldSelection &selection)
     if (idx >= g_nmea.size()) return out;
 
     CachedValue cached{};
+    CachedValue variation{};
     portENTER_CRITICAL(&g_nmea_mux);
     cached = g_nmea[idx];
+    variation = g_variation;
     portEXIT_CRITICAL(&g_nmea_mux);
 
     if (!cached.valid) return out;
@@ -126,6 +157,9 @@ InstrumentValue instrument_data_get(const DataFieldSelection &selection)
     out.value = cached.value;
     out.age_ms = static_cast<uint32_t>((esp_timer_get_time() - cached.updated_us) / 1000);
     out.stale = out.age_ms > NMEA_STALE_MS;
+    out.heading_reference = cached.heading_reference;
+    out.variation_valid = variation.valid && esp_timer_get_time() - variation.updated_us <= VARIATION_STALE_US;
+    out.variation_radians = variation.value;
     return out;
 }
 
@@ -191,6 +225,21 @@ void instrument_format_value(const DataFieldSelection &selection,
         format_speed(v.value, units.wind_speed, value_out, value_out_size, unit_out, unit_out_size);
     } else if (is_vessel_speed(metric)) {
         format_speed(v.value, units.vessel_speed, value_out, value_out_size, unit_out, unit_out_size);
+    } else if (metric == DataMetric::Heading) {
+        std::snprintf(unit_out, unit_out_size, "deg %s", units.heading_reference == HeadingReference::Magnetic ? "M" : "T");
+        if (v.heading_reference == HeadingReference::Unknown ||
+            (v.heading_reference != units.heading_reference && !v.variation_valid)) {
+            std::snprintf(value_out, value_out_size, "---");
+            return;
+        }
+        double radians = v.value;
+        if (v.heading_reference != units.heading_reference) {
+            // East-positive variation: true = magnetic + variation.
+            radians += units.heading_reference == HeadingReference::True ? v.variation_radians : -v.variation_radians;
+        }
+        double degrees = std::fmod(radians * RAD_TO_DEG, 360.0);
+        if (degrees < 0) degrees += 360.0;
+        std::snprintf(value_out, value_out_size, "%u", static_cast<unsigned>(std::lround(degrees)) % 360U);
     } else if (is_angle(metric)) {
         std::snprintf(value_out, value_out_size, "%.0f", v.value * RAD_TO_DEG);
         std::snprintf(unit_out, unit_out_size, "deg");

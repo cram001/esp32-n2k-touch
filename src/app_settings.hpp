@@ -53,6 +53,7 @@ enum class TemperatureUnit : uint8_t { Celsius = 0, Fahrenheit = 1 };
 enum class SpeedUnit : uint8_t { Knots = 0, KilometresPerHour = 1, MetresPerSecond = 2 };
 enum class DistanceUnit : uint8_t { NauticalMiles = 0, Kilometres = 1 };
 enum class ShortDistanceUnit : uint8_t { Metres = 0, Feet = 1, Yards = 2 };
+enum class HeadingReference : uint8_t { True = 0, Magnetic = 1, Unknown = 255 };
 
 struct UnitsSettings {
     DepthUnit depth = DepthUnit::Metres;
@@ -61,6 +62,8 @@ struct UnitsSettings {
     SpeedUnit vessel_speed = SpeedUnit::Knots;
     DistanceUnit distance = DistanceUnit::NauticalMiles;
     ShortDistanceUnit short_distance = ShortDistanceUnit::Metres;
+    // Stored separately in NVS; this byte occupies former ABI padding.
+    HeadingReference heading_reference = HeadingReference::True;
     // Distances below this threshold use short_distance. Stored in nautical miles.
     float short_distance_threshold_nm = 0.2f;
 };
