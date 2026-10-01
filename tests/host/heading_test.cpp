@@ -53,5 +53,10 @@ int main() {
     char value[32], label[16];
     instrument_format_value(cog,units,instrument_data_get(cog),value,sizeof(value),label,sizeof(label));
     assert(std::strcmp(value,"42")==0 && std::strcmp(label,"deg")==0);
-    std::puts("PASS: heading reference, signed conversion, wrap/rounding, missing/stale variation, heading expiry and unchanged COG");
+    instrument_data_update_heading(20*DEG,HeadingReference::True);
+    instrument_data_update_variation(2*DEG);
+    instrument_data_reset_nmea();
+    assert(!instrument_data_get(cog).valid);
+    expect(HeadingReference::True,"---","");
+    std::puts("PASS: heading reference, signed conversion, wrap/rounding, missing/stale variation, heading expiry, source reset and unchanged COG");
 }

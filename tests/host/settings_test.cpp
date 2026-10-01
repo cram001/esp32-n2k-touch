@@ -70,6 +70,8 @@ int main(){
     expected.smartshunts[0].configured=true;expected.smartshunts[0].n2k_enabled=true;
     expected.smartshunts[0].battery_instance=17;std::strcpy(expected.smartshunts[0].bindkey.data(),"0123456789abcdef0123456789abcdef");
     expected.units.depth=DepthUnit::Feet;expected.pages[1].enabled=true;expected.pages[1].layout=PageLayout::Six;
+    expected.n2k_input.mode=N2kInputMode::W2kTcp;
+    std::strcpy(expected.n2k_input.ip.data(),"192.168.4.1");expected.n2k_input.port=60003;
     expected.units.heading_reference=HeadingReference::Magnetic;
     assert(settings_save(expected));reboot=settings_load();
     assert(reboot.wifi.enabled && reboot.wifi.ssid==expected.wifi.ssid && reboot.wifi.password==expected.wifi.password);
@@ -77,6 +79,13 @@ int main(){
     assert(reboot.smartshunts[0].bindkey==expected.smartshunts[0].bindkey && reboot.smartshunts[0].battery_instance==17 && reboot.smartshunts[0].n2k_enabled);
     assert(reboot.units.depth==DepthUnit::Feet && reboot.pages[1].layout==PageLayout::Six && reboot.pages[1].enabled);
     assert(reboot.units.heading_reference==HeadingReference::Magnetic);
+    assert(reboot.n2k_input.mode==N2kInputMode::W2kTcp && reboot.n2k_input.ip==expected.n2k_input.ip && reboot.n2k_input.port==60003);
+    assert(durable["n2k_in_v1"].size()==24);
+    auto saved_input=durable["n2k_in_v1"];durable["n2k_in_v1"][0]=2;
+    assert(settings_load().n2k_input.mode==N2kInputMode::Wired);
+    durable["n2k_in_v1"]=saved_input;durable["n2k_in_v1"][4]=255;
+    assert(settings_load().n2k_input.mode==N2kInputMode::Wired);
+    durable["n2k_in_v1"]=saved_input;
     // Original display_v1 padding must not be treated as a heading preference.
     durable.erase("heading_ref");
     durable["display_v1"][4+6]=255;

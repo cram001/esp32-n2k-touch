@@ -35,6 +35,15 @@ struct PersistedDisplayConfig {
     std::array<DataPageConfig, MAX_DATA_PAGES> pages{};
 };
 
+struct PersistedN2kInput {
+    uint32_t schema = 1;
+    uint8_t mode = 0;
+    std::array<char, 16> ip{};
+    uint8_t reserved = 0;
+    uint16_t port = 60001;
+};
+static_assert(sizeof(PersistedN2kInput) == 24, "N2K input v1 ABI changed");
+
 struct LegacyWifiConfig {
     uint32_t schema = 2;
     bool enabled = false;
@@ -200,6 +209,16 @@ AppSettings settings_load()
         }
     }
 
+    PersistedN2kInput input{};
+    size = sizeof(input);
+    if (nvs_get_blob(handle, "n2k_in_v1", &input, &size) == ESP_OK &&
+        size == sizeof(input) && input.schema == 1 && input.mode <= 1) {
+        settings.n2k_input.mode = static_cast<N2kInputMode>(input.mode);
+        settings.n2k_input.ip = input.ip;
+        settings.n2k_input.ip.back() = '\0';
+        settings.n2k_input.port = input.port;
+    }
+
     sanitize_display_settings(settings);
 
     // Old display blobs contain arbitrary padding at the new field's offset.
@@ -245,6 +264,11 @@ bool settings_save(const AppSettings &settings)
     persisted_wifi.ap_password = settings.wifi.ap_password;
     persisted_wifi.ap_password.back() = '\0';
 
+    PersistedN2kInput input{};
+    input.mode = settings.n2k_input.mode == N2kInputMode::W2kTcp ? 1 : 0;
+    input.ip = settings.n2k_input.ip; input.ip.back() = '\0';
+    input.port = settings.n2k_input.port;
+
     err = nvs_set_u8(handle, KEY_THEME, static_cast<uint8_t>(settings.theme));
     if (err == ESP_OK) err = nvs_set_u8(handle, KEY_HEADING_REFERENCE,
         settings.units.heading_reference == HeadingReference::Magnetic ? 1 : 0);
@@ -253,6 +277,7 @@ bool settings_save(const AppSettings &settings)
     if (err == ESP_OK) err = nvs_set_blob(handle, KEY_SHUNTS, &persisted_shunts, sizeof(persisted_shunts));
     if (err == ESP_OK) err = nvs_set_blob(handle, KEY_DISPLAY, &persisted_display, sizeof(persisted_display));
     if (err == ESP_OK) err = nvs_set_blob(handle, KEY_WIFI, &persisted_wifi, sizeof(persisted_wifi));
+    if (err == ESP_OK) err = nvs_set_blob(handle, "n2k_in_v1", &input, sizeof(input));
     if (err == ESP_OK) err = nvs_commit(handle);
 
     nvs_close(handle);

@@ -104,12 +104,20 @@ struct WifiConfig {
     std::array<char, 65> ap_password{};
 };
 
+enum class N2kInputMode : uint8_t { Wired = 0, W2kTcp = 1 };
+struct N2kInputConfig {
+    N2kInputMode mode = N2kInputMode::Wired;
+    std::array<char, 16> ip{};
+    uint16_t port = 60001;
+};
+
 struct AppSettings {
     DisplayTheme theme = DisplayTheme::Day;
     uint8_t day_brightness = 80;
     uint8_t night_brightness = 20;
     WifiConfig wifi{};
     UnitsSettings units{};
+    N2kInputConfig n2k_input{};
     std::array<DataPageConfig, MAX_DATA_PAGES> pages{};
     std::array<SmartShuntConfig, MAX_SMARTSHUNTS> smartshunts{};
 };

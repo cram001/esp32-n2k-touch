@@ -27,14 +27,20 @@ N2K headings/variation, verify north wraparound, save and reboot, and confirm al
 existing page/unit/SmartShunt settings remain. Confirm the seven Units rows fit and
 respond correctly with rotated touch.
 
-## Queued for later increments
+## Current increment: W2K-1 and gestures
 
-- Selectable wired N2K versus wireless Actisense stream.
-- Swipe left/right to change instrument pages.
-- Swipe down to edit the current page.
-- Swipe up to open Settings.
-- Boot-time gesture hints and status when gestures are introduced.
+Selectable wired CAN / W2K-1 TCP input with persistent gateway IP/port is implemented.
+The gateway must use N2K ASCII. Left/right swipes change enabled pages, down edits
+the current page and up opens Settings. The boot screen retains firmware identity
+and adds gesture hints and startup status for eight seconds. See
+[`w2k-input-gestures.md`](w2k-input-gestures.md) for setup and bench acceptance.
 
-Wireless transport and gestures remain future work. Wi-Fi scans remain explicit,
+## Next increment: sources and additional instruments
+
+Per-field source selection, one selected GPS, engine/tank/position/navigation and
+environmental fields, depth-reference/installation settings, 30-second missing-data
+dashes, and rejection of depths above 1000 metres are the next authorized increment.
+
+Wi-Fi scans remain explicit,
 user-triggered operations to limit BLE coexistence impact. Every increment uses a
 feature branch and PR; merging requires explicit approval.
