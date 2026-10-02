@@ -97,6 +97,26 @@ reject missing or stale startup stack configurations.
 8. On a recoverable bench setup with a known valid previous slot, install a deliberately unhealthy test image or reset the candidate before its five-second confirmation window. Confirm rollback to the previous slot, its version and retained NVS settings. Record results before considering this release ready for permanent installation.
 9. Run the existing SmartShunt/NMEA bench checks in `docs/development.md`, including stale-data behavior and optional battery-PGN bridging. Those service implementations were not edited.
 
+## HTTP listener diagnostics
+
+This firmware uses ESP-IDF, following Espressif's
+[HTTP server setup](https://docs.espressif.com/projects/esp-idf/en/v5.5.3/esp32s3/api-reference/protocols/esp_http_server.html)
+and [OTA APIs](https://docs.espressif.com/projects/esp-idf/en/v5.5.3/esp32s3/api-reference/system/ota.html).
+The page sends the application binary as a raw request body, which is consumed
+with `httpd_req_recv` and written to the inactive partition with `esp_ota_begin`,
+`esp_ota_write`, and `esp_ota_end`. Only successful validation selects the new
+boot partition. Arduino's `WebServer`/`Update` example uses Arduino libraries
+that are not dependencies of this ESP-IDF project.
+
+If the display reports `Listener startup failed (0xffffffff)`, the HTTP SDK
+returned generic `ESP_FAIL` while initializing its sockets, before page handlers
+were registered. AP and Firmware Update status now show the saved socket errno;
+connecting a client to the AP also prints it with its description. Capture that
+line after installing the diagnostic firmware. It can distinguish an address
+collision from socket exhaustion or another socket failure. The SDK does not
+return the exact failing operation; zero means no errno was preserved, not that
+socket startup succeeded. This diagnostic does not itself repair the listener.
+
 ## Future planning, not implemented
 
 - Selectable wired NMEA 2000 versus a wireless Actisense N2K stream.

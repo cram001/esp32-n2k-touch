@@ -202,6 +202,7 @@ void ota_task(void *)
 httpd_handle_t g_server = nullptr;
 std::atomic<LocalServerStage> g_server_stage{LocalServerStage::NotStarted};
 std::atomic<int> g_server_error{0};
+std::atomic<int> g_server_socket_error{0};
 char g_upload_token[33]{};
 
 bool ap_request(httpd_req_t *request, bool token_required) {
@@ -407,12 +408,12 @@ bool ota_start_local_server()
     httpd_uri_t reboot{};reboot.uri="/reboot";reboot.method=HTTP_POST;reboot.handler=reboot_handler;
     const httpd_uri_t routes[]={page,upload,reboot};
     const auto result=start_local_http_server(g_server,routes,3);
-    g_server_error=result.error;g_server_stage=result.stage;
+    g_server_error=result.error;g_server_socket_error=result.socket_error;g_server_stage=result.stage;
     ota_log_local_server_status();
     return result.stage==LocalServerStage::Listening;
 }
 
-LocalServerStatus ota_local_server_status(){return {g_server_stage.load(),g_server_error.load()};}
+LocalServerStatus ota_local_server_status(){return {g_server_stage.load(),g_server_error.load(),g_server_socket_error.load()};}
 const char *ota_local_server_stage_name(LocalServerStage stage){
     switch(stage){
     case LocalServerStage::NotStarted:return "Not started";
@@ -425,8 +426,9 @@ const char *ota_local_server_stage_name(LocalServerStage stage){
 }
 void ota_log_local_server_status(){
     const auto status=ota_local_server_status();
-    ESP_LOGI(TAG,"HTTP server: %s; error %s (0x%x); OTA layout: %s",ota_local_server_stage_name(status.stage),
-             esp_err_to_name(status.error),status.error,ota_partition_layout_valid()?"valid":"incompatible (uploads disabled)");
+    ESP_LOGI(TAG,"HTTP server: %s; error %s (0x%x); socket errno %d (%s); OTA layout: %s",ota_local_server_stage_name(status.stage),
+             esp_err_to_name(status.error),status.error,status.socket_error,status.socket_error?std::strerror(status.socket_error):"none captured",
+             ota_partition_layout_valid()?"valid":"incompatible (uploads disabled)");
 }
 
 void ota_prepare() {ensure_mutex();}

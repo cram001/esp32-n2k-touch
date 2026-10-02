@@ -23,6 +23,7 @@ enum class LocalServerStage : uint8_t { NotStarted, Starting, Listening, StartFa
 struct LocalServerStatus {
     LocalServerStage stage=LocalServerStage::NotStarted;
     int error=0;
+    int socket_error=0;
 };
 LocalServerStatus ota_local_server_status();
 const char *ota_local_server_stage_name(LocalServerStage stage);
