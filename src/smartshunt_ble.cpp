@@ -1,4 +1,5 @@
 #include "smartshunt_ble.hpp"
+#include "victron_discovery.hpp"
 
 #include <array>
 #include <cctype>
@@ -16,7 +17,6 @@
 
 namespace {
 constexpr const char *TAG = "smartshunt";
-constexpr uint16_t VICTRON_COMPANY_ID = 0x02E1;
 constexpr uint8_t VICTRON_PRODUCT_ADVERTISEMENT = 0x10;
 constexpr uint8_t VICTRON_BATTERY_MONITOR_RECORD = 0x02;
 constexpr uint8_t VICTRON_INSTANT_READOUT = 0xA0;
@@ -37,6 +37,7 @@ struct RuntimeSlot {
 struct DiscoveredSlot {
     DiscoveredSmartShunt device{};
     int64_t last_seen_us = 0;
+    bool has_complete_name = false;
 };
 
 SemaphoreHandle_t g_mutex = nullptr;
@@ -98,49 +99,7 @@ void format_mac(const uint8_t mac[6], char out[18])
     std::snprintf(out, 18, "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 }
 
-const uint8_t *find_ad_type(const uint8_t *adv, size_t adv_len, uint8_t wanted_type, size_t &data_len)
-{
-    data_len = 0;
-    size_t pos = 0;
-    while (pos < adv_len) {
-        const uint8_t field_len = adv[pos];
-        if (field_len == 0 || pos + 1U + field_len > adv_len) break;
-        const uint8_t type = adv[pos + 1U];
-        if (type == wanted_type && field_len >= 2) {
-            data_len = field_len - 1U;
-            return &adv[pos + 2U];
-        }
-        pos += static_cast<size_t>(field_len) + 1U;
-    }
-    return nullptr;
-}
-
-const uint8_t *find_manufacturer_payload(const uint8_t *adv, size_t adv_len, size_t &payload_len)
-{
-    size_t len = 0;
-    const uint8_t *data = find_ad_type(adv, adv_len, 0xFF, len);
-    if (data == nullptr || len < 3) return nullptr;
-    const uint16_t company_id = static_cast<uint16_t>(data[0]) | (static_cast<uint16_t>(data[1]) << 8U);
-    if (company_id != VICTRON_COMPANY_ID) return nullptr;
-    payload_len = len - 2U;
-    return data + 2U;
-}
-
-void advertised_name(const uint8_t *adv, size_t adv_len, char out[25], const uint8_t mac[6])
-{
-    size_t len = 0;
-    const uint8_t *name = find_ad_type(adv, adv_len, 0x09, len);
-    if (name == nullptr) name = find_ad_type(adv, adv_len, 0x08, len);
-    if (name != nullptr && len > 0) {
-        const size_t copy = len < 24 ? len : 24;
-        std::memcpy(out, name, copy);
-        out[copy] = '\0';
-        return;
-    }
-    std::snprintf(out, 25, "SmartShunt %02X%02X", mac[4], mac[5]);
-}
-
-void update_discovery(const esp_ble_gap_cb_param_t::ble_scan_result_evt_param &scan)
+void update_discovery(const esp_ble_gap_cb_param_t::ble_scan_result_evt_param &scan,bool victron_seen)
 {
     char mac_text[18]{};
     format_mac(scan.bda, mac_text);
@@ -149,22 +108,35 @@ void update_discovery(const esp_ble_gap_cb_param_t::ble_scan_result_evt_param &s
     if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(5)) != pdTRUE) return;
     size_t target = MAX_DISCOVERED_SMARTSHUNTS;
     size_t oldest = 0;
+    bool known=false;
     for (size_t i = 0; i < g_discovered.size(); ++i) {
         if (g_discovered[i].device.valid && std::strcmp(g_discovered[i].device.mac.data(), mac_text) == 0) {
-            target = i;
+            target = i;known=true;
             break;
         }
         if (!g_discovered[i].device.valid && target == MAX_DISCOVERED_SMARTSHUNTS) target = i;
         if (g_discovered[i].last_seen_us < g_discovered[oldest].last_seen_us) oldest = i;
     }
+    // A name-only scan response can enrich a known Victron device, but must
+    // never make an unrelated Bluetooth device appear in this picker.
+    if(!victron_seen && !known){xSemaphoreGive(g_mutex);return;}
     if (target == MAX_DISCOVERED_SMARTSHUNTS) target = oldest;
-
     auto &slot = g_discovered[target];
-    slot.device = {};
+    if(!known)slot={};
     slot.device.valid = true;
     slot.device.rssi = scan.rssi;
     std::snprintf(slot.device.mac.data(), slot.device.mac.size(), "%s", mac_text);
-    advertised_name(scan.ble_adv, static_cast<size_t>(scan.adv_data_len) + static_cast<size_t>(scan.scan_rsp_len), slot.device.name.data(), scan.bda);
+    char name[25]{};
+    bool complete=false;
+    if(victron_discovery::name(scan.ble_adv,scan.adv_data_len,
+        scan.ble_adv+scan.adv_data_len,scan.scan_rsp_len,name,sizeof(name),&complete)) {
+        if(!slot.has_complete_name || complete) {
+            std::snprintf(slot.device.name.data(),slot.device.name.size(),"%s",name);
+            slot.has_complete_name=complete;
+        }
+    } else if(!known) {
+        std::snprintf(slot.device.name.data(),slot.device.name.size(),"Victron %02X%02X",scan.bda[4],scan.bda[5]);
+    }
     slot.last_seen_us = now;
     xSemaphoreGive(g_mutex);
 }
@@ -218,9 +190,19 @@ void handle_victron_advertisement(const esp_ble_gap_cb_param_t::ble_scan_result_
 {
     if (scan.search_evt != ESP_GAP_SEARCH_INQ_RES_EVT) return;
 
-    size_t payload_len = 0;
     const size_t raw_len = static_cast<size_t>(scan.adv_data_len) + static_cast<size_t>(scan.scan_rsp_len);
-    const uint8_t *payload = find_manufacturer_payload(scan.ble_adv, raw_len, payload_len);
+    if(scan.adv_data_len>31 || scan.scan_rsp_len>31 || raw_len>sizeof(scan.ble_adv))return;
+    const auto manufacturer=victron_discovery::manufacturer(scan.ble_adv,scan.adv_data_len,
+        scan.ble_adv+scan.adv_data_len,scan.scan_rsp_len);
+    const size_t payload_len=manufacturer.size;
+    const uint8_t *payload=manufacturer.data;
+
+    // Discovery is intentionally broader than telemetry decoding. A nearby
+    // Victron device should appear in the picker even when Instant Readout is
+    // disabled, uses a record type we do not decode yet, or its key is unknown.
+    // This also lets active scan responses contribute the configured device name.
+    update_discovery(scan,payload!=nullptr);
+
     if (payload == nullptr || payload_len < VICTRON_HEADER_LEN) return;
     // Victron manufacturer payload after the 0x02E1 company ID:
     // [0] 0x10 product advertisement, [1..2] product ID (LE),
@@ -231,8 +213,6 @@ void handle_victron_advertisement(const esp_ble_gap_cb_param_t::ble_scan_result_
         payload[4] != VICTRON_BATTERY_MONITOR_RECORD) {
         return;
     }
-
-    update_discovery(scan);
 
     std::array<uint8_t, 6> incoming{};
     std::memcpy(incoming.data(), scan.bda, incoming.size());
@@ -340,7 +320,7 @@ bool smartshunt_ble_start(const AppSettings &settings)
 
     ESP_ERROR_CHECK(esp_ble_gap_register_callback(gap_callback));
     static esp_ble_scan_params_t scan_params{};
-    scan_params.scan_type = BLE_SCAN_TYPE_PASSIVE;
+    scan_params.scan_type = BLE_SCAN_TYPE_ACTIVE;
     scan_params.own_addr_type = BLE_ADDR_TYPE_PUBLIC;
     scan_params.scan_filter_policy = BLE_SCAN_FILTER_ALLOW_ALL;
     scan_params.scan_interval = 0x80;
@@ -348,7 +328,7 @@ bool smartshunt_ble_start(const AppSettings &settings)
     scan_params.scan_duplicate = BLE_SCAN_DUPLICATE_DISABLE;
     ESP_ERROR_CHECK(esp_ble_gap_set_scan_params(&scan_params));
     g_ble_initialized = true;
-    ESP_LOGI(TAG, "Passive multi-SmartShunt scanner started");
+    ESP_LOGI(TAG, "Active Victron BLE discovery / SmartShunt Instant Readout scanner started");
     return true;
 }
 

@@ -34,6 +34,14 @@ jobs:
         run: |
           g++ -std=c++17 -Wall -Wextra -I tests/host -I src src/app_settings.cpp src/wifi_config.cpp tests/host/settings_test.cpp -o /tmp/settings_test
           /tmp/settings_test
+          g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -I src tests/host/victron_discovery_test.cpp -o /tmp/victron_discovery_test
+          /tmp/victron_discovery_test
+          g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -I tests/host/ble -I tests/host -I src tests/host/smartshunt_discovery_test.cpp -o /tmp/smartshunt_discovery_test
+          /tmp/smartshunt_discovery_test
+          g++ -std=c++17 -Wall -Wextra -I src tests/host/tile_number_fit_test.cpp -o /tmp/tile_number_fit_test
+          /tmp/tile_number_fit_test
+          g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -I tests/host -I src tests/host/depth_display_test.cpp -o /tmp/depth_display_test
+          /tmp/depth_display_test
           g++ -std=c++17 -Wall -Wextra -I tests/host/wifi -I tests/host -I src src/wifi_config.cpp tests/host/wifi_service_test.cpp -o /tmp/wifi_service_test
           /tmp/wifi_service_test
           g++ -std=c++17 -Wall -Wextra -I tests/host/instrument -I tests/host -I src src/instrument_data.cpp src/n2k_sources.cpp tests/host/nvs_fake.cpp tests/host/heading_test.cpp -o /tmp/heading_test

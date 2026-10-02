@@ -9,14 +9,21 @@ struct InstrumentValue {
     bool valid = false;
     bool stale = true;
     double value = 0.0;
+    bool secondary_valid = false;
+    double secondary_value = 0.0;
     uint32_t age_ms = 0;
+    int64_t sample_us = 0;
+    uint64_t source_identity = 0;
+    uint32_t display_context = 0;
     HeadingReference heading_reference = HeadingReference::Unknown;
     bool variation_valid = false;
     double variation_radians = 0.0;
     bool depth_offset_valid = false;
     double depth_offset_m = 0.0;
     uint8_t depth_reference = 0;
-    std::array<char, 33> text{};
+    uint8_t source_kind = 255;
+    uint8_t source_instance = 255;
+    std::array<char, 64> text{};
 };
 
 // NMEA 2000 services publish canonical values here: metres, m/s, radians, kelvin.

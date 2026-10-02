@@ -18,6 +18,8 @@
 #include "n2k_sources.hpp"
 #include <cmath>
 #include "smartshunt_ble.hpp"
+#include "tile_number_fit.hpp"
+#include "depth_display.hpp"
 #include "wifi_service.hpp"
 #include "ota.hpp"
 #include "esp_system.h"
@@ -37,6 +39,7 @@ lv_obj_t *require_obj(lv_obj_t *obj, const char *what)
 }
 
 AppSettings g_settings;
+lv_obj_t *g_rotation_button=nullptr;
 size_t g_active_page = 0;
 size_t g_edit_page = 0;
 size_t g_edit_field = 0;
@@ -113,6 +116,7 @@ lv_obj_t *g_units_wind = nullptr;
 lv_obj_t *g_units_vessel = nullptr;
 lv_obj_t *g_units_distance = nullptr;
 lv_obj_t *g_units_short = nullptr;
+lv_obj_t *g_units_latlon = nullptr;
 lv_obj_t *g_units_threshold = nullptr;
 
 std::array<lv_obj_t *, MAX_SMARTSHUNTS> g_shunt_slot_labels{};
@@ -157,8 +161,9 @@ void ota_feedback(const char *text) {
 }
 void update_wifi_scan();
 void update_ota_status();
+void update_shunt_picker();
 
-const std::array<DataMetric, 46> NMEA_METRICS = {
+const std::array<DataMetric, 47> NMEA_METRICS = {
     DataMetric::None,
     DataMetric::Depth,
     DataMetric::BoatSpeed,
@@ -190,6 +195,7 @@ const std::array<DataMetric, 46> NMEA_METRICS = {
     DataMetric::TankCapacity,
     DataMetric::Latitude,
     DataMetric::Longitude,
+    DataMetric::Position,
     DataMetric::Altitude,
     DataMetric::WaypointBearing,
     DataMetric::WaypointVmg,
@@ -326,8 +332,6 @@ void position_tile(size_t index, PageLayout layout)
     const int x=10+static_cast<int>(index%columns)*(w+gap);
     const int y=top+static_cast<int>(index/columns)*(h+gap);
     lv_obj_set_pos(box,x,y);lv_obj_set_size(box,w,h);lv_obj_set_style_pad_all(box,8,0);style_card(box);
-    const lv_font_t *vf=count<=2?&lv_font_montserrat_48:&lv_font_montserrat_32;
-    lv_obj_set_style_text_font(g_tile_values[index],vf,0);
     lv_obj_set_style_text_color(g_tile_titles[index], ui_muted(), 0);
     lv_obj_set_style_text_color(g_tile_values[index], ui_text(), 0);
     lv_obj_set_style_text_color(g_tile_units[index], ui_muted(), 0);
@@ -341,8 +345,42 @@ void position_tile(size_t index, PageLayout layout)
     lv_obj_align(g_tile_sources[index],LV_ALIGN_BOTTOM_RIGHT,-2,0);
 }
 
+void fit_numeric_tile(size_t index,size_t count,const char *text,const char *unit)
+{
+    auto *value=g_tile_values[index];
+    const int columns=count>=4?2:1,rows=static_cast<int>(count)/columns;
+    // Card padding/border plus a small guard on both sides.
+    const int width=(columns==2?226:460)-20;
+    const int height=(410-(rows-1)*8)/rows-20;
+    lv_obj_set_style_text_font(value,&lv_font_montserrat_48,0);
+    lv_obj_set_style_text_letter_space(value,0,0);
+    lv_obj_set_style_text_line_space(value,0,0);
+    lv_point_t measured{};
+    lv_text_get_size(&measured,text,&lv_font_montserrat_48,0,0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
+    const int footer=lv_obj_has_flag(g_tile_sources[index],LV_OBJ_FLAG_HIDDEN)?0:
+        lv_font_get_line_height(&lv_font_montserrat_14);
+    const auto fit=tile_number_fit(width,height,lv_font_get_line_height(&lv_font_montserrat_20),
+        unit[0]?lv_font_get_line_height(&lv_font_montserrat_20):0,footer,measured.x,measured.y);
+    // LVGL scales the label uniformly from its top-left pivot. Explicitly
+    // position the rendered bounds; raw label coordinates remain unscaled.
+    lv_obj_set_style_transform_pivot_x(value,0,0);
+    lv_obj_set_style_transform_pivot_y(value,0,0);
+    lv_obj_set_style_transform_scale_x(value,fit.scale,0);
+    lv_obj_set_style_transform_scale_y(value,fit.scale,0);
+    lv_obj_set_align(value,LV_ALIGN_TOP_LEFT);
+    lv_obj_set_size(value,measured.x,measured.y);
+    lv_obj_set_pos(value,fit.x,fit.y);
+    lv_obj_set_width(g_tile_titles[index],width);
+    lv_label_set_long_mode(g_tile_titles[index],LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_width(g_tile_units[index],width);
+    lv_obj_set_style_text_align(g_tile_units[index],LV_TEXT_ALIGN_CENTER,0);
+    lv_obj_set_align(g_tile_units[index],LV_ALIGN_TOP_LEFT);
+    lv_obj_set_pos(g_tile_units[index],0,fit.unit_y);
+}
+
 void render_active_page()
 {
+    static std::array<DepthDisplay,MAX_DATA_PAGES*MAX_DATA_FIELDS_PER_PAGE> depth_display{};
     if(!g_settings.pages[g_active_page].enabled) g_active_page=first_enabled_page();
     auto &active=g_settings.pages[g_active_page];
     char title[40];std::snprintf(title,sizeof(title),"%s   %u/%u",active.name.data(),static_cast<unsigned>(g_active_page+1),static_cast<unsigned>(MAX_DATA_PAGES));
@@ -358,24 +396,41 @@ void render_active_page()
         if(i>=count){lv_obj_add_flag(g_tile_boxes[i],LV_OBJ_FLAG_HIDDEN);continue;}
         lv_obj_remove_flag(g_tile_boxes[i],LV_OBJ_FLAG_HIDDEN);position_tile(i,active.layout);
         const auto &sel=active.fields[i];lv_label_set_text(g_tile_titles[i],instrument_metric_name(sel.metric));
+        const auto field_id=static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+i);
+        const InstrumentValue v=depth_display[field_id].apply(sel,g_settings.units.depth,instrument_data_get(sel,field_id));
         if(sel.source==DataSourceType::SmartShunt){
             lv_label_set_text(g_tile_sources[i],instrument_source_name(sel,g_settings,static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+i)));
+            lv_obj_remove_flag(g_tile_sources[i],LV_OBJ_FLAG_HIDDEN);
+        }else if(sel.metric==DataMetric::TankLevel || sel.metric==DataMetric::TankCapacity){
+            const char *fluid[]={"Fuel","Water","Grey water","Live well","Oil","Sewage","Gasoline"};
+            lv_label_set_text(g_tile_sources[i],v.source_kind<7?fluid[v.source_kind]:"Tank");
             lv_obj_remove_flag(g_tile_sources[i],LV_OBJ_FLAG_HIDDEN);
         }else{
             lv_obj_add_flag(g_tile_sources[i],LV_OBJ_FLAG_HIDDEN);
         }
-        const InstrumentValue v=instrument_data_get(sel,static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+i));
         if(sel.metric==DataMetric::Depth){
             const char *depth_titles[]={"Depth (transducer)","Depth (sensor)","Depth (keel)","Depth (surface)"};
             lv_label_set_text(g_tile_titles[i],depth_titles[v.depth_reference<4?v.depth_reference:0]);
         }
-        if(sel.metric==DataMetric::WaypointName || sel.metric==DataMetric::Latitude || sel.metric==DataMetric::Longitude){
-            lv_obj_set_style_text_font(g_tile_values[i],count==1?&lv_font_montserrat_32:&lv_font_montserrat_20,0);
+        if(sel.metric==DataMetric::WaypointName || sel.metric==DataMetric::Latitude || sel.metric==DataMetric::Longitude || sel.metric==DataMetric::Position){
+            lv_obj_set_style_transform_scale_x(g_tile_values[i],256,0);
+            lv_obj_set_style_transform_scale_y(g_tile_values[i],256,0);
+            lv_obj_set_style_text_font(g_tile_values[i],count==1?&lv_font_montserrat_48:&lv_font_montserrat_24,0);
+            lv_obj_set_height(g_tile_values[i],LV_SIZE_CONTENT);
             lv_obj_set_width(g_tile_values[i],lv_obj_get_width(g_tile_boxes[i])-90);
             lv_label_set_long_mode(g_tile_values[i],LV_LABEL_LONG_MODE_DOTS);
         }else{lv_obj_set_width(g_tile_values[i],LV_SIZE_CONTENT);lv_label_set_long_mode(g_tile_values[i],LV_LABEL_LONG_MODE_WRAP);}
-        char value[40],unit[12];instrument_format_value(sel,g_settings.units,v,value,sizeof(value),unit,sizeof(unit));
+        char value[80],unit[16];instrument_format_value(sel,g_settings.units,v,value,sizeof(value),unit,sizeof(unit));
         lv_label_set_text(g_tile_values[i],value);lv_label_set_text(g_tile_units[i],unit);
+        const bool text_field=sel.metric==DataMetric::WaypointName || sel.metric==DataMetric::Latitude ||
+            sel.metric==DataMetric::Longitude || sel.metric==DataMetric::Position;
+        if(!text_field)fit_numeric_tile(i,count,value,unit);
+        else {
+            lv_obj_align(g_tile_values[i],LV_ALIGN_CENTER,-10,count==6?2:5);
+            lv_obj_set_width(g_tile_units[i],LV_SIZE_CONTENT);
+            lv_obj_set_style_text_align(g_tile_units[i],LV_TEXT_ALIGN_LEFT,0);
+            lv_obj_align_to(g_tile_units[i],g_tile_values[i],LV_ALIGN_OUT_RIGHT_MID,6,0);
+        }
     }
 }
 
@@ -397,11 +452,27 @@ void update_wifi_status()
     }
     lv_label_set_text(g_wifi_status,b);
 }
-void refresh_cb(lv_timer_t *){++g_ui_refreshes;g_ui_last_refresh_ms=static_cast<uint32_t>(esp_timer_get_time()/1000);render_active_page();update_wifi_status();update_wifi_scan();update_ota_status();update_input_status();}
+void refresh_cb(lv_timer_t *){++g_ui_refreshes;g_ui_last_refresh_ms=static_cast<uint32_t>(esp_timer_get_time()/1000);render_active_page();update_wifi_status();update_wifi_scan();update_ota_status();update_input_status();if(lv_screen_active()==g_shunt_picker_screen)update_shunt_picker();}
 void previous_page_cb(lv_event_t *){g_active_page=next_enabled_page(g_active_page,-1);render_active_page();}
 void next_page_cb(lv_event_t *){g_active_page=next_enabled_page(g_active_page,+1);render_active_page();}
 void data_screen_cb(lv_event_t *){render_active_page();lv_screen_load(g_data_screen);}
 void settings_screen_cb(lv_event_t *){lv_screen_load(g_settings_screen);}
+void rotation_label(){
+    lv_label_set_text(button_label(g_rotation_button),g_settings.rotation==DisplayRotation::Normal?"Rotation: Normal (tap)":"Rotation: 180° (tap)");
+}
+void rotation_cb(lv_event_t *){
+    AppSettings next=g_settings;
+    next.rotation=next.rotation==DisplayRotation::Normal?DisplayRotation::Rotated180:DisplayRotation::Normal;
+    if(!settings_save(next)){
+        lv_label_set_text(button_label(g_rotation_button),"Rotation save failed; tap to retry");return;
+    }
+    g_settings.rotation=next.rotation;
+    // Runs in LVGL's callback, under its existing ownership/lock. Display
+    // rotation also transforms the associated touch coordinates in LVGL.
+    if(auto *input=lv_indev_active())lv_indev_wait_release(input);
+    lv_display_set_rotation(lv_obj_get_display(g_settings_screen),next.rotation==DisplayRotation::Normal?LV_DISPLAY_ROTATION_0:LV_DISPLAY_ROTATION_180);
+    rotation_label();
+}
 void theme_toggle_cb(lv_event_t *){g_settings.theme=g_settings.theme==DisplayTheme::Day?DisplayTheme::Night:DisplayTheme::Day;persist();}
 void brightness_down_cb(lv_event_t *){uint8_t &v=g_settings.theme==DisplayTheme::Day?g_settings.day_brightness:g_settings.night_brightness;v=v>10?static_cast<uint8_t>(v-10):1;persist();}
 void brightness_up_cb(lv_event_t *){uint8_t &v=g_settings.theme==DisplayTheme::Day?g_settings.day_brightness:g_settings.night_brightness;v=v<91?static_cast<uint8_t>(v+10):100;persist();}
@@ -434,8 +505,10 @@ void field_device_cb(lv_event_t *){auto &f=g_settings.pages[g_edit_page].fields[
 void field_done_cb(lv_event_t *){update_page_setup();lv_screen_load(g_page_setup_screen);}
 
 const char *depth_name(){return g_settings.units.depth==DepthUnit::Metres?"METRES":"FEET";}const char *temp_name(){return g_settings.units.temperature==TemperatureUnit::Celsius?"CELSIUS":"FAHRENHEIT";}const char *speed_name(SpeedUnit u){return u==SpeedUnit::Knots?"KNOTS":(u==SpeedUnit::KilometresPerHour?"KM/H":"M/S");}const char *distance_name(){return g_settings.units.distance==DistanceUnit::NauticalMiles?"NM":"KM";}const char *short_name(){return g_settings.units.short_distance==ShortDistanceUnit::Metres?"METRES":(g_settings.units.short_distance==ShortDistanceUnit::Feet?"FEET":"YARDS");}
-void update_units(){lv_label_set_text(g_units_heading,g_settings.units.heading_reference==HeadingReference::True?"TRUE":"MAGNETIC");lv_label_set_text(g_units_depth,depth_name());lv_label_set_text(g_units_temp,temp_name());lv_label_set_text(g_units_wind,speed_name(g_settings.units.wind_speed));lv_label_set_text(g_units_vessel,speed_name(g_settings.units.vessel_speed));lv_label_set_text(g_units_distance,distance_name());lv_label_set_text(g_units_short,short_name());char b[24];std::snprintf(b,sizeof(b),"< %.2f NM",g_settings.units.short_distance_threshold_nm);lv_label_set_text(g_units_threshold,b);}
+const char *latlon_name(){switch(g_settings.units.lat_lon_format){case LatLonFormat::DecimalDegrees:return "DECIMAL";case LatLonFormat::DegreesMinutesSeconds:return "DMS";default:return "DEG + MIN";}}
+void update_units(){lv_label_set_text(g_units_heading,g_settings.units.heading_reference==HeadingReference::True?"TRUE":"MAGNETIC");lv_label_set_text(g_units_depth,depth_name());lv_label_set_text(g_units_temp,temp_name());lv_label_set_text(g_units_wind,speed_name(g_settings.units.wind_speed));lv_label_set_text(g_units_vessel,speed_name(g_settings.units.vessel_speed));lv_label_set_text(g_units_distance,distance_name());lv_label_set_text(g_units_short,short_name());lv_label_set_text(g_units_latlon,latlon_name());char b[24];std::snprintf(b,sizeof(b),"< %.2f NM",g_settings.units.short_distance_threshold_nm);lv_label_set_text(g_units_threshold,b);}
 void unit_heading_cb(lv_event_t *){g_settings.units.heading_reference=g_settings.units.heading_reference==HeadingReference::True?HeadingReference::Magnetic:HeadingReference::True;persist();update_units();}
+void unit_latlon_cb(lv_event_t *){auto &f=g_settings.units.lat_lon_format;f=f==LatLonFormat::DecimalDegrees?LatLonFormat::DegreesMinutes:(f==LatLonFormat::DegreesMinutes?LatLonFormat::DegreesMinutesSeconds:LatLonFormat::DecimalDegrees);persist();update_units();}
 void units_screen_cb(lv_event_t *){update_units();lv_screen_load(g_units_screen);}void unit_depth_cb(lv_event_t *){g_settings.units.depth=g_settings.units.depth==DepthUnit::Metres?DepthUnit::Feet:DepthUnit::Metres;persist();update_units();}void unit_temp_cb(lv_event_t *){g_settings.units.temperature=g_settings.units.temperature==TemperatureUnit::Celsius?TemperatureUnit::Fahrenheit:TemperatureUnit::Celsius;persist();update_units();}
 SpeedUnit next_speed(SpeedUnit u){return u==SpeedUnit::Knots?SpeedUnit::KilometresPerHour:(u==SpeedUnit::KilometresPerHour?SpeedUnit::MetresPerSecond:SpeedUnit::Knots);}void unit_wind_cb(lv_event_t *){g_settings.units.wind_speed=next_speed(g_settings.units.wind_speed);persist();update_units();}void unit_vessel_cb(lv_event_t *){g_settings.units.vessel_speed=next_speed(g_settings.units.vessel_speed);persist();update_units();}void unit_distance_cb(lv_event_t *){g_settings.units.distance=g_settings.units.distance==DistanceUnit::NauticalMiles?DistanceUnit::Kilometres:DistanceUnit::NauticalMiles;persist();update_units();}void unit_short_cb(lv_event_t *){auto&u=g_settings.units.short_distance;u=u==ShortDistanceUnit::Metres?ShortDistanceUnit::Feet:(u==ShortDistanceUnit::Feet?ShortDistanceUnit::Yards:ShortDistanceUnit::Metres);persist();update_units();}void unit_threshold_down_cb(lv_event_t *){auto&t=g_settings.units.short_distance_threshold_nm;if(t>0.05f)t-=0.05f;persist();update_units();}void unit_threshold_up_cb(lv_event_t *){auto&t=g_settings.units.short_distance_threshold_nm;if(t<1.0f)t+=0.05f;persist();update_units();}
 
@@ -565,6 +638,10 @@ void update_shunts_list(){for(size_t i=0;i<MAX_SMARTSHUNTS;++i){char b[48];const
 void shunts_screen_cb(lv_event_t *){update_shunts_list();lv_screen_load(g_shunts_screen);}void shunt_slot_cb(lv_event_t *e){g_edit_shunt=static_cast<size_t>(reinterpret_cast<uintptr_t>(lv_event_get_user_data(e)));auto &c=g_settings.smartshunts[g_edit_shunt];lv_textarea_set_text(g_shunt_name,c.name.data());lv_textarea_set_text(g_shunt_key,c.bindkey.data());if(c.n2k_enabled)lv_obj_add_state(g_shunt_n2k,LV_STATE_CHECKED);else lv_obj_remove_state(g_shunt_n2k,LV_STATE_CHECKED);char b[12];std::snprintf(b,sizeof(b),"%u",c.battery_instance);lv_label_set_text(g_shunt_instance,b);lv_screen_load(g_shunt_edit_screen);}
 void update_shunt_picker()
 {
+    // Keep row identities unchanged throughout a press, so a refreshed list
+    // cannot select a different device when the finger is released.
+    for(lv_indev_t *input=lv_indev_get_next(nullptr);input;input=lv_indev_get_next(input))
+        if(lv_indev_get_state(input)==LV_INDEV_STATE_PRESSED)return;
     g_picker_devices = {};
     g_picker_count = smartshunt_ble_get_discovered(g_picker_devices);
     for (size_t i = 0; i < MAX_DISCOVERED_SMARTSHUNTS; ++i) {
@@ -862,7 +939,7 @@ void create_data_screen()
     lv_obj_set_style_pad_all(g_data_screen,0,0);
 
     g_page_title=lv_label_create(g_data_screen);
-    lv_obj_set_style_text_font(g_page_title,&lv_font_montserrat_20,0);
+    lv_obj_set_style_text_font(g_page_title,&lv_font_montserrat_24,0);
     lv_obj_set_style_text_color(g_page_title,ui_text(),0);
     lv_obj_align(g_page_title,LV_ALIGN_TOP_MID,0,12);
 
@@ -872,10 +949,10 @@ void create_data_screen()
         style_card(g_tile_boxes[i]);
 
         g_tile_titles[i]=lv_label_create(g_tile_boxes[i]);
-        lv_obj_set_style_text_font(g_tile_titles[i],&lv_font_montserrat_14,0);
+        lv_obj_set_style_text_font(g_tile_titles[i],&lv_font_montserrat_20,0);
         g_tile_values[i]=lv_label_create(g_tile_boxes[i]);
         g_tile_units[i]=lv_label_create(g_tile_boxes[i]);
-        lv_obj_set_style_text_font(g_tile_units[i],&lv_font_montserrat_14,0);
+        lv_obj_set_style_text_font(g_tile_units[i],&lv_font_montserrat_20,0);
         g_tile_sources[i]=lv_label_create(g_tile_boxes[i]);
         lv_obj_set_style_text_font(g_tile_sources[i],&lv_font_montserrat_14,0);
     }
@@ -919,12 +996,16 @@ void create_settings_screen()
     b=make_button(g_settings_screen,"BR +",brightness_up_cb,80,46);
     lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-35,286);
 
+    g_rotation_button=make_button(g_settings_screen,"",rotation_cb,380,38);
+    lv_obj_align(g_rotation_button,LV_ALIGN_TOP_MID,0,338);rotation_label();
+
     lv_obj_t *identity = require_obj(lv_label_create(g_settings_screen), "firmware identity");
     const esp_app_desc_t *app = esp_app_get_description();
     lv_label_set_text_fmt(identity, "Firmware: %s\nBuilt: %s %s", app->version, app->date, app->time);
     lv_obj_set_width(identity, 440);
     lv_obj_set_style_text_align(identity, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(identity, LV_ALIGN_TOP_MID, 0, 346);
+    lv_obj_set_style_text_font(identity,&lv_font_montserrat_14,0);
+    lv_obj_align(identity, LV_ALIGN_TOP_MID, 0, 382);
 
     b=make_button(g_settings_screen,"BACK",data_screen_cb,120,46);
     lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-18);
@@ -1024,33 +1105,34 @@ void create_units_screen()
     lv_obj_set_style_text_font(l, &lv_font_montserrat_24, 0);
     lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 18);
 
-    const char *names[] = {"Heading", "Depth", "Temperature", "Wind speed", "Boat speed", "Distance", "Short distance"};
+    const char *names[] = {"Heading", "Depth", "Temperature", "Wind speed", "Boat speed", "Distance", "Short distance", "Lat / long"};
     lv_obj_t **vals[] = {&g_units_heading, &g_units_depth, &g_units_temp, &g_units_wind,
-                         &g_units_vessel, &g_units_distance, &g_units_short};
+                         &g_units_vessel, &g_units_distance, &g_units_short, &g_units_latlon};
     lv_event_cb_t cbs[] = {unit_heading_cb, unit_depth_cb, unit_temp_cb, unit_wind_cb,
-                           unit_vessel_cb, unit_distance_cb, unit_short_cb};
+                           unit_vessel_cb, unit_distance_cb, unit_short_cb, unit_latlon_cb};
 
-    for (int i = 0; i < 7; ++i) {
+    for (int i = 0; i < 8; ++i) {
         l = require_obj(lv_label_create(g_units_screen), "unit row label");
         lv_label_set_text(l, names[i]);
-        lv_obj_align(l, LV_ALIGN_TOP_LEFT, 32, 64 + i * 43);
+        lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);
+        lv_obj_align(l, LV_ALIGN_TOP_LEFT, 32, 58 + i * 38);
 
-        lv_obj_t *b = make_button(g_units_screen, "", cbs[i], 170, 40);
+        lv_obj_t *b = make_button(g_units_screen, "", cbs[i], 170, 36);
         *vals[i] = button_label(b);
-        lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -32, 54 + i * 43);
+        lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -32, 48 + i * 38);
     }
 
     l = require_obj(lv_label_create(g_units_screen), "short-distance threshold label");
     lv_label_set_text(l, "Short if");
-    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 32, 376);
+    lv_obj_align(l, LV_ALIGN_TOP_LEFT, 32, 366);
 
-    lv_obj_t *b = make_button(g_units_screen, "-", unit_threshold_down_cb, 48, 38);
-    lv_obj_align(b, LV_ALIGN_TOP_LEFT, 145, 365);
-    b = make_button(g_units_screen, "", unit_threshold_up_cb, 125, 38);
+    lv_obj_t *b = make_button(g_units_screen, "-", unit_threshold_down_cb, 48, 36);
+    lv_obj_align(b, LV_ALIGN_TOP_LEFT, 145, 354);
+    b = make_button(g_units_screen, "", unit_threshold_up_cb, 125, 36);
     g_units_threshold = button_label(b);
-    lv_obj_align(b, LV_ALIGN_TOP_MID, 60, 365);
-    b = make_button(g_units_screen, "+", unit_threshold_up_cb, 48, 38);
-    lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -32, 365);
+    lv_obj_align(b, LV_ALIGN_TOP_MID, 60, 354);
+    b = make_button(g_units_screen, "+", unit_threshold_up_cb, 48, 36);
+    lv_obj_align(b, LV_ALIGN_TOP_RIGHT, -32, 354);
 
     b = make_button(g_units_screen, "BACK", settings_screen_cb, 120, 46);
     lv_obj_align(b, LV_ALIGN_BOTTOM_MID, 0, -12);
@@ -1176,11 +1258,11 @@ void create_shunt_edit_screen()
     lv_obj_set_style_text_color(g_shunt_key, ui_text(), 0);
     lv_obj_set_style_border_color(g_shunt_key, ui_border(), 0);
     lv_obj_set_style_radius(g_shunt_key, 8, 0);
-    lv_obj_set_size(g_shunt_key, 300, 42);
+    lv_obj_set_size(g_shunt_key, 360, 42);
     lv_textarea_set_one_line(g_shunt_key, true);
-    lv_textarea_set_password_mode(g_shunt_key, true);
+    lv_textarea_set_password_mode(g_shunt_key, false);
     lv_textarea_set_max_length(g_shunt_key, 32);
-    lv_obj_align(g_shunt_key, LV_ALIGN_TOP_RIGHT, -30, 155);
+    lv_obj_align(g_shunt_key, LV_ALIGN_TOP_RIGHT, -20, 155);
     lv_obj_add_event_cb(g_shunt_key, textarea_focus_cb, LV_EVENT_FOCUSED, nullptr);
 
     l = require_obj(lv_label_create(g_shunt_edit_screen), "NMEA bridge label");

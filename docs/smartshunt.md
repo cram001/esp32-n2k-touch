@@ -4,7 +4,7 @@
 
 The firmware uses Victron **Instant Readout** BLE manufacturer advertisements. It does not open or hold a GATT connection to a SmartShunt.
 
-The scanner runs continuously so the UI can discover nearby Victron battery monitors and configured devices can update in the background. Live battery data remains advertisement-based and does not require a connection.
+The scanner runs continuously so the UI can discover nearby Victron devices and configured monitors can update in the background. Active scanning requests Bluetooth scan-response names; it does not establish a GATT connection. Live battery data remains advertisement-based. Wi-Fi scans remain user-triggered.
 
 ## Multiple SmartShunts
 
@@ -25,9 +25,16 @@ The BLE hardware address is an internal stable identifier. Normal setup and oper
 
 Use **Settings > SmartShunts > Add SmartShunt**.
 
-The ESP32 lists nearby Victron battery-monitor advertisements by their advertised Bluetooth name. Signal strength is shown as secondary information. Tapping a name binds that physical device internally and opens its editor.
+Open a SmartShunt slot and tap **SELECT NEARBY**. The ESP32 lists nearby Victron manufacturer advertisements by their advertised Bluetooth name and signal strength. The list refreshes while open; it stays stable during a touch to avoid selecting a different device on release. Tapping a name binds that physical device internally and opens its editor.
 
-If an advertisement does not contain a readable local name, the UI creates a fallback `SmartShunt ####` label for selection. The stored display name can then be changed in the editor.
+If an advertisement does not contain a readable local name, the UI creates a fallback `Victron ####` label. A complete name received later is retained even when subsequent advertisements omit it or provide only an abbreviated name. The stored display name can be changed in the editor.
+
+Discovery does not require an encryption key or a supported telemetry record.
+Other Victron products can appear in this list; this release still decodes only
+battery-monitor Instant Readout data. Select the actual SmartShunt and enable
+Instant Readout in VictronConnect to receive values. Bluetooth must remain enabled
+on the SmartShunt. Confirm discovery, key entry and live readings on the physical
+device; host packet tests cannot verify radio reception or coexistence.
 
 After selecting a device:
 

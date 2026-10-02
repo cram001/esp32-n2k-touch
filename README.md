@@ -16,7 +16,7 @@ Wall mounted case 3D printed:  https://cults3d.com/en/3d-model/home/flush-mount-
 - Receive NMEA 2000 over the onboard CAN/TWAI interface.
 - Display water depth from NMEA 2000 PGN 128267 (next depth milestone).
 - Day/night display themes with separately stored brightness levels.
-- Passively receive Victron SmartShunt **Instant Readout** BLE advertisements.
+- Receive Victron SmartShunt **Instant Readout** BLE advertisements, with active scanning for device names.
 - Display SmartShunt voltage, current, SOC, consumed Ah and time-to-go.
 - Optionally bridge SmartShunt battery data onto NMEA 2000 using a selectable battery instance.
 - Connect to Wi-Fi in station or Access Point mode; separate credentials persist in application NVS.
@@ -65,7 +65,7 @@ See [release notes and bench checklist](docs/next-release-wifi-ota.md) for setup
 
 ## SmartShunt Instant Readout
 
-The ESP32 does not create a BLE connection to the SmartShunt. It passively scans Victron manufacturer advertisements, identifies battery-monitor Instant Readout records, decrypts them with the key supplied by VictronConnect, and decodes the published battery-monitor fields.
+The ESP32 does not create a BLE connection to the SmartShunt. It scans Victron manufacturer advertisements and requests scan-response names, identifies battery-monitor Instant Readout records, decrypts them with the key supplied by VictronConnect, and decodes the published battery-monitor fields. The nearby-device picker refreshes while open and can discover Victron devices before a key is entered. Discovery does not imply that a device supports the decoded battery-monitor record.
 
 Displayed values:
 

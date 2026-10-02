@@ -64,6 +64,16 @@ int main(){
     reset();assert(settings_init());auto defaults=settings_load();
     assert(!defaults.wifi.enabled && defaults.pages[0].enabled && commits==0);
     assert(defaults.units.heading_reference==HeadingReference::True);
+    assert(defaults.rotation==DisplayRotation::Rotated180);
+    auto rotated=defaults;rotated.rotation=DisplayRotation::Normal;
+    assert(settings_save(rotated));assert(settings_load().rotation==DisplayRotation::Normal);
+    const auto before_rotation_failure=durable;fail_commit=true;
+    rotated.rotation=DisplayRotation::Rotated180;
+    assert(!settings_save(rotated));assert(durable==before_rotation_failure);
+    assert(settings_load().rotation==DisplayRotation::Normal);fail_commit=false;
+    assert(settings_save(rotated));assert(settings_load().rotation==DisplayRotation::Rotated180);
+    fixture("rotation",uint8_t{255});assert(settings_load().rotation==DisplayRotation::Rotated180);
+    rotated.rotation=static_cast<DisplayRotation>(255);assert(!settings_save(rotated));
 
     reset();LegacyWifi legacy;fixture("wifi_v1",legacy);const Bytes old=durable["wifi_v1"];
     auto migrated=settings_load();
@@ -82,6 +92,7 @@ int main(){
     fail_commit=false;migrated=settings_load();assert(commits==1); // Retry migration.
 
     reset();auto expected=defaults;expected.wifi.enabled=true;
+    expected.rotation=DisplayRotation::Normal;
     expected.wifi.ssid.fill('S');expected.wifi.ssid.back()=0;
     expected.wifi.password.fill('a');expected.wifi.password.back()=0; // 64 hex digits.
     expected.wifi.mode=WifiMode::AccessPoint;
@@ -98,6 +109,7 @@ int main(){
     assert(reboot.smartshunts[0].bindkey==expected.smartshunts[0].bindkey && reboot.smartshunts[0].battery_instance==17 && reboot.smartshunts[0].n2k_enabled);
     assert(reboot.units.depth==DepthUnit::Feet && reboot.pages[1].layout==PageLayout::Six && reboot.pages[1].enabled);
     assert(reboot.units.heading_reference==HeadingReference::Magnetic);
+    assert(reboot.rotation==DisplayRotation::Normal);
     assert(reboot.n2k_input.mode==N2kInputMode::W2kTcp && reboot.n2k_input.ip==expected.n2k_input.ip && reboot.n2k_input.port==60003);
     assert(durable["n2k_in_v1"].size()==24);
     auto saved_input=durable["n2k_in_v1"];durable["n2k_in_v1"][0]=2;

@@ -14,6 +14,7 @@ enum class DisplayTheme : uint8_t {
     Day = 0,
     Night = 1,
 };
+enum class DisplayRotation : uint8_t { Normal = 0, Rotated180 = 1 };
 
 enum class PageLayout : uint8_t {
     One = 1,
@@ -80,6 +81,7 @@ enum class DataMetric : uint8_t {
     DepthBelowKeel,
     DepthWaterline,
     DepthSensorOffset,
+    Position,
     Count,
 };
 
@@ -89,6 +91,11 @@ enum class SpeedUnit : uint8_t { Knots = 0, KilometresPerHour = 1, MetresPerSeco
 enum class DistanceUnit : uint8_t { NauticalMiles = 0, Kilometres = 1 };
 enum class ShortDistanceUnit : uint8_t { Metres = 0, Feet = 1, Yards = 2 };
 enum class HeadingReference : uint8_t { True = 0, Magnetic = 1, Unknown = 255 };
+enum class LatLonFormat : uint8_t {
+    DecimalDegrees = 0,      // 49.12345 N
+    DegreesMinutes = 1,      // 49° 07.407' N
+    DegreesMinutesSeconds = 2, // 49° 07' 24.4" N
+};
 
 struct UnitsSettings {
     DepthUnit depth = DepthUnit::Metres;
@@ -99,6 +106,8 @@ struct UnitsSettings {
     ShortDistanceUnit short_distance = ShortDistanceUnit::Metres;
     // Stored separately in NVS; this byte occupies former ABI padding.
     HeadingReference heading_reference = HeadingReference::True;
+    // Uses the former padding byte so the persisted UnitsSettings ABI remains 12 bytes.
+    LatLonFormat lat_lon_format = LatLonFormat::DegreesMinutes;
     // Distances below this threshold use short_distance. Stored in nautical miles.
     float short_distance_threshold_nm = 0.2f;
 };
@@ -148,6 +157,8 @@ struct N2kInputConfig {
 
 struct AppSettings {
     DisplayTheme theme = DisplayTheme::Day;
+    // Separate NVS key; existing persisted blobs keep their layouts.
+    DisplayRotation rotation = DisplayRotation::Rotated180;
     uint8_t day_brightness = DEFAULT_DAY_BRIGHTNESS;
     uint8_t night_brightness = DEFAULT_NIGHT_BRIGHTNESS;
     WifiConfig wifi{};
