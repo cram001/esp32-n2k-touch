@@ -1,5 +1,7 @@
 #include "instrument_data.hpp"
 #include "smartshunt_ble.hpp"
+#include "depth_display.hpp"
+#include "n2k_sources.hpp"
 #include <cassert>
 #include <cstdio>
 #include <cstring>
@@ -18,6 +20,29 @@ void expect(DataMetric metric,double value,const UnitsSettings &units,const char
     assert(std::strcmp(text,number)==0 && std::strcmp(suffix,unit)==0);
 }
 int main(){
+    UnitsSettings distance{};
+    DepthDisplay filter;DataFieldSelection depth{};depth.metric=DataMetric::Depth;
+    n2k_sources_publish(DataMetric::Depth,10,255,255,10.1);
+    auto initial=instrument_data_get(depth,0);assert(initial.sample_us==fake_time_us);
+    assert(filter.apply(depth,DepthUnit::Metres,initial).value==10.1);
+    fake_time_us+=100000;n2k_sources_publish(DataMetric::Depth,10,255,255,10.2);
+    for(int i=0;i<5;++i)assert(filter.apply(depth,DepthUnit::Metres,instrument_data_get(depth,0)).value==10.1);
+    fake_time_us+=100000;n2k_sources_publish(DataMetric::Depth,10,255,255,10.2);
+    assert(filter.apply(depth,DepthUnit::Metres,instrument_data_get(depth,0)).value==10.2);
+    const auto context=instrument_data_get(depth,0).display_context;
+    assert(n2k_sources_save_depth(DepthConfig{}));
+    assert(instrument_data_get(depth,0).display_context!=context);
+    fake_time_us+=100000;n2k_sources_publish(DataMetric::Depth,10,255,255,1000.01);
+    assert(!filter.apply(depth,DepthUnit::Metres,instrument_data_get(depth,0)).valid);
+    instrument_data_reset_nmea();
+    expect(DataMetric::Depth,10.15,distance,"10.2","m");
+    expect(DataMetric::DistanceToWaypoint,1852,distance,"1.0","NM");
+    expect(DataMetric::TripDistance,2315,distance,"1.2","NM");
+    distance.distance=DistanceUnit::Kilometres;
+    expect(DataMetric::TripDistance,1852,distance,"1.9","km");
+    expect(DataMetric::DistanceToWaypoint,100.4,distance,"100","m");
+    distance.short_distance=ShortDistanceUnit::Feet;
+    expect(DataMetric::DistanceToWaypoint,100.4,distance,"329","ft");
     UnitsSettings units{};units.depth=DepthUnit::Feet;
     expect(DataMetric::Depth,1000,units,"3280.8","ft");
     expect(DataMetric::Depth,1000.01,units,"--","");

@@ -31,6 +31,7 @@ struct CachedValue {
 
 std::array<CachedValue, METRIC_COUNT> g_nmea{};
 CachedValue g_variation{};
+uint32_t g_nmea_context=0;
 portMUX_TYPE g_nmea_mux = portMUX_INITIALIZER_UNLOCKED;
 
 size_t metric_index(DataMetric metric) { return static_cast<size_t>(metric); }
@@ -105,7 +106,7 @@ InstrumentValue smartshunt_value(const DataFieldSelection &selection)
 void instrument_data_reset_nmea() {
     n2k_sources_reset();
     portENTER_CRITICAL(&g_nmea_mux);
-    g_nmea = {}; g_variation = {};
+    g_nmea = {}; g_variation = {}; ++g_nmea_context;
     portEXIT_CRITICAL(&g_nmea_mux);
 }
 
@@ -174,12 +175,14 @@ InstrumentValue instrument_data_get(const DataFieldSelection &selection, uint8_t
     CachedValue variation{};
     portENTER_CRITICAL(&g_nmea_mux);
     cached = g_nmea[idx];
+    out.display_context=g_nmea_context;
     variation = g_variation;
     portEXIT_CRITICAL(&g_nmea_mux);
 
     if (!cached.valid) return out;
     out.valid = true;
     out.value = cached.value;
+    out.sample_us = cached.updated_us;
     out.age_ms = static_cast<uint32_t>((esp_timer_get_time() - cached.updated_us) / 1000);
     out.stale = out.age_ms >= NMEA_STALE_MS;
     out.heading_reference = cached.heading_reference;
@@ -375,9 +378,9 @@ void instrument_format_value(const DataFieldSelection &selection,
             default: std::snprintf(value_out, value_out_size, "%.0f", v.value); std::snprintf(unit_out, unit_out_size, "m"); break;
             }
         } else if (units.distance == DistanceUnit::Kilometres) {
-            std::snprintf(value_out, value_out_size, "%.2f", v.value * M_TO_KM); std::snprintf(unit_out, unit_out_size, "km");
+            std::snprintf(value_out, value_out_size, "%.1f", v.value * M_TO_KM); std::snprintf(unit_out, unit_out_size, "km");
         } else {
-            std::snprintf(value_out, value_out_size, "%.2f", nm); std::snprintf(unit_out, unit_out_size, "NM");
+            std::snprintf(value_out, value_out_size, "%.1f", nm); std::snprintf(unit_out, unit_out_size, "NM");
         }
     } else if (metric == DataMetric::BatteryVoltage) { std::snprintf(value_out, value_out_size, "%.2f", v.value); std::snprintf(unit_out, unit_out_size, "V"); }
     else if (metric == DataMetric::BatteryCurrent) { std::snprintf(value_out, value_out_size, "%+.1f", v.value); std::snprintf(unit_out, unit_out_size, "A"); }

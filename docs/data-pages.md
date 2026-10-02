@@ -14,6 +14,14 @@ buttons. Tiles use the released space; the page indicators remain at the bottom.
 Only Victron SmartShunt tiles display their source name. NMEA2000 source selection
 and identity remain available in the field editor.
 
+Numeric values fit automatically to each tile's measured width and height.
+The title stays above the value and the units are centered below it, with space
+reserved for a Victron source name or tank-type footer when present. LVGL scales
+the numeric label uniformly to the largest fitting size; long signed numbers,
+decimals, times and stale-data dashes stay on one line. The size can change when
+the displayed value gains or loses digits. Position/coordinate and waypoint text
+retain their separate text layout.
+
 ## Brightness recovery
 
 Every boot displays the startup screen at 80% brightness, even when saved day or
@@ -98,3 +106,14 @@ Global unit settings currently include:
 - Short-distance threshold: default 0.20 NM, adjustable in 0.05 NM increments
 
 Values aged 30 seconds or more show `--`. This also applies to SmartShunt display values; its existing CAN safety cutoff remains five seconds.
+
+Depth shows one decimal in metres or feet. A one-tenth change needs two fresh
+sensor observations of the same rounded value; alternating adjacent tenths hold
+steady. Changes of two tenths or more show immediately, so a continuing trend
+has at most one observed sample of delay. This is display-only: CAN and cached
+sensor values retain their original precision. Each page field owns its filter;
+source, input reset, depth setup/reference/offset and unit changes reset it.
+Invalid depth, readings over 1000 metres and the 30-second timeout immediately
+show `--` and clear the filter. A gap of 30 seconds also clears it.
+Long distances show one decimal in NM/km; short distances show whole m/ft/yd.
+Rotation remains fixed at 180 degrees; a saved Normal/180 setting is outstanding.

@@ -12,6 +12,9 @@ struct InstrumentValue {
     bool secondary_valid = false;
     double secondary_value = 0.0;
     uint32_t age_ms = 0;
+    int64_t sample_us = 0;
+    uint64_t source_identity = 0;
+    uint32_t display_context = 0;
     HeadingReference heading_reference = HeadingReference::Unknown;
     bool variation_valid = false;
     double variation_radians = 0.0;

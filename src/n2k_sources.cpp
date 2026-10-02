@@ -32,6 +32,7 @@ struct DepthProfile { bool used = false; N2kSourceChoice source{}; DepthConfig c
 std::array<DepthProfile,16> depth_profiles{};
 portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 bool initialized = false;
+uint32_t display_context = 0;
 using Bytes = std::array<uint8_t,460>;
 
 Device *device(uint8_t address) {
@@ -142,7 +143,7 @@ bool persist(const Preferences &next) {
     esp_err_t error=nvs_set_blob(handle,"sources_v1",bytes.data(),bytes.size());
     if(error==ESP_OK)error=nvs_commit(handle);
     nvs_close(handle);if(error!=ESP_OK)return false;
-    portENTER_CRITICAL(&mux);preferences=next;portEXIT_CRITICAL(&mux);return true;
+    portENTER_CRITICAL(&mux);preferences=next;++display_context;portEXIT_CRITICAL(&mux);return true;
 }
 }
 bool n2k_sources_is_gps(DataMetric m) {
@@ -181,7 +182,7 @@ bool n2k_sources_init() {
     preferences=decoded;return true;
 }
 void n2k_sources_reset() {
-    portENTER_CRITICAL(&mux);records={};devices={};automatic.fill(NO_RECORD);automatic_gps={};
+    portENTER_CRITICAL(&mux);++display_context;records={};devices={};automatic.fill(NO_RECORD);automatic_gps={};
     for(auto &s:preferences.sources)if(s.mode==SourceChoiceMode::ThisBootAddress){s.address=255;s.name=0;}
     for(auto &p:depth_profiles)if(p.source.mode==SourceChoiceMode::ThisBootAddress)p.used=false;
     portEXIT_CRITICAL(&mux);
@@ -260,12 +261,15 @@ bool n2k_sources_get(DataMetric metric,uint8_t field,InstrumentValue &out) {
         const auto &gps=preferences.sources[N2K_GPS_CHOICE].mode==SourceChoiceMode::Automatic?automatic_gps:preferences.sources[N2K_GPS_CHOICE];
         if(!variation.used)for(const auto &r:records)if(r.used && r.metric==DataMetric::MagneticVariation && same_device(gps,r.source)){variation=r;break;}
     }
+    const uint32_t context=display_context;
     portEXIT_CRITICAL(&mux);
     if(metric==DataMetric::DepthTransducer)depth.reference=DepthReference::Transducer;
     else if(metric==DataMetric::DepthBelowKeel)depth.reference=DepthReference::Keel;
     else if(metric==DataMetric::DepthWaterline)depth.reference=DepthReference::Waterline;
     else if(metric==DataMetric::DepthSensorOffset)depth.reference=DepthReference::SensorOffset;
     out=copy.value;out.depth_reference=static_cast<uint8_t>(depth.reference);
+    out.sample_us=copy.updated;out.display_context=context;
+    out.source_identity=copy.source.name?copy.source.name:static_cast<uint64_t>(copy.source.address)+1;
     out.source_kind=copy.source.kind;out.source_instance=copy.source.instance;
     if(!copy.used)return handled;
     out.age_ms=static_cast<uint32_t>(std::max<int64_t>(0,now-copy.updated)/1000);
@@ -332,7 +336,7 @@ bool n2k_sources_save_depth(const DepthConfig &depth,const N2kSourceChoice *sour
         nvs_handle_t handle;if(nvs_open("app",NVS_READWRITE,&handle)!=ESP_OK)return false;
         esp_err_t error=nvs_set_blob(handle,"depth_src_v1",bytes.data(),bytes.size());if(error==ESP_OK)error=nvs_commit(handle);nvs_close(handle);
         if(error!=ESP_OK)return false;
-        portENTER_CRITICAL(&mux);depth_profiles=next;portEXIT_CRITICAL(&mux);return true;
+        portENTER_CRITICAL(&mux);depth_profiles=next;++display_context;portEXIT_CRITICAL(&mux);return true;
     }
     // Manual mounting distances belong to one physical sensor, not every source.
     if(depth.reference==DepthReference::Keel || depth.reference==DepthReference::Waterline || depth.keel_set || depth.waterline_set)return false;

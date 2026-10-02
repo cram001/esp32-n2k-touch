@@ -18,6 +18,8 @@
 #include "n2k_sources.hpp"
 #include <cmath>
 #include "smartshunt_ble.hpp"
+#include "tile_number_fit.hpp"
+#include "depth_display.hpp"
 #include "wifi_service.hpp"
 #include "ota.hpp"
 #include "esp_system.h"
@@ -329,8 +331,6 @@ void position_tile(size_t index, PageLayout layout)
     const int x=10+static_cast<int>(index%columns)*(w+gap);
     const int y=top+static_cast<int>(index/columns)*(h+gap);
     lv_obj_set_pos(box,x,y);lv_obj_set_size(box,w,h);lv_obj_set_style_pad_all(box,8,0);style_card(box);
-    const lv_font_t *vf=count<=4?&lv_font_montserrat_48:&lv_font_montserrat_32;
-    lv_obj_set_style_text_font(g_tile_values[index],vf,0);
     lv_obj_set_style_text_color(g_tile_titles[index], ui_muted(), 0);
     lv_obj_set_style_text_color(g_tile_values[index], ui_text(), 0);
     lv_obj_set_style_text_color(g_tile_units[index], ui_muted(), 0);
@@ -344,8 +344,42 @@ void position_tile(size_t index, PageLayout layout)
     lv_obj_align(g_tile_sources[index],LV_ALIGN_BOTTOM_RIGHT,-2,0);
 }
 
+void fit_numeric_tile(size_t index,size_t count,const char *text,const char *unit)
+{
+    auto *value=g_tile_values[index];
+    const int columns=count>=4?2:1,rows=static_cast<int>(count)/columns;
+    // Card padding/border plus a small guard on both sides.
+    const int width=(columns==2?226:460)-20;
+    const int height=(410-(rows-1)*8)/rows-20;
+    lv_obj_set_style_text_font(value,&lv_font_montserrat_48,0);
+    lv_obj_set_style_text_letter_space(value,0,0);
+    lv_obj_set_style_text_line_space(value,0,0);
+    lv_point_t measured{};
+    lv_text_get_size(&measured,text,&lv_font_montserrat_48,0,0,LV_COORD_MAX,LV_TEXT_FLAG_NONE);
+    const int footer=lv_obj_has_flag(g_tile_sources[index],LV_OBJ_FLAG_HIDDEN)?0:
+        lv_font_get_line_height(&lv_font_montserrat_14);
+    const auto fit=tile_number_fit(width,height,lv_font_get_line_height(&lv_font_montserrat_20),
+        unit[0]?lv_font_get_line_height(&lv_font_montserrat_20):0,footer,measured.x,measured.y);
+    // LVGL scales the label uniformly from its top-left pivot. Explicitly
+    // position the rendered bounds; raw label coordinates remain unscaled.
+    lv_obj_set_style_transform_pivot_x(value,0,0);
+    lv_obj_set_style_transform_pivot_y(value,0,0);
+    lv_obj_set_style_transform_scale_x(value,fit.scale,0);
+    lv_obj_set_style_transform_scale_y(value,fit.scale,0);
+    lv_obj_set_align(value,LV_ALIGN_TOP_LEFT);
+    lv_obj_set_size(value,measured.x,measured.y);
+    lv_obj_set_pos(value,fit.x,fit.y);
+    lv_obj_set_width(g_tile_titles[index],width);
+    lv_label_set_long_mode(g_tile_titles[index],LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_width(g_tile_units[index],width);
+    lv_obj_set_style_text_align(g_tile_units[index],LV_TEXT_ALIGN_CENTER,0);
+    lv_obj_set_align(g_tile_units[index],LV_ALIGN_TOP_LEFT);
+    lv_obj_set_pos(g_tile_units[index],0,fit.unit_y);
+}
+
 void render_active_page()
 {
+    static std::array<DepthDisplay,MAX_DATA_PAGES*MAX_DATA_FIELDS_PER_PAGE> depth_display{};
     if(!g_settings.pages[g_active_page].enabled) g_active_page=first_enabled_page();
     auto &active=g_settings.pages[g_active_page];
     char title[40];std::snprintf(title,sizeof(title),"%s   %u/%u",active.name.data(),static_cast<unsigned>(g_active_page+1),static_cast<unsigned>(MAX_DATA_PAGES));
@@ -361,7 +395,8 @@ void render_active_page()
         if(i>=count){lv_obj_add_flag(g_tile_boxes[i],LV_OBJ_FLAG_HIDDEN);continue;}
         lv_obj_remove_flag(g_tile_boxes[i],LV_OBJ_FLAG_HIDDEN);position_tile(i,active.layout);
         const auto &sel=active.fields[i];lv_label_set_text(g_tile_titles[i],instrument_metric_name(sel.metric));
-        const InstrumentValue v=instrument_data_get(sel,static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+i));
+        const auto field_id=static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+i);
+        const InstrumentValue v=depth_display[field_id].apply(sel,g_settings.units.depth,instrument_data_get(sel,field_id));
         if(sel.source==DataSourceType::SmartShunt){
             lv_label_set_text(g_tile_sources[i],instrument_source_name(sel,g_settings,static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+i)));
             lv_obj_remove_flag(g_tile_sources[i],LV_OBJ_FLAG_HIDDEN);
@@ -377,12 +412,24 @@ void render_active_page()
             lv_label_set_text(g_tile_titles[i],depth_titles[v.depth_reference<4?v.depth_reference:0]);
         }
         if(sel.metric==DataMetric::WaypointName || sel.metric==DataMetric::Latitude || sel.metric==DataMetric::Longitude || sel.metric==DataMetric::Position){
+            lv_obj_set_style_transform_scale_x(g_tile_values[i],256,0);
+            lv_obj_set_style_transform_scale_y(g_tile_values[i],256,0);
             lv_obj_set_style_text_font(g_tile_values[i],count==1?&lv_font_montserrat_48:&lv_font_montserrat_24,0);
+            lv_obj_set_height(g_tile_values[i],LV_SIZE_CONTENT);
             lv_obj_set_width(g_tile_values[i],lv_obj_get_width(g_tile_boxes[i])-90);
             lv_label_set_long_mode(g_tile_values[i],LV_LABEL_LONG_MODE_DOTS);
         }else{lv_obj_set_width(g_tile_values[i],LV_SIZE_CONTENT);lv_label_set_long_mode(g_tile_values[i],LV_LABEL_LONG_MODE_WRAP);}
         char value[80],unit[16];instrument_format_value(sel,g_settings.units,v,value,sizeof(value),unit,sizeof(unit));
         lv_label_set_text(g_tile_values[i],value);lv_label_set_text(g_tile_units[i],unit);
+        const bool text_field=sel.metric==DataMetric::WaypointName || sel.metric==DataMetric::Latitude ||
+            sel.metric==DataMetric::Longitude || sel.metric==DataMetric::Position;
+        if(!text_field)fit_numeric_tile(i,count,value,unit);
+        else {
+            lv_obj_align(g_tile_values[i],LV_ALIGN_CENTER,-10,count==6?2:5);
+            lv_obj_set_width(g_tile_units[i],LV_SIZE_CONTENT);
+            lv_obj_set_style_text_align(g_tile_units[i],LV_TEXT_ALIGN_LEFT,0);
+            lv_obj_align_to(g_tile_units[i],g_tile_values[i],LV_ALIGN_OUT_RIGHT_MID,6,0);
+        }
     }
 }
 
