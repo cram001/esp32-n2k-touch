@@ -99,8 +99,10 @@ git apply --check http-listener-memory.patch
 git apply http-listener-memory.patch
 ```
 
-Existing generated sdkconfig values override defaults. Preserve custom settings:
-rename `sdkconfig.waveshare-touch-4` to a backup, then run `pio run -t clean`
+The tracked `sdkconfig.waveshare-touch-4` is updated alongside the defaults,
+so a normal checkout/build gets this profile. Existing custom generated values
+can still override defaults. If the stale-profile guard triggers, preserve custom
+settings: rename `sdkconfig.waveshare-touch-4` to a backup, then run `pio run -t clean`
 and `pio run` to regenerate from defaults. Alternatively use
 `pio run -t menuconfig` and set every profile value above manually.
 Do not erase NVS. Reapply unrelated custom configuration from the backup if any.
