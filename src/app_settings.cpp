@@ -13,6 +13,7 @@ namespace {
 constexpr const char *TAG = "settings";
 constexpr const char *NAMESPACE = "app";
 constexpr const char *KEY_THEME = "theme";
+constexpr const char *KEY_ROTATION = "rotation";
 constexpr const char *KEY_DAY_BRIGHTNESS = "day_br";
 constexpr const char *KEY_NIGHT_BRIGHTNESS = "night_br";
 constexpr const char *KEY_SHUNTS = "shunts_v2";
@@ -154,6 +155,9 @@ AppSettings settings_load()
     }
 
     uint8_t value = 0;
+    if (nvs_get_u8(handle, KEY_ROTATION, &value) == ESP_OK && value <= 1) {
+        settings.rotation = static_cast<DisplayRotation>(value);
+    }
     if (nvs_get_u8(handle, KEY_THEME, &value) == ESP_OK && value <= static_cast<uint8_t>(DisplayTheme::Night)) {
         settings.theme = static_cast<DisplayTheme>(value);
     }
@@ -247,6 +251,7 @@ AppSettings settings_load()
 
 bool settings_save(const AppSettings &settings)
 {
+    if (static_cast<uint8_t>(settings.rotation) > 1) return false;
     nvs_handle_t handle;
     esp_err_t err = nvs_open(NAMESPACE, NVS_READWRITE, &handle);
     if (err != ESP_OK) {
@@ -280,6 +285,7 @@ bool settings_save(const AppSettings &settings)
     input.port = settings.n2k_input.port;
 
     err = nvs_set_u8(handle, KEY_THEME, static_cast<uint8_t>(settings.theme));
+    if (err == ESP_OK) err = nvs_set_u8(handle, KEY_ROTATION, static_cast<uint8_t>(settings.rotation));
     if (err == ESP_OK) err = nvs_set_u8(handle, KEY_HEADING_REFERENCE,
         settings.units.heading_reference == HeadingReference::Magnetic ? 1 : 0);
     if (err == ESP_OK) err = nvs_set_u8(handle, KEY_LAT_LON_FORMAT,

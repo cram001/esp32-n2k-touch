@@ -39,6 +39,7 @@ lv_obj_t *require_obj(lv_obj_t *obj, const char *what)
 }
 
 AppSettings g_settings;
+lv_obj_t *g_rotation_button=nullptr;
 size_t g_active_page = 0;
 size_t g_edit_page = 0;
 size_t g_edit_field = 0;
@@ -456,6 +457,22 @@ void previous_page_cb(lv_event_t *){g_active_page=next_enabled_page(g_active_pag
 void next_page_cb(lv_event_t *){g_active_page=next_enabled_page(g_active_page,+1);render_active_page();}
 void data_screen_cb(lv_event_t *){render_active_page();lv_screen_load(g_data_screen);}
 void settings_screen_cb(lv_event_t *){lv_screen_load(g_settings_screen);}
+void rotation_label(){
+    lv_label_set_text(button_label(g_rotation_button),g_settings.rotation==DisplayRotation::Normal?"Rotation: Normal (tap)":"Rotation: 180° (tap)");
+}
+void rotation_cb(lv_event_t *){
+    AppSettings next=g_settings;
+    next.rotation=next.rotation==DisplayRotation::Normal?DisplayRotation::Rotated180:DisplayRotation::Normal;
+    if(!settings_save(next)){
+        lv_label_set_text(button_label(g_rotation_button),"Rotation save failed; tap to retry");return;
+    }
+    g_settings.rotation=next.rotation;
+    // Runs in LVGL's callback, under its existing ownership/lock. Display
+    // rotation also transforms the associated touch coordinates in LVGL.
+    if(auto *input=lv_indev_active())lv_indev_wait_release(input);
+    lv_display_set_rotation(lv_obj_get_display(g_settings_screen),next.rotation==DisplayRotation::Normal?LV_DISPLAY_ROTATION_0:LV_DISPLAY_ROTATION_180);
+    rotation_label();
+}
 void theme_toggle_cb(lv_event_t *){g_settings.theme=g_settings.theme==DisplayTheme::Day?DisplayTheme::Night:DisplayTheme::Day;persist();}
 void brightness_down_cb(lv_event_t *){uint8_t &v=g_settings.theme==DisplayTheme::Day?g_settings.day_brightness:g_settings.night_brightness;v=v>10?static_cast<uint8_t>(v-10):1;persist();}
 void brightness_up_cb(lv_event_t *){uint8_t &v=g_settings.theme==DisplayTheme::Day?g_settings.day_brightness:g_settings.night_brightness;v=v<91?static_cast<uint8_t>(v+10):100;persist();}
@@ -979,12 +996,16 @@ void create_settings_screen()
     b=make_button(g_settings_screen,"BR +",brightness_up_cb,80,46);
     lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-35,286);
 
+    g_rotation_button=make_button(g_settings_screen,"",rotation_cb,380,38);
+    lv_obj_align(g_rotation_button,LV_ALIGN_TOP_MID,0,338);rotation_label();
+
     lv_obj_t *identity = require_obj(lv_label_create(g_settings_screen), "firmware identity");
     const esp_app_desc_t *app = esp_app_get_description();
     lv_label_set_text_fmt(identity, "Firmware: %s\nBuilt: %s %s", app->version, app->date, app->time);
     lv_obj_set_width(identity, 440);
     lv_obj_set_style_text_align(identity, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(identity, LV_ALIGN_TOP_MID, 0, 346);
+    lv_obj_set_style_text_font(identity,&lv_font_montserrat_14,0);
+    lv_obj_align(identity, LV_ALIGN_TOP_MID, 0, 382);
 
     b=make_button(g_settings_screen,"BACK",data_screen_cb,120,46);
     lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-18);

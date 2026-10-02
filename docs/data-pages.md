@@ -116,4 +116,7 @@ source, input reset, depth setup/reference/offset and unit changes reset it.
 Invalid depth, readings over 1000 metres and the 30-second timeout immediately
 show `--` and clear the filter. A gap of 30 seconds also clears it.
 Long distances show one decimal in NM/km; short distances show whole m/ft/yd.
-Rotation remains fixed at 180 degrees; a saved Normal/180 setting is outstanding.
+Settings includes a Rotation button that toggles Normal/180 degrees immediately
+and saves the choice for reboot. Existing installations default to 180 degrees.
+LVGL rotates touch coordinates with the display; no separate touch transform is
+applied. A failed save leaves the current orientation unchanged and offers retry.

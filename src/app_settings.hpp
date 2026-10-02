@@ -14,6 +14,7 @@ enum class DisplayTheme : uint8_t {
     Day = 0,
     Night = 1,
 };
+enum class DisplayRotation : uint8_t { Normal = 0, Rotated180 = 1 };
 
 enum class PageLayout : uint8_t {
     One = 1,
@@ -156,6 +157,8 @@ struct N2kInputConfig {
 
 struct AppSettings {
     DisplayTheme theme = DisplayTheme::Day;
+    // Separate NVS key; existing persisted blobs keep their layouts.
+    DisplayRotation rotation = DisplayRotation::Rotated180;
     uint8_t day_brightness = DEFAULT_DAY_BRIGHTNESS;
     uint8_t night_brightness = DEFAULT_NIGHT_BRIGHTNESS;
     WifiConfig wifi{};
