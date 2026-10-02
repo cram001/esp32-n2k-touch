@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include "local_http_server.hpp"
+#include "local_server_retry.hpp"
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -11,6 +12,7 @@
 #include "esp_app_desc.h"
 #include "esp_crt_bundle.h"
 #include "esp_err.h"
+#include "esp_heap_caps.h"
 #include "esp_https_ota.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
@@ -27,6 +29,15 @@
 #if !CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE
 #error "Dual-slot release firmware requires bootloader rollback"
 #endif
+#if !CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP
+#error "HTTP memory profile missing: regenerate sdkconfig.waveshare-touch-4 from sdkconfig.defaults"
+#endif
+static_assert(CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL==1024 && CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM==6 &&
+              CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM==16 && CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM==6 &&
+              CONFIG_ESP_WIFI_CACHE_TX_BUFFER_NUM==8 && CONFIG_LWIP_MAX_SOCKETS==10 &&
+              CONFIG_LWIP_TCP_SND_BUF_DEFAULT==2880 && CONFIG_LWIP_TCP_WND_DEFAULT==2880 &&
+              CONFIG_LWIP_TCP_OOSEQ_MAX_PBUFS==2,
+              "Stale HTTP memory profile: regenerate sdkconfig.waveshare-touch-4 before building");
 
 namespace {
 constexpr const char *TAG = "ota";
@@ -200,10 +211,34 @@ void ota_task(void *)
 }
 // HTTP runs in its own server task. It never touches LVGL objects.
 httpd_handle_t g_server = nullptr;
-std::atomic<LocalServerStage> g_server_stage{LocalServerStage::NotStarted};
-std::atomic<int> g_server_error{0};
-std::atomic<int> g_server_socket_error{0};
+LocalServerStatus g_server_status{}; // protected by g_mutex
+std::atomic<bool> g_server_request{false};
+TaskHandle_t g_server_worker=nullptr; // startup owner creates once
+struct ServerHeap {
+    size_t internal_free=0,internal_largest=0,internal_minimum=0;
+    size_t psram_free=0,psram_largest=0;
+    size_t internal_8bit_free=0,internal_8bit_largest=0;
+};
+ServerHeap g_server_heap{}; // last startup snapshot, protected by g_mutex
 char g_upload_token[33]{};
+
+ServerHeap server_heap() {
+    return {heap_caps_get_free_size(MALLOC_CAP_INTERNAL),heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
+            heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+            heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM),heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT),
+            heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT)};
+}
+void log_server_heap(const char *phase,const ServerHeap &heap) {
+    ESP_LOGI(TAG,"HTTP heap %s: internal free=%u largest=%u minimum=%u; PSRAM free=%u largest=%u",phase,
+             static_cast<unsigned>(heap.internal_free),static_cast<unsigned>(heap.internal_largest),
+             static_cast<unsigned>(heap.internal_minimum),static_cast<unsigned>(heap.psram_free),
+             static_cast<unsigned>(heap.psram_largest));
+    ESP_LOGI(TAG,"HTTP heap %s: internal 8-bit free=%u largest=%u",phase,
+             static_cast<unsigned>(heap.internal_8bit_free),static_cast<unsigned>(heap.internal_8bit_largest));
+}
+void publish_server_status(const LocalServerStatus &status,const ServerHeap &heap) {
+    xSemaphoreTake(g_mutex,portMAX_DELAY);g_server_status=status;g_server_heap=heap;xSemaphoreGive(g_mutex);
+}
 
 bool ap_request(httpd_req_t *request, bool token_required) {
     if (wifi_service_get_status().state != WifiState::AccessPoint) {
@@ -330,6 +365,35 @@ esp_err_t reboot_handler(httpd_req_t *request) {
     return httpd_resp_sendstr(request,"Restarting. Reconnect to the display after startup.");
 }
 
+void local_server_worker(void *) {
+    LocalServerRetry retry;
+    uint8_t random[16];esp_fill_random(random,sizeof(random));
+    for(size_t i=0;i<sizeof(random);++i)std::snprintf(g_upload_token+i*2,3,"%02x",random[i]);
+    httpd_uri_t page{};page.uri="/";page.method=HTTP_GET;page.handler=page_handler;
+    httpd_uri_t upload{};upload.uri="/upload";upload.method=HTTP_POST;upload.handler=upload_handler;
+    httpd_uri_t reboot{};reboot.uri="/reboot";reboot.method=HTTP_POST;reboot.handler=reboot_handler;
+    const httpd_uri_t routes[]={page,upload,reboot};
+    for(;;) {
+        const int64_t now=esp_timer_get_time();
+        if(g_server_request.exchange(false))retry.request(now);
+        if(retry.due(now)) {
+            const auto before=server_heap();
+            publish_server_status({LocalServerStage::Starting,0,0,retry.attempts+1,false},before);
+            ESP_LOGI(TAG,"HTTP startup attempt %u/%u",retry.attempts+1,LocalServerRetry::limit);
+            log_server_heap("before httpd_start",before);
+            auto result=start_local_http_server(g_server,routes,3);
+            const auto after=server_heap();
+            if(result.stage!=LocalServerStage::Listening)log_server_heap("after failed startup",after);
+            retry.complete(result.stage==LocalServerStage::Listening,esp_timer_get_time());
+            result.attempts=retry.attempts;result.retry_pending=retry.active;
+            publish_server_status(result,after);
+            ota_log_local_server_status();
+            if(retry.active)ESP_LOGW(TAG,"HTTP startup retry in 2000 ms");
+            else if(!retry.listening)ESP_LOGE(TAG,"HTTP startup retries exhausted; a new AP start can request another batch");
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+}
 } // namespace
 
 void ota_confirm_running_image()
@@ -398,22 +462,21 @@ bool ota_partition_layout_valid()
 bool ota_start_local_server()
 {
     ensure_mutex();
-    if (!g_mutex) {g_server_error=ESP_ERR_NO_MEM;g_server_stage=LocalServerStage::StartFailed;return false;}
-    if (g_server) return true;
-    g_server_stage=LocalServerStage::Starting;
-    uint8_t random[16];esp_fill_random(random,sizeof(random));
-    for(size_t i=0;i<sizeof(random);++i) std::snprintf(g_upload_token+i*2,3,"%02x",random[i]);
-    httpd_uri_t page{};page.uri="/";page.method=HTTP_GET;page.handler=page_handler;
-    httpd_uri_t upload{};upload.uri="/upload";upload.method=HTTP_POST;upload.handler=upload_handler;
-    httpd_uri_t reboot{};reboot.uri="/reboot";reboot.method=HTTP_POST;reboot.handler=reboot_handler;
-    const httpd_uri_t routes[]={page,upload,reboot};
-    const auto result=start_local_http_server(g_server,routes,3);
-    g_server_error=result.error;g_server_socket_error=result.socket_error;g_server_stage=result.stage;
-    ota_log_local_server_status();
-    return result.stage==LocalServerStage::Listening;
+    if(!g_mutex)return false;
+    // Called by app_main only. AP events just set the atomic request flag.
+    if(!g_server_worker && xTaskCreate(local_server_worker,"http_start",4096,nullptr,1,&g_server_worker)!=pdPASS) {
+        publish_server_status({LocalServerStage::StartFailed,ESP_ERR_NO_MEM,0,0,false},server_heap());
+        ota_log_local_server_status();return false;
+    }
+    ota_request_local_server_start();
+    return true; // scheduling accepted; health checks must inspect Listening
 }
 
-LocalServerStatus ota_local_server_status(){return {g_server_stage.load(),g_server_error.load(),g_server_socket_error.load()};}
+void ota_request_local_server_start(){g_server_request=true;}
+LocalServerStatus ota_local_server_status(){
+    if(!g_mutex)return {LocalServerStage::StartFailed,ESP_ERR_NO_MEM};
+    xSemaphoreTake(g_mutex,portMAX_DELAY);const auto status=g_server_status;xSemaphoreGive(g_mutex);return status;
+}
 const char *ota_local_server_stage_name(LocalServerStage stage){
     switch(stage){
     case LocalServerStage::NotStarted:return "Not started";
@@ -426,9 +489,11 @@ const char *ota_local_server_stage_name(LocalServerStage stage){
 }
 void ota_log_local_server_status(){
     const auto status=ota_local_server_status();
-    ESP_LOGI(TAG,"HTTP server: %s; error %s (0x%x); socket errno %d (%s); OTA layout: %s",ota_local_server_stage_name(status.stage),
+    ESP_LOGI(TAG,"HTTP server: %s; error %s (0x%x); socket errno %d (%s); attempt %u/10; retry %s; OTA layout: %s",ota_local_server_stage_name(status.stage),
              esp_err_to_name(status.error),status.error,status.socket_error,status.socket_error?std::strerror(status.socket_error):"none captured",
+             status.attempts,status.retry_pending?"pending":"idle",
              ota_partition_layout_valid()?"valid":"incompatible (uploads disabled)");
+    if(g_mutex){xSemaphoreTake(g_mutex,portMAX_DELAY);const auto heap=g_server_heap;xSemaphoreGive(g_mutex);log_server_heap("last startup snapshot",heap);}
 }
 
 void ota_prepare() {ensure_mutex();}

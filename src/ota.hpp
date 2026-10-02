@@ -24,6 +24,8 @@ struct LocalServerStatus {
     LocalServerStage stage=LocalServerStage::NotStarted;
     int error=0;
     int socket_error=0;
+    unsigned attempts=0;
+    bool retry_pending=false;
 };
 LocalServerStatus ota_local_server_status();
 const char *ota_local_server_stage_name(LocalServerStage stage);
@@ -36,6 +38,8 @@ void ota_confirm_running_image();
 void ota_reject_running_image();
 bool ota_partition_layout_valid();
 bool ota_start_local_server();
+// Nonblocking AP-event request. The startup worker owns all HTTP start calls.
+void ota_request_local_server_start();
 
 // Starts an HTTPS OTA update in a background FreeRTOS task.
 // Requires an already-working network connection. Returns false if an update is

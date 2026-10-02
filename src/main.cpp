@@ -5,6 +5,7 @@
 #include "wifi_service.hpp"
 #include "ui.hpp"
 #include "ota.hpp"
+#include "local_server_retry.hpp"
 
 #include "bsp/esp-bsp.h"
 #include "driver/gpio.h"
@@ -12,6 +13,7 @@
 #include "esp_app_desc.h"
 #include "esp_ota_ops.h"
 #include "esp_rom_sys.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -21,6 +23,25 @@ static_assert(CONFIG_ESP_MAIN_TASK_STACK_SIZE >= 8192,
 constexpr const char *TAG = "app";
 constexpr gpio_num_t BOARD_I2C_SDA = GPIO_NUM_15;
 constexpr gpio_num_t BOARD_I2C_SCL = GPIO_NUM_7;
+bool g_startup_prerequisites=false; // assigned before health task creation
+
+void startup_health_task(void *) {
+    const int64_t started=esp_timer_get_time();
+    for(;;) {
+        const auto decision=startup_health_decision(g_startup_prerequisites,
+            ota_local_server_status().stage==LocalServerStage::Listening,ui_is_healthy(),esp_timer_get_time()-started);
+        if(decision==StartupHealthDecision::Confirm) {
+            ESP_LOGI(TAG,"Startup health passed: HTTP listener ready and UI healthy");
+            ota_confirm_running_image();break;
+        }
+        if(decision==StartupHealthDecision::Reject) {
+            ESP_LOGE(TAG,"Startup health failed: prerequisites or HTTP/UI readiness deadline");
+            ota_reject_running_image();break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    vTaskDelete(nullptr);
+}
 
 bool board_i2c_recover()
 {
@@ -120,8 +141,8 @@ extern "C" void app_main(void)
 
     // Bring the local listener up before BLE/CAN initialization. A readable
     // page must not depend on those services or on OTA partition compatibility.
-    const bool ota_ok = ota_start_local_server();
-    if (!ota_ok) ESP_LOGE(TAG, "Local HTTP server failed to initialize");
+    const bool ota_scheduled = ota_start_local_server();
+    if (!ota_scheduled) ESP_LOGE(TAG, "Local HTTP startup worker failed to initialize");
     const bool ota_layout_ok=ota_partition_layout_valid();
 
     const bool ble_ok = smartshunt_ble_start(settings);
@@ -135,12 +156,11 @@ extern "C" void app_main(void)
 
     // Confirm only after local services initialize. Router availability is not
     // a health requirement; Wi-Fi initialization itself must succeed.
-    if (settings_ok && sources_ok && wifi_ok && ble_ok && n2k_ok && ota_ok && ota_layout_ok) {
-        vTaskDelay(pdMS_TO_TICKS(5000));
-        if (ui_is_healthy()) ota_confirm_running_image();
-        else ota_reject_running_image();
-    } else {
-        ESP_LOGE(TAG, "Startup health check failed; rejecting pending OTA image");
+    // A late listener counts only if actually Listening within 25 seconds;
+    // scheduling the worker is never sufficient to confirm an OTA trial.
+    g_startup_prerequisites=settings_ok && sources_ok && wifi_ok && ble_ok && n2k_ok && ota_scheduled && ota_layout_ok;
+    if(xTaskCreate(startup_health_task,"startup_health",4096,nullptr,1,nullptr)!=pdPASS) {
+        ESP_LOGE(TAG,"Startup health task allocation failed; rejecting pending OTA image");
         ota_reject_running_image();
     }
 }
