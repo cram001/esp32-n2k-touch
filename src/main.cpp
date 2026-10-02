@@ -118,6 +118,12 @@ extern "C" void app_main(void)
     const bool wifi_ok = wifi_service_start(settings.wifi);
     if (!wifi_ok) ESP_LOGE(TAG, "Wi-Fi service failed to initialize");
 
+    // Bring the local listener up before BLE/CAN initialization. A readable
+    // page must not depend on those services or on OTA partition compatibility.
+    const bool ota_ok = ota_start_local_server();
+    if (!ota_ok) ESP_LOGE(TAG, "Local HTTP server failed to initialize");
+    const bool ota_layout_ok=ota_partition_layout_valid();
+
     const bool ble_ok = smartshunt_ble_start(settings);
     if (!ble_ok) ESP_LOGE(TAG, "SmartShunt BLE service failed to initialize");
 
@@ -125,13 +131,11 @@ extern "C" void app_main(void)
     if (!n2k_ok) ESP_LOGE(TAG, "NMEA 2000 service failed to initialize");
 
 
-    const bool ota_ok = wifi_ok && ota_start_local_server();
-    if (!ota_ok) ESP_LOGE(TAG, "OTA server or partition validation failed");
     ESP_LOGI(TAG, "Main stack minimum free after services: %u bytes", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
 
     // Confirm only after local services initialize. Router availability is not
     // a health requirement; Wi-Fi initialization itself must succeed.
-    if (settings_ok && sources_ok && wifi_ok && ble_ok && n2k_ok && ota_ok) {
+    if (settings_ok && sources_ok && wifi_ok && ble_ok && n2k_ok && ota_ok && ota_layout_ok) {
         vTaskDelay(pdMS_TO_TICKS(5000));
         if (ui_is_healthy()) ota_confirm_running_image();
         else ota_reject_running_image();

@@ -5,6 +5,8 @@ bool fake_queue_full=false;
 unsigned fake_commands=0, fake_starts=0, fake_scans=0;
 int fake_stop_error=0, fake_mode_error=0, fake_config_error=0, fake_start_error=0;
 bool fake_ota_busy=false, fake_network_claim=false;
+unsigned server_reports=0;
+void ota_log_local_server_status(){++server_reports;}
 bool ota_update_in_progress() { return fake_ota_busy; }
 bool ota_begin_network_change() { if (fake_ota_busy) return false; fake_network_claim=true; return true; }
 void ota_end_network_change() { fake_network_claim=false; }
@@ -12,6 +14,8 @@ void ota_end_network_change() { fake_network_claim=false; }
 #include "../../src/wifi_service.cpp"
 
 int main() {
+    event(nullptr,WIFI_EVENT,WIFI_EVENT_AP_STACONNECTED,nullptr);
+    assert(server_reports==1);
     WifiConfig migrated{};
     migrated.enabled=true;
     std::strcpy(migrated.ssid.data(), "BoatWiFi");
