@@ -447,7 +447,12 @@ void update_wifi_status()
     case WifiState::Connected: std::snprintf(b,sizeof(b),"%s\n%s   %d dBm",st.ssid.data(),st.ip.data(),st.rssi); break;
     case WifiState::CredentialsRequired: std::snprintf(b,sizeof(b),"%s\n%s",st.ssid.data(),st.message.data()); break;
     case WifiState::Disconnected: std::snprintf(b,sizeof(b),"%s\nReason %d; retrying",st.message.data(),st.disconnect_reason); break;
-    case WifiState::AccessPoint: std::snprintf(b,sizeof(b),"AP: %s\nUpload: http://%s",st.ssid.data(),st.ip.data()); break;
+    case WifiState::AccessPoint: {
+        const auto server=ota_local_server_status();
+        if(server.stage==LocalServerStage::Listening)std::snprintf(b,sizeof(b),"AP: %s\nUpdate page: http://%s",st.ssid.data(),st.ip.data());
+        else std::snprintf(b,sizeof(b),"AP: %s\nWeb: %s (0x%x)",st.ssid.data(),ota_local_server_stage_name(server.stage),server.error);
+        break;
+    }
     case WifiState::Error: std::snprintf(b,sizeof(b),"Wi-Fi error 0x%x\n%s",st.last_error,st.message.data()); break;
     }
     lv_label_set_text(g_wifi_status,b);
@@ -621,8 +626,9 @@ void update_ota_status() {
     if(!g_ota_status || lv_screen_active()!=g_ota_screen) return;
     if(g_ota_feedback[0] && lv_tick_elaps(g_ota_feedback_time)<6000) return;
     g_ota_feedback[0]=0;
-    const auto st=ota_get_status();const auto wifi=wifi_service_get_status();char text[220];
-    std::snprintf(text,sizeof(text),"Version: %s\n%s (%d%%)  error: 0x%x\nAP upload: http://%s\nUse application firmware.bin only",ota_running_version(),st.message[0]?st.message:"Enter HTTPS URL or use AP upload",st.progress_percent,st.last_error,wifi.ip[0]?wifi.ip.data():"connect-to-AP");
+    const auto st=ota_get_status();const auto wifi=wifi_service_get_status();const auto server=ota_local_server_status();char text[360];
+    std::snprintf(text,sizeof(text),"Version: %s\n%s (%d%%)  error: 0x%x\nWeb: %s (0x%x)\nOTA layout: %s\nAP page: http://%s",ota_running_version(),st.message[0]?st.message:"Enter HTTPS URL or use AP upload",st.progress_percent,st.last_error,
+        ota_local_server_stage_name(server.stage),server.error,ota_partition_layout_valid()?"ready":"incompatible; use USB",wifi.ip[0]?wifi.ip.data():"connect-to-AP");
     lv_label_set_text(g_ota_status,text);
 }
 void ota_screen_cb(lv_event_t *) { hide_wifi_keyboard();lv_screen_load(g_ota_screen);update_ota_status(); }

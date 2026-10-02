@@ -1,6 +1,8 @@
 #include "ota.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include "local_http_server.hpp"
 #include <cstdio>
 #include <cstring>
 #include <ctime>
@@ -198,6 +200,8 @@ void ota_task(void *)
 }
 // HTTP runs in its own server task. It never touches LVGL objects.
 httpd_handle_t g_server = nullptr;
+std::atomic<LocalServerStage> g_server_stage{LocalServerStage::NotStarted};
+std::atomic<int> g_server_error{0};
 char g_upload_token[33]{};
 
 bool ap_request(httpd_req_t *request, bool token_required) {
@@ -217,18 +221,20 @@ bool ap_request(httpd_req_t *request, bool token_required) {
 }
 
 esp_err_t page_handler(httpd_req_t *request) {
+    ESP_LOGI(TAG,"Local HTTP GET /");
     if (!ap_request(request,false)) return ESP_OK;
     // The token prevents cross-origin update/reboot requests. No CORS is enabled.
     const char *page = R"HTML(<!doctype html><html><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>N2K Display firmware update</title><style>body{font:18px system-ui;max-width:600px;margin:30px auto;padding:20px}button,input{font:inherit;margin:12px 0}pre{white-space:pre-wrap}</style>
-<h1>Firmware update</h1><p>Select the application <b>firmware.bin</b>. Keep the display powered until validation finishes. A full-flash or bootloader image cannot be used here.</p>
+<h1>Firmware update</h1><p>%s</p><p>Select the application <b>firmware.bin</b>. Keep the display powered until validation finishes. A full-flash or bootloader image cannot be used here.</p>
 <input id="file" type="file" accept=".bin"><br><button id="upload">Upload firmware</button><br><button id="reboot">Reboot after validation</button><pre id="status">Ready</pre>
 <script>const token='%s';const status=document.getElementById('status');let busy=false;
 document.getElementById('upload').onclick=async()=>{if(busy)return;const f=document.getElementById('file').files[0];if(!f){status.textContent='Choose firmware.bin first';return;}busy=true;status.textContent='Uploading and validating. Keep power connected.';try{const r=await fetch('/upload',{method:'POST',headers:{'X-OTA-Token':token,'Content-Type':'application/octet-stream'},body:f});status.textContent=await r.text();}catch(e){status.textContent='Connection interrupted. Check display status before retrying.';}finally{busy=false;}};
 document.getElementById('reboot').onclick=async()=>{if(busy)return;try{const r=await fetch('/reboot',{method:'POST',headers:{'X-OTA-Token':token}});status.textContent=await r.text();}catch(e){status.textContent='Reconnect to the display after it restarts.';}};
 </script></html>)HTML";
     char html[2600];
-    const int len = std::snprintf(html,sizeof(html),page,g_upload_token);
+    const bool layout_ok=ota_partition_layout_valid();
+    const int len = std::snprintf(html,sizeof(html),page,layout_ok?"Ready for firmware upload.":"Upload unavailable: incompatible flash layout. Install compatible firmware using USB.",g_upload_token);
     if (len < 0 || static_cast<size_t>(len) >= sizeof(html)) return httpd_resp_send_err(request,HTTPD_500_INTERNAL_SERVER_ERROR,"Page unavailable");
     httpd_resp_set_type(request,"text/html");
     httpd_resp_set_hdr(request,"Cache-Control","no-store");
@@ -391,22 +397,36 @@ bool ota_partition_layout_valid()
 bool ota_start_local_server()
 {
     ensure_mutex();
-    if (!g_mutex || !ota_partition_layout_valid()) return false;
+    if (!g_mutex) {g_server_error=ESP_ERR_NO_MEM;g_server_stage=LocalServerStage::StartFailed;return false;}
     if (g_server) return true;
+    g_server_stage=LocalServerStage::Starting;
     uint8_t random[16];esp_fill_random(random,sizeof(random));
     for(size_t i=0;i<sizeof(random);++i) std::snprintf(g_upload_token+i*2,3,"%02x",random[i]);
-    httpd_config_t config=HTTPD_DEFAULT_CONFIG();config.stack_size=10240;
-    config.max_open_sockets=2;config.recv_wait_timeout=5;config.send_wait_timeout=5;
-    if(httpd_start(&g_server,&config)!=ESP_OK) return false;
     httpd_uri_t page{};page.uri="/";page.method=HTTP_GET;page.handler=page_handler;
     httpd_uri_t upload{};upload.uri="/upload";upload.method=HTTP_POST;upload.handler=upload_handler;
     httpd_uri_t reboot{};reboot.uri="/reboot";reboot.method=HTTP_POST;reboot.handler=reboot_handler;
-    if(httpd_register_uri_handler(g_server,&page)!=ESP_OK ||
-       httpd_register_uri_handler(g_server,&upload)!=ESP_OK ||
-       httpd_register_uri_handler(g_server,&reboot)!=ESP_OK) {
-        httpd_stop(g_server);g_server=nullptr;return false;
+    const httpd_uri_t routes[]={page,upload,reboot};
+    const auto result=start_local_http_server(g_server,routes,3);
+    g_server_error=result.error;g_server_stage=result.stage;
+    ota_log_local_server_status();
+    return result.stage==LocalServerStage::Listening;
+}
+
+LocalServerStatus ota_local_server_status(){return {g_server_stage.load(),g_server_error.load()};}
+const char *ota_local_server_stage_name(LocalServerStage stage){
+    switch(stage){
+    case LocalServerStage::NotStarted:return "Not started";
+    case LocalServerStage::Starting:return "Starting";
+    case LocalServerStage::Listening:return "Listening on port 80";
+    case LocalServerStage::StartFailed:return "Listener startup failed";
+    case LocalServerStage::RoutesFailed:return "Page registration failed";
     }
-    return true;
+    return "Unknown";
+}
+void ota_log_local_server_status(){
+    const auto status=ota_local_server_status();
+    ESP_LOGI(TAG,"HTTP server: %s; error %s (0x%x); OTA layout: %s",ota_local_server_stage_name(status.stage),
+             esp_err_to_name(status.error),status.error,ota_partition_layout_valid()?"valid":"incompatible (uploads disabled)");
 }
 
 void ota_prepare() {ensure_mutex();}

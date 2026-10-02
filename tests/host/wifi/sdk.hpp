@@ -22,6 +22,7 @@ using esp_event_base_t=int;
 constexpr int WIFI_EVENT=1, IP_EVENT=2, ESP_EVENT_ANY_ID=-1;
 constexpr int WIFI_EVENT_STA_START=1, WIFI_EVENT_AP_START=2, WIFI_EVENT_STA_CONNECTED=3,
               WIFI_EVENT_STA_DISCONNECTED=4, WIFI_EVENT_SCAN_DONE=5, IP_EVENT_STA_GOT_IP=6;
+constexpr int WIFI_EVENT_AP_STACONNECTED=7;
 inline int esp_event_loop_create_default() { return ESP_OK; }
 inline int esp_event_handler_register(int, int, void (*)(void *, int, int32_t, void *), void *) { return ESP_OK; }
 struct esp_netif_t {};

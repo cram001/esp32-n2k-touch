@@ -19,6 +19,15 @@ struct OtaStatus {
     char message[64]{};
 };
 
+enum class LocalServerStage : uint8_t { NotStarted, Starting, Listening, StartFailed, RoutesFailed };
+struct LocalServerStatus {
+    LocalServerStage stage=LocalServerStage::NotStarted;
+    int error=0;
+};
+LocalServerStatus ota_local_server_status();
+const char *ota_local_server_stage_name(LocalServerStage stage);
+void ota_log_local_server_status();
+
 // Call once during boot. If the bootloader marked this image pending verification,
 // this confirms it as healthy and prevents automatic rollback.
 void ota_prepare();

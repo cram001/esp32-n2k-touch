@@ -13,6 +13,14 @@ Base: `f8e648011ed054350f03bb52e5978128b2ff4409` on `feature/smartshunt-ble-n2k`
 - User-triggered scans with SSID, signal strength and Open/Secured labels. Results are limited to 16 AP records and duplicate SSIDs are collapsed. Manual entry remains available for hidden SSIDs. Scans are never automatically repeated. If the driver is busy connecting, the UI reports the scan error and allows an explicit retry.
 - Access Point mode uses separate credentials, WPA2, channel 1 and at most two clients. Set a custom AP password of 8–63 bytes. There is no default AP password, and an unconfigured AP will not start. Station and AP modes are selectable alternatives; AP mode does not supply Internet access.
 - AP firmware upload through `http://<displayed-IP>/`, typically `http://192.168.4.1/`. Choose the application `firmware.bin`, upload, wait for validation, then click Reboot after validation. The server accepts upload/reboot only in active AP mode and requires a per-boot request token. Its task publishes status snapshots and never accesses LVGL.
+- The HTTP listener starts immediately after Wi-Fi initialization, before BLE/CAN.
+  Its diagnostic page remains available even with incompatible OTA partitions;
+  upload validation still rejects that layout before writing flash. Settings shows
+  actual listener/route startup state and errors instead of advertising a page
+  when startup failed. Four client sockets with idle-session eviction prevent
+  abandoned browser connections from permanently filling the listener. Connecting
+  an AP client prints retained server/partition status, allowing diagnosis when
+  USB monitoring misses early boot output; GET requests also log their arrival.
 
 Wi-Fi credentials reside in normal application NVS, with the same storage protection as the existing SmartShunt configuration. Firmware changes do not log passwords or include real credentials in tests.
 

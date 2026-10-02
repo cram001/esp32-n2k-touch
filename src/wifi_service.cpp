@@ -111,6 +111,10 @@ void event(void *, esp_event_base_t base, int32_t id, void *data) {
         if (!g_scanning) { esp_wifi_clear_ap_list(); return; }
         g_scan_error = static_cast<wifi_event_sta_scan_done_t *>(data)->status;
         g_scan_finished = true;
+    } else if(base==WIFI_EVENT && id==WIFI_EVENT_AP_STACONNECTED){
+        // Report retained startup diagnostics when USB monitoring is attached
+        // after boot; the event handler never accesses display objects.
+        ota_log_local_server_status();
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         if (g_switching || !snapshot().enabled || snapshot().mode != WifiMode::Station) return;
         auto *got = static_cast<ip_event_got_ip_t *>(data);
