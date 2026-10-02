@@ -33,6 +33,7 @@
 #error "HTTP memory profile missing: regenerate sdkconfig.waveshare-touch-4 from sdkconfig.defaults"
 #endif
 static_assert(CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL==1024 && CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM==6 &&
+              CONFIG_ESP_WIFI_RX_BA_WIN==6 &&
               CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM==16 && CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM==6 &&
               CONFIG_ESP_WIFI_CACHE_TX_BUFFER_NUM==8 && CONFIG_LWIP_MAX_SOCKETS==10 &&
               CONFIG_LWIP_TCP_SND_BUF_DEFAULT==2880 && CONFIG_LWIP_TCP_WND_DEFAULT==2880 &&

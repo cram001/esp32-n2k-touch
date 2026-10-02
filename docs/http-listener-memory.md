@@ -67,7 +67,8 @@ conservative pressure mitigation to evaluate on the board, not proof of cause.
 | SPIRAM_USE_MALLOC | y (already the SDK default) | Keep PSRAM available to normal allocations. DMA and ordinary task stacks still require internal RAM. |
 | SPIRAM_MALLOC_ALWAYSINTERNAL | 1024, previously 16384 | Prefer PSRAM for more medium-size allocations. Preserves internal RAM, with extra PSRAM access latency. Smaller allocations can still consume internal RAM. |
 | SPIRAM_TRY_ALLOCATE_WIFI_LWIP | y | Supported network allocations prefer PSRAM with internal fallback. This does not move DMA buffers or all FreeRTOS queues to PSRAM. |
-| ESP_WIFI_STATIC_RX_BUFFER_NUM | 6, previously 10 | Fewer permanent approximately 1.6 KB DMA buffers; retains six, matching the default RX BA window. Less receive burst headroom. |
+| ESP_WIFI_STATIC_RX_BUFFER_NUM | 6, previously 10 | Fewer permanent approximately 1.6 KB DMA buffers; matches the explicitly pinned RX BA window. Less receive burst headroom. |
+| ESP_WIFI_RX_BA_WIN | 6, unchanged from the old profile | PSRAM-first would otherwise raise this to 16. Pin six to match static RX buffers. This deliberately sacrifices the SDK's recommended larger PSRAM throughput/compatibility profile for memory headroom; validate with the actual AP/station peers. |
 | ESP_WIFI_DYNAMIC_RX_BUFFER_NUM | 16, previously 32 | Bounds dynamic receive bursts. May reduce throughput during congestion. |
 | ESP_WIFI_STATIC_TX_BUFFER / NUM | y / 6 | PSRAM-first disables the dynamic TX choice in this SDK. Six buffers cost approximately 9.6 KB permanently and limit TX burst headroom; pinning avoids the new default of sixteen. |
 | ESP_WIFI_CACHE_TX_BUFFER_NUM | 8, new PSRAM profile default 32 | Bound cached TX packets, at the cost of less congestion buffering. |
