@@ -145,17 +145,17 @@ extern "C" void app_main(void)
                  static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
     };
 
-    // BLE controller initialization needs a contiguous internal allocation.
-    // Start it before Wi-Fi reserves its static RX/TX buffers. The firmware
-    // HTTP server remains off until the user explicitly opens the update window.
+    // Preserve the previously stable radio startup order. Unlike the old
+    // firmware, the HTTP server is no longer competing for heap during boot.
+    log_internal_heap("Heap before Wi-Fi");
+    const bool wifi_ok = wifi_service_start(settings.wifi);
+    if (!wifi_ok) ESP_LOGE(TAG, "Wi-Fi service failed to initialize");
+    log_internal_heap("Heap after Wi-Fi");
+
     log_internal_heap("Heap before SmartShunt BLE");
     const bool ble_ok = smartshunt_ble_start(settings);
     if (!ble_ok) ESP_LOGE(TAG, "SmartShunt BLE service failed to initialize");
     log_internal_heap("Heap after SmartShunt BLE");
-
-    const bool wifi_ok = wifi_service_start(settings.wifi);
-    if (!wifi_ok) ESP_LOGE(TAG, "Wi-Fi service failed to initialize");
-    log_internal_heap("Heap after Wi-Fi");
 
     // The local firmware web server is intentionally not started at boot.
     // It is enabled by the user for a 120-second update window and pauses BLE.
