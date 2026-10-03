@@ -791,37 +791,74 @@ void input_focus_cb(lv_event_t *event) {
     lv_obj_remove_flag(g_input_keyboard, LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(g_input_keyboard);
 }
+const char *operating_mode_label(OperatingMode mode) {
+    switch(mode) {
+    case OperatingMode::CanN2kBluetooth: return "MODE 1: CAN N2K + BLUETOOTH";
+    case OperatingMode::WifiN2k: return "MODE 2: WI-FI N2K";
+    case OperatingMode::FirmwareUpdate: return "MODE 3: FIRMWARE UPDATE";
+    }
+    return "MODE";
+}
 void input_mode_cb(lv_event_t *) {
-    g_input_draft.mode = g_input_draft.mode == N2kInputMode::Wired ? N2kInputMode::W2kTcp : N2kInputMode::Wired;
-    lv_label_set_text(button_label(g_input_mode), g_input_draft.mode == N2kInputMode::Wired ? "INPUT: WIRED CAN" : "INPUT: W2K-1 TCP");
+    if(g_mode_draft==OperatingMode::CanN2kBluetooth) g_mode_draft=OperatingMode::WifiN2k;
+    else if(g_mode_draft==OperatingMode::WifiN2k) g_mode_draft=OperatingMode::FirmwareUpdate;
+    else g_mode_draft=OperatingMode::CanN2kBluetooth;
+    lv_label_set_text(button_label(g_input_mode),operating_mode_label(g_mode_draft));
+    update_input_status();
 }
 void input_screen_cb(lv_event_t *) {
-    g_input_feedback = false; g_input_draft = g_settings.n2k_input;
-    lv_label_set_text(button_label(g_input_mode), g_input_draft.mode == N2kInputMode::Wired ? "INPUT: WIRED CAN" : "INPUT: W2K-1 TCP");
-    lv_textarea_set_text(g_input_ip, g_input_draft.ip.data());
-    char port[8]; std::snprintf(port, sizeof(port), "%u", g_input_draft.port);
-    lv_textarea_set_text(g_input_port, port);
-    input_keyboard_hide(); update_input_status(); lv_screen_load(g_input_screen);
+    g_input_feedback=false;
+    g_input_draft=g_settings.n2k_input;
+    g_mode_draft=g_settings.operating_mode;
+    lv_label_set_text(button_label(g_input_mode),operating_mode_label(g_mode_draft));
+    lv_textarea_set_text(g_input_ip,g_input_draft.ip.data());
+    char port[8];std::snprintf(port,sizeof(port),"%u",g_input_draft.port);
+    lv_textarea_set_text(g_input_port,port);
+    input_keyboard_hide();update_input_status();lv_screen_load(g_input_screen);
 }
-void input_back_cb(lv_event_t *) { input_keyboard_hide(); lv_screen_load(g_settings_screen); }
+void input_back_cb(lv_event_t *) {input_keyboard_hide();lv_screen_load(g_settings_screen);}
 void input_save_cb(lv_event_t *) {
     input_keyboard_hide();
-    std::snprintf(g_input_draft.ip.data(), g_input_draft.ip.size(), "%s", lv_textarea_get_text(g_input_ip));
-    const char *text = lv_textarea_get_text(g_input_port); char *end = nullptr;
-    const unsigned long port = std::strtoul(text, &end, 10);
-    if (g_input_draft.mode == N2kInputMode::W2kTcp &&
-        (!*text || *end || port > 65535 || !n2k_endpoint_valid(g_input_draft.ip.data(), static_cast<uint16_t>(port)))) {
-        g_input_feedback = true; lv_label_set_text(g_input_status, "Enter a valid IPv4 address and port 1-65535"); return;
+    std::snprintf(g_input_draft.ip.data(),g_input_draft.ip.size(),"%s",lv_textarea_get_text(g_input_ip));
+    const char *text=lv_textarea_get_text(g_input_port);char *end=nullptr;
+    const unsigned long port=std::strtoul(text,&end,10);
+    if(g_mode_draft==OperatingMode::WifiN2k &&
+       (!*text || *end || port>65535 || !n2k_endpoint_valid(g_input_draft.ip.data(),static_cast<uint16_t>(port)))) {
+        g_input_feedback=true;lv_label_set_text(g_input_status,"Mode 2 requires a valid W2K-1 IPv4 address and port");return;
     }
-    if (*text && !*end && port && port <= 65535) g_input_draft.port = static_cast<uint16_t>(port);
-    const N2kInputConfig previous = g_settings.n2k_input;
-    g_settings.n2k_input = g_input_draft;
-    // Keep a failed save visible, and do not switch the running source.
-    if (!settings_save(g_settings)) {
-        g_settings.n2k_input = previous;
-        g_input_feedback = true; lv_label_set_text(g_input_status, "Could not save input settings; please retry"); return;
+    if(*text && !*end && port && port<=65535) g_input_draft.port=static_cast<uint16_t>(port);
+
+    AppSettings candidate=g_settings;
+    candidate.operating_mode=g_mode_draft;
+    if(g_mode_draft==OperatingMode::WifiN2k) {
+        candidate.n2k_input.mode=N2kInputMode::W2kTcp;
+        candidate.n2k_input.ip=g_input_draft.ip;
+        candidate.n2k_input.port=g_input_draft.port;
+        WifiConfig wifi=candidate.wifi;wifi.enabled=true;wifi.mode=WifiMode::Station;
+        const char *reason=nullptr;
+        if(!wifi_config_valid(wifi,&reason)) {
+            g_input_feedback=true;lv_label_set_text_fmt(g_input_status,"Configure Station Wi-Fi first: %s",reason?reason:"invalid Wi-Fi settings");return;
+        }
+    } else if(g_mode_draft==OperatingMode::CanN2kBluetooth) {
+        candidate.n2k_input.mode=N2kInputMode::Wired;
+    } else {
+        WifiConfig wifi=candidate.wifi;wifi.enabled=true;
+        const char *reason=nullptr;
+        if(!wifi_config_valid(wifi,&reason)) {
+            g_input_feedback=true;lv_label_set_text_fmt(g_input_status,"Configure AP or Station Wi-Fi first: %s",reason?reason:"invalid Wi-Fi settings");return;
+        }
+        if(g_settings.operating_mode!=OperatingMode::FirmwareUpdate)
+            candidate.return_mode=g_settings.operating_mode==OperatingMode::WifiN2k?OperatingMode::WifiN2k:OperatingMode::CanN2kBluetooth;
     }
-    g_input_feedback = false; n2k_bridge_apply_settings(g_settings); update_input_status();
+    if(g_mode_draft!=OperatingMode::FirmwareUpdate) candidate.return_mode=g_mode_draft;
+
+    if(!settings_save(candidate)) {
+        g_input_feedback=true;lv_label_set_text(g_input_status,"Could not save operating mode; please retry");return;
+    }
+    g_settings=candidate;
+    lv_label_set_text(g_input_status,"Mode saved. Rebooting...");
+    vTaskDelay(pdMS_TO_TICKS(150));
+    esp_restart();
 }
 void source_choice_cb(lv_event_t *event) {
     const size_t item=reinterpret_cast<uintptr_t>(lv_event_get_user_data(event));
