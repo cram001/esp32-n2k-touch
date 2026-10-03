@@ -274,14 +274,21 @@ esp_err_t page_handler(httpd_req_t *request) {
 document.getElementById('upload').onclick=async()=>{if(busy)return;const f=document.getElementById('file').files[0];if(!f){status.textContent='Choose firmware.bin first';return;}busy=true;status.textContent='Uploading and validating. Keep power connected.';try{const r=await fetch('/upload',{method:'POST',headers:{'X-OTA-Token':token,'Content-Type':'application/octet-stream'},body:f});status.textContent=await r.text();}catch(e){status.textContent='Connection interrupted. Check display status before retrying.';}finally{busy=false;}};
 document.getElementById('reboot').onclick=async()=>{if(busy)return;try{const r=await fetch('/reboot',{method:'POST',headers:{'X-OTA-Token':token}});status.textContent=await r.text();}catch(e){status.textContent='Reconnect to the display after it restarts.';}};
 </script></html>)HTML";
-    char html[2600];
+    constexpr size_t HTML_SIZE=2600;
+    char *html=static_cast<char *>(heap_caps_malloc(HTML_SIZE,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
+    if(!html) return httpd_resp_send_err(request,HTTPD_500_INTERNAL_SERVER_ERROR,"Page memory unavailable");
     const bool layout_ok=ota_partition_layout_valid();
-    const int len = std::snprintf(html,sizeof(html),page,layout_ok?"Ready for firmware upload.":"Upload unavailable: incompatible flash layout. Install compatible firmware using USB.",g_upload_token);
-    if (len < 0 || static_cast<size_t>(len) >= sizeof(html)) return httpd_resp_send_err(request,HTTPD_500_INTERNAL_SERVER_ERROR,"Page unavailable");
+    const int len = std::snprintf(html,HTML_SIZE,page,layout_ok?"Ready for firmware upload.":"Upload unavailable: incompatible flash layout. Install compatible firmware using USB.",g_upload_token);
+    if (len < 0 || static_cast<size_t>(len) >= HTML_SIZE) {
+        heap_caps_free(html);
+        return httpd_resp_send_err(request,HTTPD_500_INTERNAL_SERVER_ERROR,"Page unavailable");
+    }
     httpd_resp_set_type(request,"text/html");
     httpd_resp_set_hdr(request,"Cache-Control","no-store");
     httpd_resp_set_hdr(request,"Content-Security-Policy","default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors 'none'");
-    return httpd_resp_send(request,html,len);
+    const esp_err_t sent=httpd_resp_send(request,html,len);
+    heap_caps_free(html);
+    return sent;
 }
 
 esp_err_t upload_handler(httpd_req_t *request) {
@@ -302,7 +309,13 @@ esp_err_t upload_handler(httpd_req_t *request) {
     esp_ota_handle_t handle = 0;
     bool handle_open = false;
     esp_err_t err = ESP_OK;
-    char buffer[4096];
+    constexpr size_t UPLOAD_BUFFER_SIZE=4096;
+    char *buffer=static_cast<char *>(heap_caps_malloc(UPLOAD_BUFFER_SIZE,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
+    if(!buffer) {
+        set_status(OtaState::Failed,0,ESP_ERR_NO_MEM,"Upload buffer allocation failed");
+        set_active(false);
+        return httpd_resp_send_err(request,HTTPD_500_INTERNAL_SERVER_ERROR,"Upload memory unavailable");
+    }
     size_t received = 0;
     // Accumulate the whole prefix even if TCP returns short reads.
     const int64_t deadline = esp_timer_get_time()+300000000LL;
@@ -336,7 +349,7 @@ esp_err_t upload_handler(httpd_req_t *request) {
     }
     if (err == ESP_OK) err=esp_ota_write(handle,buffer,received);
     while (err == ESP_OK && received < request->content_len) {
-        const int n=receive(buffer,std::min(sizeof(buffer),request->content_len-received));
+        const int n=receive(buffer,std::min(UPLOAD_BUFFER_SIZE,request->content_len-received));
         if (n < 0) {err=ESP_ERR_TIMEOUT;break;}
         if (!n) continue;
         err=esp_ota_write(handle,buffer,n);
@@ -350,6 +363,7 @@ esp_err_t upload_handler(httpd_req_t *request) {
     }
     if (handle_open) esp_ota_abort(handle);
     if (err == ESP_OK) err=esp_ota_set_boot_partition(target);
+    heap_caps_free(buffer);
     if (err != ESP_OK) {
         set_status(OtaState::Failed,0,err,"Upload failed; current firmware retained");
         set_active(false);
@@ -382,7 +396,7 @@ void local_server_worker(void *) {
         return;
     }
     // Give controller/Bluedroid deinit a short interval to return heap before
-    // creating the 10 KB HTTP task stack.
+    // creating the HTTP task stack. Large request buffers live in PSRAM.
     vTaskDelay(pdMS_TO_TICKS(100));
     uint8_t random[16];esp_fill_random(random,sizeof(random));
     for(size_t i=0;i<sizeof(random);++i)std::snprintf(g_upload_token+i*2,3,"%02x",random[i]);
@@ -514,7 +528,7 @@ bool ota_enable_local_server(uint32_t seconds)
     g_server_deadline_us=esp_timer_get_time()+duration;
     if(g_server_worker) return true; // Extend the active window.
     publish_server_status({LocalServerStage::Starting,ESP_OK,0,0,false},server_heap());
-    if(xTaskCreate(local_server_worker,"http_window",4096,nullptr,1,&g_server_worker)!=pdPASS) {
+    if(xTaskCreate(local_server_worker,"http_window",2048,nullptr,1,&g_server_worker)!=pdPASS) {
         g_server_deadline_us=0;
         g_server_worker=nullptr;
         publish_server_status({LocalServerStage::StartFailed,ESP_ERR_NO_MEM,0,0,false},server_heap());
