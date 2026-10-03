@@ -10,6 +10,7 @@
 #include "bsp/esp-bsp.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "esp_app_desc.h"
 #include "esp_ota_ops.h"
 #include "esp_rom_sys.h"
@@ -23,24 +24,22 @@ static_assert(CONFIG_ESP_MAIN_TASK_STACK_SIZE >= 8192,
 constexpr const char *TAG = "app";
 constexpr gpio_num_t BOARD_I2C_SDA = GPIO_NUM_15;
 constexpr gpio_num_t BOARD_I2C_SCL = GPIO_NUM_7;
-bool g_startup_prerequisites=false; // assigned before health task creation
-
-void startup_health_task(void *) {
+void finish_startup_health(bool prerequisites) {
     const int64_t started=esp_timer_get_time();
     for(;;) {
-        const auto decision=startup_health_decision(g_startup_prerequisites,
-            ota_local_server_status().stage==LocalServerStage::Listening,ui_is_healthy(),esp_timer_get_time()-started);
+        const auto decision=startup_health_decision(prerequisites,ui_is_healthy(),esp_timer_get_time()-started);
         if(decision==StartupHealthDecision::Confirm) {
-            ESP_LOGI(TAG,"Startup health passed: HTTP listener ready and UI healthy");
-            ota_confirm_running_image();break;
+            ESP_LOGI(TAG,"Startup health passed: selected mode and UI healthy");
+            ota_confirm_running_image();
+            return;
         }
         if(decision==StartupHealthDecision::Reject) {
-            ESP_LOGE(TAG,"Startup health failed: prerequisites or HTTP/UI readiness deadline");
-            ota_reject_running_image();break;
+            ESP_LOGE(TAG,"Startup health failed: selected-mode prerequisite or UI readiness deadline");
+            ota_reject_running_image();
+            return;
         }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
-    vTaskDelete(nullptr);
 }
 
 bool board_i2c_recover()
@@ -113,7 +112,6 @@ extern "C" void app_main(void)
     const AppSettings settings = settings_load();
     const bool sources_ok = settings_ok && n2k_sources_init();
     ota_prepare();
-    wifi_service_prepare();
 
     if (!board_i2c_recover()) {
         ESP_LOGW(TAG, "I2C recovery was incomplete; continuing so BSP initialization can report the real bus error");
@@ -136,31 +134,40 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "Display and touch UI initialized");
     ESP_LOGI(TAG, "Main stack minimum free after settings/UI: %u bytes", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
 
-    const bool wifi_ok = wifi_service_start(settings.wifi);
-    if (!wifi_ok) ESP_LOGE(TAG, "Wi-Fi service failed to initialize");
+    auto log_internal_heap=[](const char *phase) {
+        ESP_LOGI(TAG,"%s: internal free=%u largest=%u; PSRAM free=%u largest=%u",phase,
+                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+                 static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
+                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+                 static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
+    };
 
-    // Bring the local listener up before BLE/CAN initialization. A readable
-    // page must not depend on those services or on OTA partition compatibility.
-    const bool ota_scheduled = ota_start_local_server();
-    if (!ota_scheduled) ESP_LOGE(TAG, "Local HTTP startup worker failed to initialize");
+    bool source_ok=false;
     const bool ota_layout_ok=ota_partition_layout_valid();
 
-    const bool ble_ok = smartshunt_ble_start(settings);
-    if (!ble_ok) ESP_LOGE(TAG, "SmartShunt BLE service failed to initialize");
-
-    const bool n2k_ok = n2k_bridge_start(settings);
-    if (!n2k_ok) ESP_LOGE(TAG, "NMEA 2000 service failed to initialize");
-
+    if(settings.n2k_input.mode==N2kInputMode::Wired) {
+        ESP_LOGI(TAG,"NMEA 2000 source: CAN/TWAI; Victron Bluetooth enabled; Wi-Fi disabled");
+        log_internal_heap("CAN source before Bluetooth");
+        const bool ble_ok=smartshunt_ble_start(settings);
+        if(!ble_ok) ESP_LOGE(TAG,"SmartShunt BLE service failed to initialize");
+        log_internal_heap("CAN source after Bluetooth");
+        const bool n2k_ok=n2k_bridge_start(settings);
+        if(!n2k_ok) ESP_LOGE(TAG,"CAN NMEA 2000 service failed to initialize");
+        source_ok=ble_ok && n2k_ok;
+    } else {
+        ESP_LOGI(TAG,"NMEA 2000 source: Wi-Fi/W2K-1; CAN and Bluetooth disabled");
+        WifiConfig wifi=settings.wifi;
+        wifi.enabled=true;
+        wifi.mode=WifiMode::Station;
+        log_internal_heap("Wi-Fi source before Wi-Fi");
+        const bool wifi_ok=wifi_service_start(wifi);
+        if(!wifi_ok) ESP_LOGE(TAG,"Wi-Fi service failed to initialize");
+        log_internal_heap("Wi-Fi source after Wi-Fi");
+        const bool n2k_ok=n2k_bridge_start(settings);
+        if(!n2k_ok) ESP_LOGE(TAG,"Wi-Fi NMEA 2000 input failed to initialize");
+        source_ok=wifi_ok && n2k_ok;
+    }
 
     ESP_LOGI(TAG, "Main stack minimum free after services: %u bytes", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
-
-    // Confirm only after local services initialize. Router availability is not
-    // a health requirement; Wi-Fi initialization itself must succeed.
-    // A late listener counts only if actually Listening within 25 seconds;
-    // scheduling the worker is never sufficient to confirm an OTA trial.
-    g_startup_prerequisites=settings_ok && sources_ok && wifi_ok && ble_ok && n2k_ok && ota_scheduled && ota_layout_ok;
-    if(xTaskCreate(startup_health_task,"startup_health",4096,nullptr,1,nullptr)!=pdPASS) {
-        ESP_LOGE(TAG,"Startup health task allocation failed; rejecting pending OTA image");
-        ota_reject_running_image();
-    }
+    finish_startup_health(settings_ok && sources_ok && source_ok && ota_layout_ok);
 }

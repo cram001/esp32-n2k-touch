@@ -303,13 +303,10 @@ void refresh_runtime(const AppSettings &settings)
 }
 }
 
-bool smartshunt_ble_start(const AppSettings &settings)
+namespace {
+bool start_ble_runtime()
 {
-    if (g_mutex == nullptr) g_mutex = xSemaphoreCreateMutex();
-    if (g_mutex == nullptr) return false;
-    refresh_runtime(settings);
     if (g_ble_initialized) return true;
-
     esp_err_t err = esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT);
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) ESP_LOGW(TAG, "Unable to release Classic BT memory: %s", esp_err_to_name(err));
     esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
@@ -317,8 +314,7 @@ bool smartshunt_ble_start(const AppSettings &settings)
     if ((err = esp_bt_controller_enable(ESP_BT_MODE_BLE)) != ESP_OK && err != ESP_ERR_INVALID_STATE) return false;
     if ((err = esp_bluedroid_init()) != ESP_OK && err != ESP_ERR_INVALID_STATE) return false;
     if ((err = esp_bluedroid_enable()) != ESP_OK && err != ESP_ERR_INVALID_STATE) return false;
-
-    ESP_ERROR_CHECK(esp_ble_gap_register_callback(gap_callback));
+    if ((err = esp_ble_gap_register_callback(gap_callback)) != ESP_OK) return false;
     static esp_ble_scan_params_t scan_params{};
     scan_params.scan_type = BLE_SCAN_TYPE_ACTIVE;
     scan_params.own_addr_type = BLE_ADDR_TYPE_PUBLIC;
@@ -326,10 +322,49 @@ bool smartshunt_ble_start(const AppSettings &settings)
     scan_params.scan_interval = 0x80;
     scan_params.scan_window = 0x30;
     scan_params.scan_duplicate = BLE_SCAN_DUPLICATE_DISABLE;
-    ESP_ERROR_CHECK(esp_ble_gap_set_scan_params(&scan_params));
+    if ((err = esp_ble_gap_set_scan_params(&scan_params)) != ESP_OK) return false;
     g_ble_initialized = true;
     ESP_LOGI(TAG, "Active Victron BLE discovery / SmartShunt Instant Readout scanner started");
     return true;
+}
+}
+
+bool smartshunt_ble_start(const AppSettings &settings)
+{
+    if (g_mutex == nullptr) g_mutex = xSemaphoreCreateMutex();
+    if (g_mutex == nullptr) return false;
+    refresh_runtime(settings);
+    return start_ble_runtime();
+}
+
+bool smartshunt_ble_pause()
+{
+    if (!g_ble_initialized) return true;
+    esp_ble_gap_stop_scanning();
+    esp_err_t err = esp_bluedroid_disable();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return false;
+    err = esp_bluedroid_deinit();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return false;
+    err = esp_bt_controller_disable();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return false;
+    err = esp_bt_controller_deinit();
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return false;
+    g_ble_initialized = false;
+    ESP_LOGI(TAG, "SmartShunt BLE paused and controller memory released for web update");
+    return true;
+}
+
+bool smartshunt_ble_resume()
+{
+    if (g_mutex == nullptr) return false;
+    const bool ok = start_ble_runtime();
+    if (!ok) ESP_LOGE(TAG, "Unable to restore SmartShunt BLE after web update");
+    return ok;
+}
+
+bool smartshunt_ble_is_running()
+{
+    return g_ble_initialized;
 }
 
 void smartshunt_ble_apply_settings(const AppSettings &settings)

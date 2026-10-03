@@ -318,3 +318,4 @@ bool settings_restore_brightness()
     if(err!=ESP_OK)ESP_LOGW(TAG,"Brightness recovery could not be saved: %s",esp_err_to_name(err));
     return err==ESP_OK;
 }
+

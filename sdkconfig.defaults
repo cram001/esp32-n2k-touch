@@ -11,7 +11,7 @@ CONFIG_SPIRAM_RODATA=y
 CONFIG_SPIRAM_SPEED_80M=y
 # Keep small UI/network allocations from consuming the DMA/task-stack heap.
 CONFIG_SPIRAM_USE_MALLOC=y
-CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=1024
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=256
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 # PSRAM-first Wi-Fi requires static TX in ESP-IDF 5.5.3. Bound its DMA
 # buffers explicitly rather than accepting the larger PSRAM-enabled defaults.
@@ -23,6 +23,8 @@ CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM=6
 CONFIG_ESP_WIFI_CACHE_TX_BUFFER_NUM=8
 # Four HTTP sessions + three HTTP infrastructure sockets + W2K/HTTPS/headroom.
 CONFIG_LWIP_MAX_SOCKETS=10
+# Local AP/OTA and W2K are IPv4-only; disabling IPv6 avoids unused lwIP state.
+CONFIG_LWIP_IPV6=n
 # Two MSS per direction: lower peak socket memory, lower bulk-upload throughput.
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=2880
 CONFIG_LWIP_TCP_WND_DEFAULT=2880

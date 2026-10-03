@@ -84,3 +84,30 @@ jobs:
             grep -Ein 'not found in any of the input files|unknown[[:space:]_-]+kconfig[[:space:]_-]+symbol|unrecognized[[:space:]_-]+symbol' build.log
             exit 1
           fi
+
+      - name: Package validated firmware artifacts
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          build=.pio/build/waveshare-touch-4
+          mkdir -p firmware-artifact
+          cp "$build/firmware.bin" firmware-artifact/
+          cp "$build/partitions.bin" firmware-artifact/
+          cp "$build/bootloader.bin" firmware-artifact/ 2>/dev/null || true
+          cp "$build/bootloader/bootloader.bin" firmware-artifact/ 2>/dev/null || true
+          cp "$build/partition_table/partition-table.bin" firmware-artifact/ 2>/dev/null || true
+          cp "$build"/ota_data_initial.bin firmware-artifact/ 2>/dev/null || true
+          cp "$build"/flash_args firmware-artifact/ 2>/dev/null || true
+          cp "$build"/flash_project_args firmware-artifact/ 2>/dev/null || true
+          printf '%s\n' "${{ github.sha }}" > firmware-artifact/commit.txt
+          sha256sum firmware-artifact/*.bin > firmware-artifact/SHA256SUMS.txt
+
+      - name: Upload validated firmware
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: waveshare-touch-4-firmware
+          path: firmware-artifact/
+          if-no-files-found: error
+          retention-days: 14

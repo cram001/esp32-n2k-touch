@@ -35,5 +35,10 @@ int main(){
     scan.adv_data_len=sizeof(adv);scan.scan_rsp_len=0;std::memcpy(scan.ble_adv,adv,sizeof(adv));
     handle_victron_advertisement(scan);
     assert(smartshunt_ble_get_discovered(devices)==1 && std::strstr(devices[0].name.data(),"Victron"));
-    std::puts("PASS: real BLE service active scan, key-independent discovery, cached names, known-MAC responses, bounds and expiry");
+    assert(smartshunt_ble_is_running());
+    assert(smartshunt_ble_pause());
+    assert(!smartshunt_ble_is_running());
+    assert(smartshunt_ble_resume());
+    assert(smartshunt_ble_is_running());
+    std::puts("PASS: real BLE service active scan, key-independent discovery, cached names, pause/resume, known-MAC responses, bounds and expiry");
 }

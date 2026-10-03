@@ -25,6 +25,8 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "esp_app_desc.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 namespace {
 constexpr const char *TAG = "ui";
@@ -152,6 +154,7 @@ uint32_t g_wifi_scan_generation = UINT32_MAX;
 lv_obj_t *g_ota_screen = nullptr;
 lv_obj_t *g_ota_url = nullptr;
 lv_obj_t *g_ota_status = nullptr;
+lv_obj_t *g_ota_web_button = nullptr;
 lv_obj_t *g_ota_keyboard = nullptr;
 char g_ota_feedback[128]{};
 uint32_t g_ota_feedback_time=0;
@@ -281,9 +284,16 @@ void apply_theme()
 
 void apply_runtime_settings()
 {
-    wifi_service_apply_config(g_settings.wifi);
-    smartshunt_ble_apply_settings(g_settings);
-    n2k_bridge_apply_settings(g_settings);
+    if(g_settings.n2k_input.mode==N2kInputMode::Wired) {
+        smartshunt_ble_apply_settings(g_settings);
+        n2k_bridge_apply_settings(g_settings);
+    } else {
+        WifiConfig wifi=g_settings.wifi;
+        wifi.enabled=true;
+        wifi.mode=WifiMode::Station;
+        wifi_service_apply_config(wifi);
+        n2k_bridge_apply_settings(g_settings);
+    }
 }
 
 void persist()
@@ -449,8 +459,9 @@ void update_wifi_status()
     case WifiState::Disconnected: std::snprintf(b,sizeof(b),"%s\nReason %d; retrying",st.message.data(),st.disconnect_reason); break;
     case WifiState::AccessPoint: {
         const auto server=ota_local_server_status();
-        if(server.stage==LocalServerStage::Listening)std::snprintf(b,sizeof(b),"AP: %s\nUpdate page: http://%s",st.ssid.data(),st.ip.data());
-        else std::snprintf(b,sizeof(b),"AP: %s\nWeb: %s (0x%x)\nSocket errno: %d; attempt %u/10%s",st.ssid.data(),ota_local_server_stage_name(server.stage),server.error,server.socket_error,server.attempts,server.retry_pending?"; retry pending":"");
+        if(server.stage==LocalServerStage::Listening)std::snprintf(b,sizeof(b),"AP: %s\nUpdate page: http://%s\n%us remaining",st.ssid.data(),st.ip.data(),static_cast<unsigned>(ota_local_server_seconds_remaining()));
+        else if(!ota_local_server_window_active())std::snprintf(b,sizeof(b),"AP: %s\nWeb update: disabled",st.ssid.data());
+        else std::snprintf(b,sizeof(b),"AP: %s\nWeb: %s (0x%x)\nSocket errno: %d",st.ssid.data(),ota_local_server_stage_name(server.stage),server.error,server.socket_error);
         break;
     }
     case WifiState::Error: std::snprintf(b,sizeof(b),"Wi-Fi error 0x%x\n%s",st.last_error,st.message.data()); break;
@@ -583,7 +594,14 @@ void wifi_save_cb(lv_event_t *) {
     AppSettings candidate=g_settings;candidate.wifi=g_wifi_draft;
     if(!settings_save(candidate)) { wifi_feedback("Save failed; settings were not applied");return; }
     g_settings=candidate;
-    if(!wifi_service_apply_config(candidate.wifi)) { wifi_feedback("Saved; Wi-Fi busy. Tap Save again to apply.");return; }
+    if(g_settings.n2k_input.mode==N2kInputMode::Wired) {
+        wifi_feedback("Saved for Wi-Fi NMEA 2000 source");
+        return;
+    }
+    WifiConfig runtime=candidate.wifi;
+    runtime.enabled=true;
+    runtime.mode=WifiMode::Station;
+    if(!wifi_service_apply_config(runtime)) {wifi_feedback("Saved; Wi-Fi is switching or busy");return;}
     wifi_mask_cb(nullptr);
     wifi_feedback("Saved; applying Wi-Fi settings");
 }
@@ -627,8 +645,16 @@ void update_ota_status() {
     if(g_ota_feedback[0] && lv_tick_elaps(g_ota_feedback_time)<6000) return;
     g_ota_feedback[0]=0;
     const auto st=ota_get_status();const auto wifi=wifi_service_get_status();const auto server=ota_local_server_status();char text[360];
-    std::snprintf(text,sizeof(text),"Version: %s\n%s (%d%%)  error: 0x%x\nWeb: %s (0x%x)\nSocket errno: %d; attempt %u/10%s\nOTA layout: %s\nAP page: http://%s",ota_running_version(),st.message[0]?st.message:"Enter HTTPS URL or use AP upload",st.progress_percent,st.last_error,
-        ota_local_server_stage_name(server.stage),server.error,server.socket_error,server.attempts,server.retry_pending?"; retry pending":"",ota_partition_layout_valid()?"ready":"incompatible; use USB",wifi.ip[0]?wifi.ip.data():"connect-to-AP");
+    const uint32_t remaining=ota_local_server_seconds_remaining();
+    if(g_ota_web_button) lv_label_set_text(button_label(g_ota_web_button),
+        ota_local_server_window_active()?"DISABLE WEB UPDATE":"ENABLE WEB UPDATE (120s)");
+    if(server.stage==LocalServerStage::Listening) {
+        std::snprintf(text,sizeof(text),"Version: %s\n%s (%d%%)  error: 0x%x\nWeb: ACTIVE - %us remaining\nBluetooth: paused\nAP page: http://%s\nOTA layout: %s",ota_running_version(),st.message[0]?st.message:"Ready for local upload",st.progress_percent,st.last_error,static_cast<unsigned>(remaining),wifi.ip[0]?wifi.ip.data():"192.168.4.1",ota_partition_layout_valid()?"ready":"incompatible; use USB");
+    } else {
+        std::snprintf(text,sizeof(text),"Version: %s\n%s (%d%%)  error: 0x%x\nWeb: %s%s\nBluetooth: normal\nOTA layout: %s",ota_running_version(),st.message[0]?st.message:"Enter HTTPS URL or enable AP web update",st.progress_percent,st.last_error,
+            ota_local_server_window_active()?ota_local_server_stage_name(server.stage):"disabled",
+            server.error?" (startup error)":"",ota_partition_layout_valid()?"ready":"incompatible; use USB");
+    }
     lv_label_set_text(g_ota_status,text);
 }
 void ota_screen_cb(lv_event_t *) { hide_wifi_keyboard();lv_screen_load(g_ota_screen);update_ota_status(); }
@@ -636,6 +662,20 @@ void ota_start_cb(lv_event_t *) {
     g_ota_feedback[0]=0;
     if(!wifi_service_is_connected()) {ota_feedback("HTTPS update needs a station connection");return;}
     if(!ota_start_https(lv_textarea_get_text(g_ota_url))) ota_feedback("Invalid HTTPS URL, scan busy, or update already active");
+}
+void ota_web_cb(lv_event_t *) {
+    g_ota_feedback[0]=0;
+    if(ota_local_server_window_active()) {
+        if(!ota_disable_local_server()) ota_feedback("Web update cannot stop during upload or while reboot is ready");
+        else ota_feedback("Stopping web update; Bluetooth will resume");
+        return;
+    }
+    if(wifi_service_get_status().state!=WifiState::AccessPoint) {
+        ota_feedback("Enable and save Access Point mode first");
+        return;
+    }
+    if(!ota_enable_local_server(120)) ota_feedback("Could not start web update window");
+    else ota_feedback("Starting web update; Bluetooth paused for up to 120 seconds");
 }
 void ota_reboot_cb(lv_event_t *) {if(ota_get_status().state==OtaState::ReadyToReboot)esp_restart();}
 void ota_focus_cb(lv_event_t *) {lv_keyboard_set_textarea(g_ota_keyboard,g_ota_url);lv_obj_remove_flag(g_ota_keyboard,LV_OBJ_FLAG_HIDDEN);}
@@ -734,16 +774,22 @@ void boot_timer_cb(lv_timer_t *timer)
 }
 void update_input_status()
 {
-    const N2kInputStatus input = n2k_input_status();
-    if (g_input_status && !g_input_feedback) {
-        lv_label_set_text_fmt(g_input_status, "%s\nMessages: %lu  Rejected: %lu  Dropped: %lu\nSocket error: %d",
-            input.message.data(), static_cast<unsigned long>(input.received),
-            static_cast<unsigned long>(input.rejected), static_cast<unsigned long>(input.dropped), input.socket_error);
+    const N2kInputStatus input=n2k_input_status();
+    if(g_input_status && !g_input_feedback) {
+        if(g_input_draft.mode==N2kInputMode::Wired)
+            lv_label_set_text(g_input_status,"Source: CAN / TWAI\nVictron Bluetooth enabled; Wi-Fi N2K disabled.");
+        else
+            lv_label_set_text_fmt(g_input_status,"Source: Wi-Fi / W2K-1 TCP\n%s\nMessages: %lu  Rejected: %lu  Dropped: %lu",
+                input.message.data(),static_cast<unsigned long>(input.received),
+                static_cast<unsigned long>(input.rejected),static_cast<unsigned long>(input.dropped));
     }
-    if (g_boot_status) {
-        const WifiStatus wifi = wifi_service_get_status();
-        lv_label_set_text_fmt(g_boot_status, "Wi-Fi: %s\nN2K: %s\nSmartShunt BLE starting in background",
-            wifi.message.data(), input.message.data());
+    if(g_boot_status) {
+        if(g_settings.n2k_input.mode==N2kInputMode::Wired)
+            lv_label_set_text(g_boot_status,"NMEA 2000: CAN / TWAI\nVictron Bluetooth enabled");
+        else {
+            const WifiStatus wifi=wifi_service_get_status();
+            lv_label_set_text_fmt(g_boot_status,"NMEA 2000: Wi-Fi / W2K-1\nWi-Fi: %s\nN2K: %s",wifi.message.data(),input.message.data());
+        }
     }
 }
 void input_keyboard_hide() {
@@ -761,36 +807,56 @@ void input_focus_cb(lv_event_t *event) {
     lv_obj_move_foreground(g_input_keyboard);
 }
 void input_mode_cb(lv_event_t *) {
-    g_input_draft.mode = g_input_draft.mode == N2kInputMode::Wired ? N2kInputMode::W2kTcp : N2kInputMode::Wired;
-    lv_label_set_text(button_label(g_input_mode), g_input_draft.mode == N2kInputMode::Wired ? "INPUT: WIRED CAN" : "INPUT: W2K-1 TCP");
+    g_input_draft.mode=g_input_draft.mode==N2kInputMode::Wired?N2kInputMode::W2kTcp:N2kInputMode::Wired;
+    lv_label_set_text(button_label(g_input_mode),
+        g_input_draft.mode==N2kInputMode::Wired?"SOURCE: CAN NMEA 2000":"SOURCE: WI-FI NMEA 2000");
+    update_input_status();
 }
 void input_screen_cb(lv_event_t *) {
-    g_input_feedback = false; g_input_draft = g_settings.n2k_input;
-    lv_label_set_text(button_label(g_input_mode), g_input_draft.mode == N2kInputMode::Wired ? "INPUT: WIRED CAN" : "INPUT: W2K-1 TCP");
-    lv_textarea_set_text(g_input_ip, g_input_draft.ip.data());
-    char port[8]; std::snprintf(port, sizeof(port), "%u", g_input_draft.port);
-    lv_textarea_set_text(g_input_port, port);
-    input_keyboard_hide(); update_input_status(); lv_screen_load(g_input_screen);
+    g_input_feedback=false;
+    g_input_draft=g_settings.n2k_input;
+    lv_label_set_text(button_label(g_input_mode),
+        g_input_draft.mode==N2kInputMode::Wired?"SOURCE: CAN NMEA 2000":"SOURCE: WI-FI NMEA 2000");
+    lv_textarea_set_text(g_input_ip,g_input_draft.ip.data());
+    char port[8];std::snprintf(port,sizeof(port),"%u",g_input_draft.port);
+    lv_textarea_set_text(g_input_port,port);
+    input_keyboard_hide();update_input_status();lv_screen_load(g_input_screen);
 }
-void input_back_cb(lv_event_t *) { input_keyboard_hide(); lv_screen_load(g_settings_screen); }
+void input_back_cb(lv_event_t *) {input_keyboard_hide();lv_screen_load(g_settings_screen);}
 void input_save_cb(lv_event_t *) {
     input_keyboard_hide();
-    std::snprintf(g_input_draft.ip.data(), g_input_draft.ip.size(), "%s", lv_textarea_get_text(g_input_ip));
-    const char *text = lv_textarea_get_text(g_input_port); char *end = nullptr;
-    const unsigned long port = std::strtoul(text, &end, 10);
-    if (g_input_draft.mode == N2kInputMode::W2kTcp &&
-        (!*text || *end || port > 65535 || !n2k_endpoint_valid(g_input_draft.ip.data(), static_cast<uint16_t>(port)))) {
-        g_input_feedback = true; lv_label_set_text(g_input_status, "Enter a valid IPv4 address and port 1-65535"); return;
+    std::snprintf(g_input_draft.ip.data(),g_input_draft.ip.size(),"%s",lv_textarea_get_text(g_input_ip));
+    const char *text=lv_textarea_get_text(g_input_port);char *end=nullptr;
+    const unsigned long port=std::strtoul(text,&end,10);
+    if(g_input_draft.mode==N2kInputMode::W2kTcp &&
+       (!*text || *end || port>65535 || !n2k_endpoint_valid(g_input_draft.ip.data(),static_cast<uint16_t>(port)))) {
+        g_input_feedback=true;lv_label_set_text(g_input_status,"Wi-Fi NMEA 2000 requires a valid W2K-1 IPv4 address and port");return;
     }
-    if (*text && !*end && port && port <= 65535) g_input_draft.port = static_cast<uint16_t>(port);
-    const N2kInputConfig previous = g_settings.n2k_input;
-    g_settings.n2k_input = g_input_draft;
-    // Keep a failed save visible, and do not switch the running source.
-    if (!settings_save(g_settings)) {
-        g_settings.n2k_input = previous;
-        g_input_feedback = true; lv_label_set_text(g_input_status, "Could not save input settings; please retry"); return;
+    if(*text && !*end && port && port<=65535) g_input_draft.port=static_cast<uint16_t>(port);
+
+    AppSettings candidate=g_settings;
+    candidate.n2k_input=g_input_draft;
+    if(candidate.n2k_input.mode==N2kInputMode::W2kTcp) {
+        WifiConfig wifi=candidate.wifi;wifi.enabled=true;wifi.mode=WifiMode::Station;
+        const char *reason=nullptr;
+        if(!wifi_config_valid(wifi,&reason)) {
+            g_input_feedback=true;lv_label_set_text_fmt(g_input_status,"Configure Station Wi-Fi first: %s",reason?reason:"invalid Wi-Fi settings");return;
+        }
     }
-    g_input_feedback = false; n2k_bridge_apply_settings(g_settings); update_input_status();
+    const bool source_changed=candidate.n2k_input.mode!=g_settings.n2k_input.mode;
+    if(!settings_save(candidate)) {
+        g_input_feedback=true;lv_label_set_text(g_input_status,"Could not save NMEA source; please retry");return;
+    }
+    g_settings=candidate;
+    if(source_changed) {
+        lv_label_set_text(g_input_status,"NMEA source saved. Rebooting...");
+        vTaskDelay(pdMS_TO_TICKS(150));
+        esp_restart();
+        return;
+    }
+    g_input_feedback=false;
+    n2k_bridge_apply_settings(g_settings);
+    update_input_status();
 }
 void source_choice_cb(lv_event_t *event) {
     const size_t item=reinterpret_cast<uintptr_t>(lv_event_get_user_data(event));
@@ -911,9 +977,9 @@ void create_source_depth_screens() {
 void create_input_screen() {
     g_input_screen = require_obj(lv_obj_create(nullptr), "NMEA input screen");
     lv_obj_remove_flag(g_input_screen, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *title = lv_label_create(g_input_screen); lv_label_set_text(title, "NMEA 2000 Input");
+    lv_obj_t *title = lv_label_create(g_input_screen); lv_label_set_text(title, "NMEA 2000 Source");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0); lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 18);
-    g_input_mode = make_button(g_input_screen, "INPUT: WIRED CAN", input_mode_cb, 300, 48);
+    g_input_mode = make_button(g_input_screen, "SOURCE: CAN NMEA 2000", input_mode_cb, 400, 48);
     lv_obj_align(g_input_mode, LV_ALIGN_TOP_MID, 0, 64);
     auto field = [](const char *placeholder, int y, size_t max_length, const char *accepted) {
         lv_obj_t *ta = require_obj(lv_textarea_create(g_input_screen), "gateway field");
@@ -925,7 +991,7 @@ void create_input_screen() {
     g_input_ip = field("W2K-1 IP address", 124, 15, "0123456789.");
     g_input_port = field("TCP port", 182, 5, "0123456789");
     lv_obj_t *hint = lv_label_create(g_input_screen);
-    lv_label_set_text(hint, "Gateway data server: TCP / N2K ASCII / Transmit\nJoin the same Wi-Fi network first.");
+    lv_label_set_text(hint, "Choose one NMEA 2000 source only.\nWi-Fi uses W2K-1 TCP / N2K ASCII / Transmit.");
     lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 240);
     g_input_status = lv_label_create(g_input_screen); lv_obj_set_width(g_input_status, 440);
     lv_obj_set_style_text_align(g_input_status, LV_TEXT_ALIGN_CENTER, 0); lv_obj_align(g_input_status, LV_ALIGN_TOP_MID, 0, 294);
@@ -986,7 +1052,7 @@ void create_settings_screen()
     lv_obj_align(b,LV_ALIGN_TOP_LEFT,30,62);
     b=make_button(g_settings_screen,"UNITS",units_screen_cb,200,48);
     lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-30,62);
-    b=make_button(g_settings_screen,"NMEA Input",input_screen_cb,200,48);
+    b=make_button(g_settings_screen,"NMEA Source",input_screen_cb,200,48);
     lv_obj_align(b,LV_ALIGN_TOP_LEFT,30,116);
     b=make_button(g_settings_screen,"Depth Setup",depth_screen_cb,200,48);
     lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-30,116);
@@ -1165,7 +1231,6 @@ void create_wifi_screen()
     g_wifi_show=lv_checkbox_create(form);lv_checkbox_set_text(g_wifi_show,"Show password");lv_obj_set_pos(g_wifi_show,4,206);lv_obj_add_event_cb(g_wifi_show,wifi_show_cb,LV_EVENT_VALUE_CHANGED,nullptr);
     g_wifi_open=lv_checkbox_create(form);lv_checkbox_set_text(g_wifi_open,"Open network");lv_obj_set_pos(g_wifi_open,232,206);
     auto *b=make_button(form,"SCAN NETWORKS",wifi_scan_cb,196,44);lv_obj_set_pos(b,4,246);
-    b=make_button(form,"FIRMWARE UPDATE",ota_screen_cb,196,44);lv_obj_set_pos(b,216,246);
     g_wifi_status=lv_label_create(form);lv_obj_set_width(g_wifi_status,410);lv_obj_set_pos(g_wifi_status,4,300);
     b=make_button(g_wifi_screen,"SAVE / CONNECT",wifi_save_cb,190,48);lv_obj_align(b,LV_ALIGN_BOTTOM_LEFT,24,-8);
     b=make_button(g_wifi_screen,"BACK",settings_screen_cb,120,48);lv_obj_align(b,LV_ALIGN_BOTTOM_RIGHT,-24,-8);
@@ -1179,14 +1244,6 @@ void create_wifi_screen()
     b=make_button(g_wifi_picker,"SCAN AGAIN",wifi_scan_again_cb,180,48);lv_obj_align(b,LV_ALIGN_BOTTOM_LEFT,24,-16);
     b=make_button(g_wifi_picker,"BACK",wifi_picker_back_cb,120,48);lv_obj_align(b,LV_ALIGN_BOTTOM_RIGHT,-24,-16);
 
-    g_ota_screen=lv_obj_create(nullptr);lv_obj_remove_flag(g_ota_screen,LV_OBJ_FLAG_SCROLLABLE);
-    title=lv_label_create(g_ota_screen);lv_label_set_text(title,"Firmware update (HTTPS / AP)");lv_obj_align(title,LV_ALIGN_TOP_MID,0,18);
-    g_ota_url=lv_textarea_create(g_ota_screen);lv_obj_set_size(g_ota_url,420,50);lv_obj_align(g_ota_url,LV_ALIGN_TOP_MID,0,70);lv_textarea_set_one_line(g_ota_url,true);lv_textarea_set_max_length(g_ota_url,255);lv_textarea_set_placeholder_text(g_ota_url,"https://.../firmware.bin");lv_obj_add_event_cb(g_ota_url,ota_focus_cb,LV_EVENT_FOCUSED,nullptr);
-    b=make_button(g_ota_screen,"DOWNLOAD HTTPS",ota_start_cb,200,48);lv_obj_align(b,LV_ALIGN_TOP_LEFT,24,140);
-    b=make_button(g_ota_screen,"REBOOT IF READY",ota_reboot_cb,200,48);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-24,140);
-    g_ota_status=lv_label_create(g_ota_screen);lv_obj_set_width(g_ota_status,420);lv_obj_align(g_ota_status,LV_ALIGN_TOP_MID,0,212);
-    b=make_button(g_ota_screen,"BACK",wifi_picker_back_cb,120,48);lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-16);
-    g_ota_keyboard=lv_keyboard_create(g_ota_screen);lv_obj_set_size(g_ota_keyboard,460,205);lv_obj_align(g_ota_keyboard,LV_ALIGN_BOTTOM_MID,0,0);lv_obj_add_event_cb(g_ota_keyboard,ota_keyboard_cb,LV_EVENT_ALL,nullptr);lv_obj_add_flag(g_ota_keyboard,LV_OBJ_FLAG_HIDDEN);
 }
 void create_shunts_screen()
 {

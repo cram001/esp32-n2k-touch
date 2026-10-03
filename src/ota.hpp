@@ -37,9 +37,13 @@ void ota_prepare();
 void ota_confirm_running_image();
 void ota_reject_running_image();
 bool ota_partition_layout_valid();
-bool ota_start_local_server();
-// Nonblocking AP-event request. The startup worker owns all HTTP start calls.
-void ota_request_local_server_start();
+// Local AP firmware upload is deliberately on-demand. Enabling it pauses
+// SmartShunt BLE, starts the HTTP server for the requested window, and restores
+// BLE when the window closes. Active uploads are never stopped by the timer.
+bool ota_enable_local_server(uint32_t seconds = 120);
+bool ota_disable_local_server();
+bool ota_local_server_window_active();
+uint32_t ota_local_server_seconds_remaining();
 
 // Starts an HTTPS OTA update in a background FreeRTOS task.
 // Requires an already-working network connection. Returns false if an update is

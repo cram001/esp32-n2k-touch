@@ -29,8 +29,12 @@ struct esp_bt_controller_config_t{};
 inline esp_err_t esp_bt_controller_mem_release(int){return ESP_OK;}
 inline esp_err_t esp_bt_controller_init(esp_bt_controller_config_t*){return ESP_OK;}
 inline esp_err_t esp_bt_controller_enable(int){return ESP_OK;}
+inline esp_err_t esp_bt_controller_disable(){return ESP_OK;}
+inline esp_err_t esp_bt_controller_deinit(){return ESP_OK;}
 inline esp_err_t esp_bluedroid_init(){return ESP_OK;}
 inline esp_err_t esp_bluedroid_enable(){return ESP_OK;}
+inline esp_err_t esp_bluedroid_disable(){return ESP_OK;}
+inline esp_err_t esp_bluedroid_deinit(){return ESP_OK;}
 using esp_gap_ble_cb_event_t=int;
 struct esp_ble_gap_cb_param_t{
     struct ble_scan_result_evt_param {
@@ -47,6 +51,7 @@ extern esp_ble_scan_params_t fake_scan_params;
 inline esp_err_t esp_ble_gap_register_callback(void(*)(esp_gap_ble_cb_event_t,esp_ble_gap_cb_param_t*)){return ESP_OK;}
 inline esp_err_t esp_ble_gap_set_scan_params(esp_ble_scan_params_t *p){fake_scan_params=*p;return ESP_OK;}
 inline esp_err_t esp_ble_gap_start_scanning(int){return ESP_OK;}
+inline esp_err_t esp_ble_gap_stop_scanning(){return ESP_OK;}
 struct esp_aes_context{};
 inline void esp_aes_init(esp_aes_context*){}
 inline void esp_aes_free(esp_aes_context*){}

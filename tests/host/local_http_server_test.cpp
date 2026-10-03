@@ -43,33 +43,14 @@ int main(){
     assert(result.stage==LocalServerStage::Listening && result.error==0 && result.socket_error==0 && server);
     assert(routes==std::vector<std::string>({"/","/upload","/reboot"}));
     assert(config.max_open_sockets==4 && config.lru_purge_enable);
-    assert(config.stack_size>=10240 && config.recv_wait_timeout==5 && config.send_wait_timeout==5);
+    assert(config.stack_size==4096 && config.recv_wait_timeout==5 && config.send_wait_timeout==5);
     const int prior=starts;result=start_local_http_server(server,expected,3);
     assert(result.stage==LocalServerStage::Listening && starts==prior); // idempotent startup
-    LocalServerRetry retry;
-    retry.request(0);assert(retry.due(0));
-    retry.complete(false,100);retry.request(500); // AP event cannot bypass backoff
-    assert(!retry.due(2000099) && retry.due(2000100) && retry.attempts==1);
-    retry.complete(true,2000100);retry.request(9000000);
-    assert(retry.listening && !retry.active && !retry.due(9000000));
-    LocalServerRetry exhausted;exhausted.request(0);
-    for(unsigned i=0;i<10;++i){assert(exhausted.due(i*2000000LL));exhausted.complete(false,i*2000000LL);}
-    assert(!exhausted.active && exhausted.attempts==10 && !exhausted.due(30000000));
-    exhausted.request(30000000);assert(exhausted.attempts==0 && exhausted.due(30000000));
-    // Actual helper succeeds on the second scheduled attempt, without duplicates.
-    server=nullptr;routes.clear();start_error=ESP_FAIL;start_errno=ENOBUFS;
-    LocalServerRetry integrated;integrated.request(0);
-    result=start_local_http_server(server,expected,3);integrated.complete(result.stage==LocalServerStage::Listening,0);
-    assert(result.socket_error==ENOBUFS && integrated.active && !server);
-    assert(!integrated.due(1999999));start_error=0;start_errno=0;
-    result=start_local_http_server(server,expected,3);integrated.complete(result.stage==LocalServerStage::Listening,2000000);
-    assert(server && integrated.listening && !integrated.active);
     using D=StartupHealthDecision;
-    assert(startup_health_decision(false,true,true,5000000)==D::Reject);
-    assert(startup_health_decision(true,true,true,4999999)==D::Wait);
-    assert(startup_health_decision(true,false,true,5000000)==D::Wait);
-    assert(startup_health_decision(true,true,true,18000000)==D::Confirm);
-    assert(startup_health_decision(true,false,true,25000000)==D::Reject);
-    assert(startup_health_decision(true,true,false,25000000)==D::Reject);
-    std::puts("PASS: actual listener configuration, idle eviction, startup/route errors, cleanup, retry and idempotence");
+    assert(startup_health_decision(false,true,5000000)==D::Reject);
+    assert(startup_health_decision(true,true,4999999)==D::Wait);
+    assert(startup_health_decision(true,true,5000000)==D::Confirm);
+    assert(startup_health_decision(true,false,24999999)==D::Wait);
+    assert(startup_health_decision(true,false,25000000)==D::Reject);
+    std::puts("PASS: listener configuration, startup/route errors, cleanup, idempotence and HTTP-independent boot health");
 }

@@ -10,19 +10,24 @@ FLASH_SIZE = 0x1000000
 SLOT_SIZE = 0x600000
 NETWORK_PROFILE = {
     'SPIRAM_USE_MALLOC': 1, 'SPIRAM_TRY_ALLOCATE_WIFI_LWIP': 1,
-    'SPIRAM_MALLOC_ALWAYSINTERNAL': 1024, 'LWIP_MAX_SOCKETS': 10,
+    'SPIRAM_MALLOC_ALWAYSINTERNAL': 256, 'LWIP_MAX_SOCKETS': 10,
     'ESP_WIFI_STATIC_RX_BUFFER_NUM': 6, 'ESP_WIFI_DYNAMIC_RX_BUFFER_NUM': 16,
     'ESP_WIFI_RX_BA_WIN': 6,
     'ESP_WIFI_STATIC_TX_BUFFER': 1, 'ESP_WIFI_STATIC_TX_BUFFER_NUM': 6,
     'ESP_WIFI_CACHE_TX_BUFFER_NUM': 8, 'LWIP_TCP_SND_BUF_DEFAULT': 2880,
     'LWIP_TCP_WND_DEFAULT': 2880, 'LWIP_TCP_OOSEQ_MAX_PBUFS': 2,
 }
+DISABLED_PROFILE = {'LWIP_IPV6'}
 
 def validate_network_profile(config):
     for name, expected in NETWORK_PROFILE.items():
         match = re.search(r'^#define CONFIG_' + name + r' (\d+)$', config, re.M)
         if not match or int(match.group(1)) != expected:
             raise ValueError(f'Stale network memory profile: CONFIG_{name}; regenerate sdkconfig')
+
+    for name in DISABLED_PROFILE:
+        if re.search(r'^#define CONFIG_' + name + r'\b', config, re.M):
+            raise ValueError(f'Unexpected enabled setting: CONFIG_{name}; regenerate sdkconfig')
 
 def validate_startup_stack(config):
     stack = re.search(r'^#define CONFIG_ESP_MAIN_TASK_STACK_SIZE (\d+)$', config, re.M)
@@ -154,6 +159,8 @@ class ArtifactNegativeTests(unittest.TestCase):
                 validate_network_profile(re.sub(r'^#define CONFIG_' + name + r' \d+\n', '', config, flags=re.M))
         with self.assertRaises(ValueError):
             validate_network_profile(config.replace('CONFIG_LWIP_MAX_SOCKETS 10', 'CONFIG_LWIP_MAX_SOCKETS 6'))
+        with self.assertRaises(ValueError):
+            validate_network_profile(config + '#define CONFIG_LWIP_IPV6 1\n')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
