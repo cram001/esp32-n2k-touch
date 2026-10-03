@@ -246,9 +246,10 @@ void publish_server_status(const LocalServerStatus &status,const ServerHeap &hea
     xSemaphoreTake(g_mutex,portMAX_DELAY);g_server_status=status;g_server_heap=heap;xSemaphoreGive(g_mutex);
 }
 
-bool ap_request(httpd_req_t *request, bool token_required) {
-    if (wifi_service_get_status().state != WifiState::AccessPoint) {
-        httpd_resp_send_err(request, HTTPD_403_FORBIDDEN, "Enable Access Point mode on the display first");
+bool network_request(httpd_req_t *request, bool token_required) {
+    const auto wifi=wifi_service_get_status();
+    if (wifi.state != WifiState::AccessPoint && wifi.state != WifiState::Connected) {
+        httpd_resp_send_err(request, HTTPD_403_FORBIDDEN, "Firmware Update mode requires active Wi-Fi");
         return false;
     }
     if (token_required) {
@@ -264,7 +265,7 @@ bool ap_request(httpd_req_t *request, bool token_required) {
 
 esp_err_t page_handler(httpd_req_t *request) {
     ESP_LOGI(TAG,"Local HTTP GET /");
-    if (!ap_request(request,false)) return ESP_OK;
+    if (!network_request(request,false)) return ESP_OK;
     // The token prevents cross-origin update/reboot requests. No CORS is enabled.
     const char *page = R"HTML(<!doctype html><html><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>N2K Display firmware update</title><style>body{font:18px system-ui;max-width:600px;margin:30px auto;padding:20px}button,input{font:inherit;margin:12px 0}pre{white-space:pre-wrap}</style>
@@ -292,7 +293,7 @@ document.getElementById('reboot').onclick=async()=>{if(busy)return;try{const r=a
 }
 
 esp_err_t upload_handler(httpd_req_t *request) {
-    if (!ap_request(request,true)) return ESP_OK;
+    if (!network_request(request,true)) return ESP_OK;
     const esp_partition_t *target = esp_ota_get_next_update_partition(nullptr);
     constexpr size_t PREFIX_SIZE = sizeof(esp_image_header_t)+sizeof(esp_image_segment_header_t)+sizeof(esp_app_desc_t);
     if (!target || !ota_partition_layout_valid() || request->content_len <= PREFIX_SIZE || request->content_len > target->size)
@@ -377,7 +378,7 @@ esp_err_t upload_handler(httpd_req_t *request) {
 
 void reboot_task(void *) {vTaskDelay(pdMS_TO_TICKS(1500));esp_restart();}
 esp_err_t reboot_handler(httpd_req_t *request) {
-    if (!ap_request(request,true)) return ESP_OK;
+    if (!network_request(request,true)) return ESP_OK;
     if (ota_get_status().state != OtaState::ReadyToReboot)
         return httpd_resp_send_err(request,HTTPD_400_BAD_REQUEST,"No validated update ready");
     if (xTaskCreate(reboot_task,"ota_reboot",2048,nullptr,3,nullptr) != pdPASS)
@@ -523,7 +524,8 @@ bool ota_partition_layout_valid()
 bool ota_enable_local_server(uint32_t seconds)
 {
     ensure_mutex();
-    if(!g_mutex || seconds==0 || wifi_service_get_status().state!=WifiState::AccessPoint) return false;
+    const auto wifi=wifi_service_get_status();
+    if(!g_mutex || seconds==0 || (wifi.state!=WifiState::AccessPoint && wifi.state!=WifiState::Connected)) return false;
     const int64_t duration=static_cast<int64_t>(seconds)*1000000LL;
     g_server_deadline_us=esp_timer_get_time()+duration;
     if(g_server_worker) return true; // Extend the active window.
