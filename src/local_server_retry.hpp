@@ -23,10 +23,10 @@ struct LocalServerRetry {
 };
 
 enum class StartupHealthDecision { Wait, Confirm, Reject };
-inline StartupHealthDecision startup_health_decision(bool prerequisites,bool listening,
+inline StartupHealthDecision startup_health_decision(bool prerequisites,
                                                      bool ui_healthy,int64_t elapsed_us) {
     if(!prerequisites)return StartupHealthDecision::Reject;
     if(elapsed_us<5000000)return StartupHealthDecision::Wait;
-    if(listening && ui_healthy)return StartupHealthDecision::Confirm;
+    if(ui_healthy)return StartupHealthDecision::Confirm;
     return elapsed_us>=25000000?StartupHealthDecision::Reject:StartupHealthDecision::Wait;
 }
