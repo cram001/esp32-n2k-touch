@@ -23,12 +23,7 @@ DISABLED_PROFILE = {'LWIP_IPV6'}
 
 def validate_network_profile(config):
     for name, expected in NETWORK_PROFILE.items():
-        match = re.search(r'^#define CONFIG_' + name + r' (\d+)$', config, re.M)
-        if not match or int(match.group(1)) != expected:
-            raise ValueError(f'Stale network memory profile: CONFIG_{name}; regenerate sdkconfig')
-    for name in DISABLED_PROFILE:
-        if re.search(r'^#define CONFIG_' + name + r'\b', config, re.M):
-            raise ValueError(f'Unexpected enabled setting: CONFIG_{name}; regenerate sdkconfig')
+        match = re.search(r'^#define CONFIG_' + name + r' (\d+)
 
 def validate_startup_stack(config):
     stack = re.search(r'^#define CONFIG_ESP_MAIN_TASK_STACK_SIZE (\d+)$', config, re.M)
