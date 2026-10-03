@@ -148,12 +148,6 @@ struct WifiConfig {
     std::array<char, 65> ap_password{};
 };
 
-enum class OperatingMode : uint8_t {
-    CanN2kBluetooth = 0,
-    WifiN2k = 1,
-    FirmwareUpdate = 2,
-};
-
 enum class N2kInputMode : uint8_t { Wired = 0, W2kTcp = 1 };
 struct N2kInputConfig {
     N2kInputMode mode = N2kInputMode::Wired;
@@ -169,8 +163,6 @@ struct AppSettings {
     uint8_t night_brightness = DEFAULT_NIGHT_BRIGHTNESS;
     WifiConfig wifi{};
     UnitsSettings units{};
-    OperatingMode operating_mode = OperatingMode::CanN2kBluetooth;
-    OperatingMode return_mode = OperatingMode::CanN2kBluetooth;
     N2kInputConfig n2k_input{};
     std::array<DataPageConfig, MAX_DATA_PAGES> pages{};
     std::array<SmartShuntConfig, MAX_SMARTSHUNTS> smartshunts{};
@@ -181,6 +173,3 @@ AppSettings settings_load();
 bool settings_save(const AppSettings &settings);
 // Recovery changes only the two brightness keys, preserving every other setting.
 bool settings_restore_brightness();
-// Firmware Update is temporary. Call after a validated image is ready so the
-// next boot returns to the previously selected normal operating mode.
-bool settings_restore_normal_mode_after_update();
