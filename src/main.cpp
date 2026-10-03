@@ -142,63 +142,32 @@ extern "C" void app_main(void)
                  static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
     };
 
-    bool mode_ok=false;
+    bool source_ok=false;
     const bool ota_layout_ok=ota_partition_layout_valid();
 
-    switch(settings.operating_mode) {
-    case OperatingMode::CanN2kBluetooth: {
-        ESP_LOGI(TAG,"Operating mode 1: CAN N2K + Victron Bluetooth");
-        log_internal_heap("Mode 1 before Bluetooth");
+    if(settings.n2k_input.mode==N2kInputMode::Wired) {
+        ESP_LOGI(TAG,"NMEA 2000 source: CAN/TWAI; Victron Bluetooth enabled; Wi-Fi disabled");
+        log_internal_heap("CAN source before Bluetooth");
         const bool ble_ok=smartshunt_ble_start(settings);
         if(!ble_ok) ESP_LOGE(TAG,"SmartShunt BLE service failed to initialize");
-        log_internal_heap("Mode 1 after Bluetooth");
+        log_internal_heap("CAN source after Bluetooth");
         const bool n2k_ok=n2k_bridge_start(settings);
         if(!n2k_ok) ESP_LOGE(TAG,"CAN NMEA 2000 service failed to initialize");
-        mode_ok=ble_ok && n2k_ok;
-        break;
-    }
-    case OperatingMode::WifiN2k: {
-        ESP_LOGI(TAG,"Operating mode 2: Wi-Fi N2K (Bluetooth/CAN disabled)");
+        source_ok=ble_ok && n2k_ok;
+    } else {
+        ESP_LOGI(TAG,"NMEA 2000 source: Wi-Fi/W2K-1; CAN and Bluetooth disabled");
         WifiConfig wifi=settings.wifi;
         wifi.enabled=true;
         wifi.mode=WifiMode::Station;
-        log_internal_heap("Mode 2 before Wi-Fi");
+        log_internal_heap("Wi-Fi source before Wi-Fi");
         const bool wifi_ok=wifi_service_start(wifi);
         if(!wifi_ok) ESP_LOGE(TAG,"Wi-Fi service failed to initialize");
-        log_internal_heap("Mode 2 after Wi-Fi");
-        AppSettings runtime=settings;
-        runtime.n2k_input.mode=N2kInputMode::W2kTcp;
-        const bool n2k_ok=n2k_bridge_start(runtime);
+        log_internal_heap("Wi-Fi source after Wi-Fi");
+        const bool n2k_ok=n2k_bridge_start(settings);
         if(!n2k_ok) ESP_LOGE(TAG,"Wi-Fi NMEA 2000 input failed to initialize");
-        mode_ok=wifi_ok && n2k_ok;
-        break;
-    }
-    case OperatingMode::FirmwareUpdate: {
-        ESP_LOGI(TAG,"Operating mode 3: Firmware Update (Wi-Fi + HTTP; Bluetooth/CAN disabled)");
-        WifiConfig wifi=settings.wifi;
-        wifi.enabled=true;
-        log_internal_heap("Mode 3 before Wi-Fi");
-        const bool wifi_ok=wifi_service_start(wifi);
-        if(!wifi_ok) ESP_LOGE(TAG,"Firmware-update Wi-Fi failed to initialize");
-        log_internal_heap("Mode 3 after Wi-Fi");
-        bool web_ok=false;
-        if(wifi_ok) {
-            const int64_t deadline=esp_timer_get_time()+15000000LL;
-            while(esp_timer_get_time()<deadline) {
-                const auto state=wifi_service_get_status().state;
-                if(state==WifiState::AccessPoint || state==WifiState::Connected) {
-                    web_ok=ota_enable_local_server(86400);
-                    break;
-                }
-                vTaskDelay(pdMS_TO_TICKS(100));
-            }
-        }
-        if(!web_ok) ESP_LOGE(TAG,"Firmware-update web server could not be started");
-        mode_ok=wifi_ok;
-        break;
-    }
+        source_ok=wifi_ok && n2k_ok;
     }
 
     ESP_LOGI(TAG, "Main stack minimum free after services: %u bytes", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
-    finish_startup_health(settings_ok && sources_ok && mode_ok && ota_layout_ok);
+    finish_startup_health(settings_ok && sources_ok && source_ok && ota_layout_ok);
 }
