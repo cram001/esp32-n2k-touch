@@ -65,8 +65,6 @@ int main(){
     assert(!defaults.wifi.enabled && defaults.pages[0].enabled && commits==0);
     assert(defaults.units.heading_reference==HeadingReference::True);
     assert(defaults.rotation==DisplayRotation::Rotated180);
-    assert(defaults.operating_mode==OperatingMode::CanN2kBluetooth);
-    assert(defaults.return_mode==OperatingMode::CanN2kBluetooth);
     auto rotated=defaults;rotated.rotation=DisplayRotation::Normal;
     assert(settings_save(rotated));assert(settings_load().rotation==DisplayRotation::Normal);
     const auto before_rotation_failure=durable;fail_commit=true;
@@ -95,8 +93,6 @@ int main(){
 
     reset();auto expected=defaults;expected.wifi.enabled=true;
     expected.rotation=DisplayRotation::Normal;
-    expected.operating_mode=OperatingMode::WifiN2k;
-    expected.return_mode=OperatingMode::WifiN2k;
     expected.wifi.ssid.fill('S');expected.wifi.ssid.back()=0;
     expected.wifi.password.fill('a');expected.wifi.password.back()=0; // 64 hex digits.
     expected.wifi.mode=WifiMode::AccessPoint;
@@ -114,15 +110,8 @@ int main(){
     assert(reboot.units.depth==DepthUnit::Feet && reboot.pages[1].layout==PageLayout::Six && reboot.pages[1].enabled);
     assert(reboot.units.heading_reference==HeadingReference::Magnetic);
     assert(reboot.rotation==DisplayRotation::Normal);
-    assert(reboot.operating_mode==OperatingMode::WifiN2k && reboot.return_mode==OperatingMode::WifiN2k);
     assert(reboot.n2k_input.mode==N2kInputMode::W2kTcp && reboot.n2k_input.ip==expected.n2k_input.ip && reboot.n2k_input.port==60003);
     assert(durable["n2k_in_v1"].size()==24);
-    durable["op_mode"]=Bytes(1,255);assert(settings_load().operating_mode==OperatingMode::CanN2kBluetooth);
-    durable["op_mode"]=Bytes(1,static_cast<unsigned char>(OperatingMode::FirmwareUpdate));
-    durable["return_mode"]=Bytes(1,static_cast<unsigned char>(OperatingMode::WifiN2k));
-    assert(settings_load().operating_mode==OperatingMode::FirmwareUpdate && settings_load().return_mode==OperatingMode::WifiN2k);
-    assert(settings_restore_normal_mode_after_update());
-    assert(settings_load().operating_mode==OperatingMode::WifiN2k);
     auto saved_input=durable["n2k_in_v1"];durable["n2k_in_v1"][0]=2;
     assert(settings_load().n2k_input.mode==N2kInputMode::Wired);
     durable["n2k_in_v1"]=saved_input;durable["n2k_in_v1"][4]=255;
