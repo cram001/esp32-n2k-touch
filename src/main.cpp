@@ -181,7 +181,20 @@ extern "C" void app_main(void)
         const bool wifi_ok=wifi_service_start(wifi);
         if(!wifi_ok) ESP_LOGE(TAG,"Firmware-update Wi-Fi failed to initialize");
         log_internal_heap("Mode 3 after Wi-Fi");
-        mode_ok=wifi_ok;
+        bool web_ok=false;
+        if(wifi_ok) {
+            const int64_t deadline=esp_timer_get_time()+15000000LL;
+            while(esp_timer_get_time()<deadline) {
+                const auto state=wifi_service_get_status().state;
+                if(state==WifiState::AccessPoint || state==WifiState::Connected) {
+                    web_ok=ota_enable_local_server(86400);
+                    break;
+                }
+                vTaskDelay(pdMS_TO_TICKS(100));
+            }
+        }
+        if(!web_ok) ESP_LOGE(TAG,"Firmware-update web server could not be started");
+        mode_ok=wifi_ok && web_ok;
         break;
     }
     }
