@@ -10,6 +10,7 @@
 #include "bsp/esp-bsp.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "esp_app_desc.h"
 #include "esp_ota_ops.h"
 #include "esp_rom_sys.h"
@@ -35,7 +36,7 @@ void startup_health_task(void *) {
             ota_confirm_running_image();break;
         }
         if(decision==StartupHealthDecision::Reject) {
-            ESP_LOGE(TAG,"Startup health failed: prerequisites or HTTP/UI readiness deadline");
+            ESP_LOGE(TAG,"Startup health failed: core prerequisite or UI readiness deadline");
             ota_reject_running_image();break;
         }
         vTaskDelay(pdMS_TO_TICKS(100));
@@ -136,15 +137,29 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "Display and touch UI initialized");
     ESP_LOGI(TAG, "Main stack minimum free after settings/UI: %u bytes", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
 
+    auto log_internal_heap=[](const char *phase) {
+        ESP_LOGI(TAG,"%s: internal free=%u largest=%u; PSRAM free=%u largest=%u",phase,
+                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+                 static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
+                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+                 static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
+    };
+
+    // BLE controller initialization needs a contiguous internal allocation.
+    // Start it before Wi-Fi reserves its static RX/TX buffers. The firmware
+    // HTTP server remains off until the user explicitly opens the update window.
+    log_internal_heap("Heap before SmartShunt BLE");
+    const bool ble_ok = smartshunt_ble_start(settings);
+    if (!ble_ok) ESP_LOGE(TAG, "SmartShunt BLE service failed to initialize");
+    log_internal_heap("Heap after SmartShunt BLE");
+
     const bool wifi_ok = wifi_service_start(settings.wifi);
     if (!wifi_ok) ESP_LOGE(TAG, "Wi-Fi service failed to initialize");
+    log_internal_heap("Heap after Wi-Fi");
 
     // The local firmware web server is intentionally not started at boot.
     // It is enabled by the user for a 120-second update window and pauses BLE.
     const bool ota_layout_ok=ota_partition_layout_valid();
-
-    const bool ble_ok = smartshunt_ble_start(settings);
-    if (!ble_ok) ESP_LOGE(TAG, "SmartShunt BLE service failed to initialize");
 
     const bool n2k_ok = n2k_bridge_start(settings);
     if (!n2k_ok) ESP_LOGE(TAG, "NMEA 2000 service failed to initialize");
