@@ -1,4 +1,5 @@
 #include "ota.hpp"
+#include "app_settings.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -211,6 +212,8 @@ void ota_task(void *)
     }
 
     ESP_LOGI(TAG, "OTA image installed successfully; reboot required");
+    if(!settings_restore_normal_mode_after_update())
+        ESP_LOGW(TAG,"Update installed but normal operating mode could not be restored");
     set_status(OtaState::ReadyToReboot, 100, ESP_OK, "Update ready - reboot");
     vTaskDelete(nullptr);
 }
@@ -371,6 +374,8 @@ esp_err_t upload_handler(httpd_req_t *request) {
         char message[100];std::snprintf(message,sizeof(message),"Firmware rejected: %s. Current firmware retained.",esp_err_to_name(err));
         return httpd_resp_send_err(request,HTTPD_400_BAD_REQUEST,message);
     }
+    if(!settings_restore_normal_mode_after_update())
+        ESP_LOGW(TAG,"Update validated but normal operating mode could not be restored");
     set_status(OtaState::ReadyToReboot,100,ESP_OK,"Update ready - reboot");
     // Keep the update claim until reboot, just like HTTPS OTA.
     return httpd_resp_sendstr(request,"Firmware validated. Click Reboot after validation to install it.");
