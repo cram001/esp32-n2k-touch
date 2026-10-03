@@ -9,7 +9,7 @@ inline LocalServerStatus start_local_http_server(httpd_handle_t &server,
                                                  const httpd_uri_t *routes,size_t count) {
     if(server)return {LocalServerStage::Listening,ESP_OK};
     httpd_config_t config=HTTPD_DEFAULT_CONFIG();
-    config.stack_size=10240;
+    config.stack_size=4096;
     config.max_open_sockets=4;
     config.lru_purge_enable=true;
     config.recv_wait_timeout=5;config.send_wait_timeout=5;
