@@ -428,7 +428,7 @@ void local_server_worker(void *) {
         return;
     }
 
-    ESP_LOGI(TAG,"Firmware web server enabled for 120 seconds; SmartShunt BLE paused");
+    ESP_LOGI(TAG,"Firmware web server enabled; selected operating mode controls radio ownership");
     for(;;) {
         const int64_t now=esp_timer_get_time();
         bool busy=false;
