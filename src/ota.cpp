@@ -414,10 +414,14 @@ void local_server_worker(void *) {
     const auto before=server_heap();
     publish_server_status({LocalServerStage::Starting,0,0,1,false},before);
     log_server_heap("before on-demand httpd_start",before);
+    ESP_LOGI(TAG,"HTTP window task minimum free stack before httpd_start: %u bytes",
+             static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
     auto result=start_local_http_server(g_server,routes,3);
     const auto after=server_heap();
     result.attempts=1;
     publish_server_status(result,after);
+    ESP_LOGI(TAG,"HTTP window task minimum free stack after httpd_start: %u bytes",
+             static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
     ota_log_local_server_status();
     if(result.stage!=LocalServerStage::Listening) {
         log_server_heap("after failed on-demand startup",after);
@@ -535,7 +539,7 @@ bool ota_enable_local_server(uint32_t seconds)
     g_server_deadline_us=esp_timer_get_time()+duration;
     if(g_server_worker) return true; // Extend the active window.
     publish_server_status({LocalServerStage::Starting,ESP_OK,0,0,false},server_heap());
-    if(xTaskCreate(local_server_worker,"http_window",2048,nullptr,1,&g_server_worker)!=pdPASS) {
+    if(xTaskCreate(local_server_worker,"http_window",4096,nullptr,1,&g_server_worker)!=pdPASS) {
         g_server_deadline_us=0;
         g_server_worker=nullptr;
         publish_server_status({LocalServerStage::StartFailed,ESP_ERR_NO_MEM,0,0,false},server_heap());
