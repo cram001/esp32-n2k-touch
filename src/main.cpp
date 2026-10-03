@@ -24,24 +24,22 @@ static_assert(CONFIG_ESP_MAIN_TASK_STACK_SIZE >= 8192,
 constexpr const char *TAG = "app";
 constexpr gpio_num_t BOARD_I2C_SDA = GPIO_NUM_15;
 constexpr gpio_num_t BOARD_I2C_SCL = GPIO_NUM_7;
-bool g_startup_prerequisites=false; // assigned before health task creation
-
-void startup_health_task(void *) {
+void finish_startup_health(bool prerequisites) {
     const int64_t started=esp_timer_get_time();
     for(;;) {
-        const auto decision=startup_health_decision(g_startup_prerequisites,
-            ui_is_healthy(),esp_timer_get_time()-started);
+        const auto decision=startup_health_decision(prerequisites,ui_is_healthy(),esp_timer_get_time()-started);
         if(decision==StartupHealthDecision::Confirm) {
-            ESP_LOGI(TAG,"Startup health passed: core services and UI healthy");
-            ota_confirm_running_image();break;
+            ESP_LOGI(TAG,"Startup health passed: selected mode and UI healthy");
+            ota_confirm_running_image();
+            return;
         }
         if(decision==StartupHealthDecision::Reject) {
-            ESP_LOGE(TAG,"Startup health failed: core prerequisite or UI readiness deadline");
-            ota_reject_running_image();break;
+            ESP_LOGE(TAG,"Startup health failed: selected-mode prerequisite or UI readiness deadline");
+            ota_reject_running_image();
+            return;
         }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
-    vTaskDelete(nullptr);
 }
 
 bool board_i2c_recover()
@@ -114,7 +112,6 @@ extern "C" void app_main(void)
     const AppSettings settings = settings_load();
     const bool sources_ok = settings_ok && n2k_sources_init();
     ota_prepare();
-    wifi_service_prepare();
 
     if (!board_i2c_recover()) {
         ESP_LOGW(TAG, "I2C recovery was incomplete; continuing so BSP initialization can report the real bus error");
@@ -145,33 +142,50 @@ extern "C" void app_main(void)
                  static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
     };
 
-    // Preserve the previously stable radio startup order. Unlike the old
-    // firmware, the HTTP server is no longer competing for heap during boot.
-    log_internal_heap("Heap before Wi-Fi");
-    const bool wifi_ok = wifi_service_start(settings.wifi);
-    if (!wifi_ok) ESP_LOGE(TAG, "Wi-Fi service failed to initialize");
-    log_internal_heap("Heap after Wi-Fi");
-
-    log_internal_heap("Heap before SmartShunt BLE");
-    const bool ble_ok = smartshunt_ble_start(settings);
-    if (!ble_ok) ESP_LOGE(TAG, "SmartShunt BLE service failed to initialize");
-    log_internal_heap("Heap after SmartShunt BLE");
-
-    // The local firmware web server is intentionally not started at boot.
-    // It is enabled by the user for a 120-second update window and pauses BLE.
+    bool mode_ok=false;
     const bool ota_layout_ok=ota_partition_layout_valid();
 
-    const bool n2k_ok = n2k_bridge_start(settings);
-    if (!n2k_ok) ESP_LOGE(TAG, "NMEA 2000 service failed to initialize");
-
+    switch(settings.operating_mode) {
+    case OperatingMode::CanN2kBluetooth: {
+        ESP_LOGI(TAG,"Operating mode 1: CAN N2K + Victron Bluetooth");
+        log_internal_heap("Mode 1 before Bluetooth");
+        const bool ble_ok=smartshunt_ble_start(settings);
+        if(!ble_ok) ESP_LOGE(TAG,"SmartShunt BLE service failed to initialize");
+        log_internal_heap("Mode 1 after Bluetooth");
+        const bool n2k_ok=n2k_bridge_start(settings);
+        if(!n2k_ok) ESP_LOGE(TAG,"CAN NMEA 2000 service failed to initialize");
+        mode_ok=ble_ok && n2k_ok;
+        break;
+    }
+    case OperatingMode::WifiN2k: {
+        ESP_LOGI(TAG,"Operating mode 2: Wi-Fi N2K (Bluetooth/CAN disabled)");
+        WifiConfig wifi=settings.wifi;
+        wifi.enabled=true;
+        wifi.mode=WifiMode::Station;
+        log_internal_heap("Mode 2 before Wi-Fi");
+        const bool wifi_ok=wifi_service_start(wifi);
+        if(!wifi_ok) ESP_LOGE(TAG,"Wi-Fi service failed to initialize");
+        log_internal_heap("Mode 2 after Wi-Fi");
+        AppSettings runtime=settings;
+        runtime.n2k_input.mode=N2kInputMode::W2kTcp;
+        const bool n2k_ok=n2k_bridge_start(runtime);
+        if(!n2k_ok) ESP_LOGE(TAG,"Wi-Fi NMEA 2000 input failed to initialize");
+        mode_ok=wifi_ok && n2k_ok;
+        break;
+    }
+    case OperatingMode::FirmwareUpdate: {
+        ESP_LOGI(TAG,"Operating mode 3: Firmware Update (Wi-Fi + HTTP; Bluetooth/CAN disabled)");
+        WifiConfig wifi=settings.wifi;
+        wifi.enabled=true;
+        log_internal_heap("Mode 3 before Wi-Fi");
+        const bool wifi_ok=wifi_service_start(wifi);
+        if(!wifi_ok) ESP_LOGE(TAG,"Firmware-update Wi-Fi failed to initialize");
+        log_internal_heap("Mode 3 after Wi-Fi");
+        mode_ok=wifi_ok;
+        break;
+    }
+    }
 
     ESP_LOGI(TAG, "Main stack minimum free after services: %u bytes", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
-
-    // Confirm only after core services initialize. The on-demand HTTP server is
-    // deliberately not a boot-health prerequisite.
-    g_startup_prerequisites=settings_ok && sources_ok && wifi_ok && ble_ok && n2k_ok && ota_layout_ok;
-    if(xTaskCreate(startup_health_task,"startup_health",4096,nullptr,1,nullptr)!=pdPASS) {
-        ESP_LOGE(TAG,"Startup health task allocation failed; rejecting pending OTA image");
-        ota_reject_running_image();
-    }
+    finish_startup_health(settings_ok && sources_ok && mode_ok && ota_layout_ok);
 }
