@@ -587,13 +587,13 @@ void ota_reject_running_image()
 bool ota_update_in_progress() {
     ensure_mutex();
     if (!g_mutex || xSemaphoreTake(g_mutex,pdMS_TO_TICKS(100))!=pdTRUE) return true;
-    const bool busy=g_active || g_network_change || g_status.state==OtaState::ReadyToReboot;
+    const bool busy=g_active || g_network_change || g_status.state==OtaState::ReadyToReboot || g_server_worker!=nullptr;
     xSemaphoreGive(g_mutex);return busy;
 }
 bool ota_begin_network_change() {
     ensure_mutex();
     if (!g_mutex || xSemaphoreTake(g_mutex,pdMS_TO_TICKS(100))!=pdTRUE) return false;
-    const bool available=!g_active && !g_network_change && g_status.state!=OtaState::ReadyToReboot;
+    const bool available=!g_active && !g_network_change && g_status.state!=OtaState::ReadyToReboot && g_server_worker==nullptr;
     if (available) g_network_change=true;
     xSemaphoreGive(g_mutex);return available;
 }
