@@ -380,6 +380,7 @@ void local_server_worker(void *) {
     if(restore_ble && !smartshunt_ble_pause()) {
         publish_server_status({LocalServerStage::StartFailed,ESP_FAIL,0,1,false},server_heap());
         ESP_LOGE(TAG,"Unable to pause SmartShunt BLE for web update");
+        if(!smartshunt_ble_resume()) ESP_LOGE(TAG,"SmartShunt BLE recovery also failed");
         g_server_worker=nullptr;
         vTaskDelete(nullptr);
         return;
