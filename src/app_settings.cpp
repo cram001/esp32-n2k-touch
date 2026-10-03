@@ -22,8 +22,6 @@ constexpr const char *KEY_HEADING_REFERENCE = "heading_ref";
 constexpr const char *KEY_LAT_LON_FORMAT = "latlon_fmt";
 constexpr const char *KEY_WIFI = "wifi_v3";
 constexpr const char *KEY_WIFI_LEGACY = "wifi_v1";
-constexpr const char *KEY_OPERATING_MODE = "op_mode";
-constexpr const char *KEY_RETURN_MODE = "return_mode";
 constexpr uint32_t SHUNTS_SCHEMA = 2;
 constexpr uint32_t DISPLAY_SCHEMA = 1;
 constexpr uint32_t WIFI_SCHEMA = 3;
@@ -165,14 +163,6 @@ AppSettings settings_load()
     }
     if (nvs_get_u8(handle, KEY_DAY_BRIGHTNESS, &value) == ESP_OK) settings.day_brightness = clamp_brightness(value);
     if (nvs_get_u8(handle, KEY_NIGHT_BRIGHTNESS, &value) == ESP_OK) settings.night_brightness = clamp_brightness(value);
-    if (nvs_get_u8(handle, KEY_OPERATING_MODE, &value) == ESP_OK &&
-        value <= static_cast<uint8_t>(OperatingMode::FirmwareUpdate)) {
-        settings.operating_mode = static_cast<OperatingMode>(value);
-    }
-    if (nvs_get_u8(handle, KEY_RETURN_MODE, &value) == ESP_OK &&
-        value <= static_cast<uint8_t>(OperatingMode::WifiN2k)) {
-        settings.return_mode = static_cast<OperatingMode>(value);
-    }
 
     PersistedSmartShunts persisted_shunts{};
     size_t size = sizeof(persisted_shunts);
@@ -261,9 +251,7 @@ AppSettings settings_load()
 
 bool settings_save(const AppSettings &settings)
 {
-    if (static_cast<uint8_t>(settings.rotation) > 1 ||
-        static_cast<uint8_t>(settings.operating_mode) > static_cast<uint8_t>(OperatingMode::FirmwareUpdate) ||
-        static_cast<uint8_t>(settings.return_mode) > static_cast<uint8_t>(OperatingMode::WifiN2k)) return false;
+    if (static_cast<uint8_t>(settings.rotation) > 1) return false;
     nvs_handle_t handle;
     esp_err_t err = nvs_open(NAMESPACE, NVS_READWRITE, &handle);
     if (err != ESP_OK) {
@@ -298,8 +286,6 @@ bool settings_save(const AppSettings &settings)
 
     err = nvs_set_u8(handle, KEY_THEME, static_cast<uint8_t>(settings.theme));
     if (err == ESP_OK) err = nvs_set_u8(handle, KEY_ROTATION, static_cast<uint8_t>(settings.rotation));
-    if (err == ESP_OK) err = nvs_set_u8(handle, KEY_OPERATING_MODE, static_cast<uint8_t>(settings.operating_mode));
-    if (err == ESP_OK) err = nvs_set_u8(handle, KEY_RETURN_MODE, static_cast<uint8_t>(settings.return_mode));
     if (err == ESP_OK) err = nvs_set_u8(handle, KEY_HEADING_REFERENCE,
         settings.units.heading_reference == HeadingReference::Magnetic ? 1 : 0);
     if (err == ESP_OK) err = nvs_set_u8(handle, KEY_LAT_LON_FORMAT,
@@ -333,19 +319,3 @@ bool settings_restore_brightness()
     return err==ESP_OK;
 }
 
-
-bool settings_restore_normal_mode_after_update()
-{
-    nvs_handle_t handle;
-    esp_err_t err=nvs_open(NAMESPACE,NVS_READWRITE,&handle);
-    if(err!=ESP_OK)return false;
-    uint8_t return_mode=static_cast<uint8_t>(OperatingMode::CanN2kBluetooth);
-    const esp_err_t read=nvs_get_u8(handle,KEY_RETURN_MODE,&return_mode);
-    if(read!=ESP_OK || return_mode>static_cast<uint8_t>(OperatingMode::WifiN2k))
-        return_mode=static_cast<uint8_t>(OperatingMode::CanN2kBluetooth);
-    err=nvs_set_u8(handle,KEY_OPERATING_MODE,return_mode);
-    if(err==ESP_OK)err=nvs_commit(handle);
-    nvs_close(handle);
-    if(err!=ESP_OK)ESP_LOGW(TAG,"Could not restore normal operating mode after update: %s",esp_err_to_name(err));
-    return err==ESP_OK;
-}
