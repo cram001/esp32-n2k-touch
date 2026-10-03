@@ -38,6 +38,11 @@ struct DiscoveredSmartShunt {
 };
 
 bool smartshunt_ble_start(const AppSettings &settings);
+// Temporarily release Bluedroid/controller heap while the local firmware web
+// server is active. Runtime SmartShunt settings/data are preserved.
+bool smartshunt_ble_pause();
+bool smartshunt_ble_resume();
+bool smartshunt_ble_is_running();
 void smartshunt_ble_apply_settings(const AppSettings &settings);
 SmartShuntData smartshunt_ble_get_data(size_t configured_index);
 size_t smartshunt_ble_get_discovered(std::array<DiscoveredSmartShunt, MAX_DISCOVERED_SMARTSHUNTS> &out);
