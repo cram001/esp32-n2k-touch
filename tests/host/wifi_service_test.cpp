@@ -6,9 +6,7 @@ unsigned fake_commands=0, fake_starts=0, fake_scans=0;
 int fake_stop_error=0, fake_mode_error=0, fake_config_error=0, fake_start_error=0;
 bool fake_ota_busy=false, fake_network_claim=false;
 unsigned server_reports=0;
-unsigned server_requests=0;
 void ota_log_local_server_status(){++server_reports;}
-void ota_request_local_server_start(){++server_requests;}
 bool ota_update_in_progress() { return fake_ota_busy; }
 bool ota_begin_network_change() { if (fake_ota_busy) return false; fake_network_claim=true; return true; }
 void ota_end_network_change() { fake_network_claim=false; }
@@ -51,9 +49,8 @@ int main() {
         *failure=ESP_OK;
     }
     assert(configure(valid));
-    // Only an enabled AP start requests the server; station/spurious events do not.
+    // AP startup does not start the on-demand firmware HTTP server.
     event(nullptr,WIFI_EVENT,WIFI_EVENT_AP_START,nullptr);
-    assert(server_requests==0);
     assert(!wifi_service_request_scan()); // Wait for actual start event.
     event(nullptr, WIFI_EVENT, WIFI_EVENT_STA_START, nullptr);
     fake_ota_busy=true;
@@ -68,6 +65,5 @@ int main() {
     WifiConfig ap=valid;ap.mode=WifiMode::AccessPoint;
     assert(configure(ap));
     event(nullptr,WIFI_EVENT,WIFI_EVENT_AP_START,nullptr);
-    assert(server_requests==1);
-    std::puts("PASS: migrated credentials scan; stop/mode/config/start recovery; OTA and queue gating");
+    std::puts("PASS: migrated credentials scan; AP stays HTTP-off; stop/mode/config/start recovery; OTA and queue gating");
 }
