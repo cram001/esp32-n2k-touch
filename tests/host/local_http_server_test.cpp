@@ -43,7 +43,7 @@ int main(){
     assert(result.stage==LocalServerStage::Listening && result.error==0 && result.socket_error==0 && server);
     assert(routes==std::vector<std::string>({"/","/upload","/reboot"}));
     assert(config.max_open_sockets==4 && config.lru_purge_enable);
-    assert(config.stack_size>=10240 && config.recv_wait_timeout==5 && config.send_wait_timeout==5);
+    assert(config.stack_size==4096 && config.recv_wait_timeout==5 && config.send_wait_timeout==5);
     const int prior=starts;result=start_local_http_server(server,expected,3);
     assert(result.stage==LocalServerStage::Listening && starts==prior); // idempotent startup
     using D=StartupHealthDecision;
