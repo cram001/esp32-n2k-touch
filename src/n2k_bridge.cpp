@@ -117,8 +117,8 @@ void n2k_task(void *)
         if (previous.mode != settings.n2k_input.mode || previous.ip != settings.n2k_input.ip || previous.port != settings.n2k_input.port) {
             instrument_data_reset_nmea(); n2k_instruments_reset(); previous = settings.n2k_input;
         }
-        g_wireless_input = settings.n2k_input.mode == N2kInputMode::W2kTcp;
-        g_nmea2000.ParseMessages();
+        g_wireless_input = settings.operating_mode == OperatingMode::WifiN2k;
+        if (!g_wireless_input) g_nmea2000.ParseMessages();
         if(g_discover_sources.exchange(false) && !g_wireless_input){
             tN2kMsg request;
             SetN2kPGNISORequest(request,255,60928);g_nmea2000.SendMsg(request);
@@ -160,23 +160,28 @@ bool n2k_bridge_start(const AppSettings &settings)
     if (g_settings_mutex == nullptr) return false;
     g_settings = settings;
 
-    g_nmea2000.SetDeviceInformation(unique_device_number(), 170, 35, 2046);
-    g_nmea2000.SetMode(tNMEA2000::N2km_ListenAndNode, 40);
-    g_nmea2000.EnableForward(false);
-    g_nmea2000.SetMsgHandler(handle_wired_message);
-    g_nmea2000.ExtendReceiveMessages(RECEIVE_PGNS);
-    g_nmea2000.SetN2kCANMsgBufSize(20);
-    if (!g_nmea2000.Open()) { ESP_LOGE(TAG, "Failed to open NMEA 2000/TWAI interface"); return false; }
-    if (!n2k_input_start(settings.n2k_input)) return false;
+    g_wireless_input = settings.operating_mode == OperatingMode::WifiN2k;
+    if (g_wireless_input) {
+        if (!n2k_input_start(settings.n2k_input)) return false;
+        ESP_LOGI(TAG, "NMEA 2000 input active over W2K-1 TCP; CAN/TWAI not initialized");
+    } else {
+        g_nmea2000.SetDeviceInformation(unique_device_number(), 170, 35, 2046);
+        g_nmea2000.SetMode(tNMEA2000::N2km_ListenAndNode, 40);
+        g_nmea2000.EnableForward(false);
+        g_nmea2000.SetMsgHandler(handle_wired_message);
+        g_nmea2000.ExtendReceiveMessages(RECEIVE_PGNS);
+        g_nmea2000.SetN2kCANMsgBufSize(20);
+        if (!g_nmea2000.Open()) { ESP_LOGE(TAG, "Failed to open NMEA 2000/TWAI interface"); return false; }
+        ESP_LOGI(TAG, "NMEA 2000 node active on TX GPIO6/RX GPIO0; Wi-Fi N2K input not initialized");
+    }
     if (xTaskCreate(n2k_task, "n2k", 6144, nullptr, 5, nullptr) != pdPASS) return false;
     g_started = true;
-    ESP_LOGI(TAG, "NMEA 2000 node active on TX GPIO6/RX GPIO0");
     return true;
 }
 
 void n2k_bridge_apply_settings(const AppSettings &settings)
 {
-    n2k_input_apply(settings.n2k_input);
+    if (g_wireless_input) n2k_input_apply(settings.n2k_input);
     if (g_settings_mutex != nullptr && xSemaphoreTake(g_settings_mutex, pdMS_TO_TICKS(20)) == pdTRUE) {
         g_settings = settings;
         xSemaphoreGive(g_settings_mutex);
