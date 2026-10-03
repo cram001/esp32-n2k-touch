@@ -765,16 +765,27 @@ void boot_timer_cb(lv_timer_t *timer)
 }
 void update_input_status()
 {
-    const N2kInputStatus input = n2k_input_status();
-    if (g_input_status && !g_input_feedback) {
-        lv_label_set_text_fmt(g_input_status, "%s\nMessages: %lu  Rejected: %lu  Dropped: %lu\nSocket error: %d",
-            input.message.data(), static_cast<unsigned long>(input.received),
-            static_cast<unsigned long>(input.rejected), static_cast<unsigned long>(input.dropped), input.socket_error);
+    const N2kInputStatus input=n2k_input_status();
+    if(g_input_status && !g_input_feedback) {
+        if(g_mode_draft==OperatingMode::CanN2kBluetooth)
+            lv_label_set_text(g_input_status,"CAN/TWAI + Victron Bluetooth\nWi-Fi and web server are disabled in this mode.");
+        else if(g_mode_draft==OperatingMode::WifiN2k)
+            lv_label_set_text_fmt(g_input_status,"Wi-Fi N2K via W2K-1 TCP\n%s\nMessages: %lu  Rejected: %lu  Dropped: %lu",
+                input.message.data(),static_cast<unsigned long>(input.received),
+                static_cast<unsigned long>(input.rejected),static_cast<unsigned long>(input.dropped));
+        else
+            lv_label_set_text(g_input_status,"Firmware Update\nWi-Fi + web server only; CAN and Bluetooth disabled.\nAP or Station is selected on the Wi-Fi setup page.");
     }
-    if (g_boot_status) {
-        const WifiStatus wifi = wifi_service_get_status();
-        lv_label_set_text_fmt(g_boot_status, "Wi-Fi: %s\nN2K: %s\nSmartShunt BLE starting in background",
-            wifi.message.data(), input.message.data());
+    if(g_boot_status) {
+        if(g_settings.operating_mode==OperatingMode::CanN2kBluetooth)
+            lv_label_set_text(g_boot_status,"Mode 1: CAN N2K + Victron Bluetooth");
+        else if(g_settings.operating_mode==OperatingMode::WifiN2k) {
+            const WifiStatus wifi=wifi_service_get_status();
+            lv_label_set_text_fmt(g_boot_status,"Mode 2: Wi-Fi N2K\nWi-Fi: %s\nN2K: %s",wifi.message.data(),input.message.data());
+        } else {
+            const WifiStatus wifi=wifi_service_get_status();
+            lv_label_set_text_fmt(g_boot_status,"Mode 3: Firmware Update\nWi-Fi: %s\nWeb server starts automatically",wifi.message.data());
+        }
     }
 }
 void input_keyboard_hide() {
@@ -979,9 +990,9 @@ void create_source_depth_screens() {
 void create_input_screen() {
     g_input_screen = require_obj(lv_obj_create(nullptr), "NMEA input screen");
     lv_obj_remove_flag(g_input_screen, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *title = lv_label_create(g_input_screen); lv_label_set_text(title, "NMEA 2000 Input");
+    lv_obj_t *title = lv_label_create(g_input_screen); lv_label_set_text(title, "Operating Mode");
     lv_obj_set_style_text_font(title, &lv_font_montserrat_24, 0); lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 18);
-    g_input_mode = make_button(g_input_screen, "INPUT: WIRED CAN", input_mode_cb, 300, 48);
+    g_input_mode = make_button(g_input_screen, "MODE 1: CAN N2K + BLUETOOTH", input_mode_cb, 400, 48);
     lv_obj_align(g_input_mode, LV_ALIGN_TOP_MID, 0, 64);
     auto field = [](const char *placeholder, int y, size_t max_length, const char *accepted) {
         lv_obj_t *ta = require_obj(lv_textarea_create(g_input_screen), "gateway field");
@@ -993,7 +1004,7 @@ void create_input_screen() {
     g_input_ip = field("W2K-1 IP address", 124, 15, "0123456789.");
     g_input_port = field("TCP port", 182, 5, "0123456789");
     lv_obj_t *hint = lv_label_create(g_input_screen);
-    lv_label_set_text(hint, "Gateway data server: TCP / N2K ASCII / Transmit\nJoin the same Wi-Fi network first.");
+    lv_label_set_text(hint, "Mode 2 uses W2K-1 TCP / N2K ASCII / Transmit.\nMode changes are applied by reboot.");
     lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 240);
     g_input_status = lv_label_create(g_input_screen); lv_obj_set_width(g_input_status, 440);
     lv_obj_set_style_text_align(g_input_status, LV_TEXT_ALIGN_CENTER, 0); lv_obj_align(g_input_status, LV_ALIGN_TOP_MID, 0, 294);
@@ -1054,7 +1065,7 @@ void create_settings_screen()
     lv_obj_align(b,LV_ALIGN_TOP_LEFT,30,62);
     b=make_button(g_settings_screen,"UNITS",units_screen_cb,200,48);
     lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-30,62);
-    b=make_button(g_settings_screen,"NMEA Input",input_screen_cb,200,48);
+    b=make_button(g_settings_screen,"Operating Mode",input_screen_cb,200,48);
     lv_obj_align(b,LV_ALIGN_TOP_LEFT,30,116);
     b=make_button(g_settings_screen,"Depth Setup",depth_screen_cb,200,48);
     lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-30,116);
