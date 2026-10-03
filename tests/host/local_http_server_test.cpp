@@ -42,6 +42,7 @@ int main(){
     fail_route=-1;routes.clear();result=start_local_http_server(server,expected,3);
     assert(result.stage==LocalServerStage::Listening && result.error==0 && result.socket_error==0 && server);
     assert(routes==std::vector<std::string>({"/","/upload","/reboot"}));
+    assert(config.server_port==80 && config.ctrl_port==ESP_HTTPD_DEF_CTRL_PORT+1);
     assert(config.max_open_sockets==4 && config.lru_purge_enable);
     assert(config.stack_size>=10240 && config.recv_wait_timeout==5 && config.send_wait_timeout==5);
     const int prior=starts;result=start_local_http_server(server,expected,3);
