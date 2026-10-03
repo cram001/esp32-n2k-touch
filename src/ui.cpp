@@ -450,7 +450,7 @@ void update_wifi_status()
     case WifiState::Disconnected: std::snprintf(b,sizeof(b),"%s\nReason %d; retrying",st.message.data(),st.disconnect_reason); break;
     case WifiState::AccessPoint: {
         const auto server=ota_local_server_status();
-        if(server.stage==LocalServerStage::Listening)std::snprintf(b,sizeof(b),"AP: %s\nUpdate page: http://%s\n%us remaining",st.ssid.data(),st.ip.data(),ota_local_server_seconds_remaining());
+        if(server.stage==LocalServerStage::Listening)std::snprintf(b,sizeof(b),"AP: %s\nUpdate page: http://%s\n%us remaining",st.ssid.data(),st.ip.data(),static_cast<unsigned>(ota_local_server_seconds_remaining()));
         else if(!ota_local_server_window_active())std::snprintf(b,sizeof(b),"AP: %s\nWeb update: disabled",st.ssid.data());
         else std::snprintf(b,sizeof(b),"AP: %s\nWeb: %s (0x%x)\nSocket errno: %d",st.ssid.data(),ota_local_server_stage_name(server.stage),server.error,server.socket_error);
         break;
@@ -633,7 +633,7 @@ void update_ota_status() {
     if(g_ota_web_button) lv_label_set_text(button_label(g_ota_web_button),
         ota_local_server_window_active()?"DISABLE WEB UPDATE":"ENABLE WEB UPDATE (120s)");
     if(server.stage==LocalServerStage::Listening) {
-        std::snprintf(text,sizeof(text),"Version: %s\n%s (%d%%)  error: 0x%x\nWeb: ACTIVE - %us remaining\nBluetooth: paused\nAP page: http://%s\nOTA layout: %s",ota_running_version(),st.message[0]?st.message:"Ready for local upload",st.progress_percent,st.last_error,remaining,wifi.ip[0]?wifi.ip.data():"192.168.4.1",ota_partition_layout_valid()?"ready":"incompatible; use USB");
+        std::snprintf(text,sizeof(text),"Version: %s\n%s (%d%%)  error: 0x%x\nWeb: ACTIVE - %us remaining\nBluetooth: paused\nAP page: http://%s\nOTA layout: %s",ota_running_version(),st.message[0]?st.message:"Ready for local upload",st.progress_percent,st.last_error,static_cast<unsigned>(remaining),wifi.ip[0]?wifi.ip.data():"192.168.4.1",ota_partition_layout_valid()?"ready":"incompatible; use USB");
     } else {
         std::snprintf(text,sizeof(text),"Version: %s\n%s (%d%%)  error: 0x%x\nWeb: %s%s\nBluetooth: normal\nOTA layout: %s",ota_running_version(),st.message[0]?st.message:"Enter HTTPS URL or enable AP web update",st.progress_percent,st.last_error,
             ota_local_server_window_active()?ota_local_server_stage_name(server.stage):"disabled",
