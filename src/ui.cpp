@@ -74,6 +74,7 @@ lv_obj_t *g_input_port = nullptr;
 lv_obj_t *g_input_status = nullptr;
 lv_obj_t *g_input_keyboard = nullptr;
 N2kInputConfig g_input_draft{};
+OperatingMode g_mode_draft = OperatingMode::CanN2kBluetooth;
 bool g_input_feedback = false;
 void update_input_status();
 lv_obj_t *g_settings_screen = nullptr;
@@ -282,9 +283,15 @@ void apply_theme()
 
 void apply_runtime_settings()
 {
-    wifi_service_apply_config(g_settings.wifi);
-    smartshunt_ble_apply_settings(g_settings);
-    n2k_bridge_apply_settings(g_settings);
+    if(g_settings.operating_mode==OperatingMode::CanN2kBluetooth) {
+        smartshunt_ble_apply_settings(g_settings);
+        n2k_bridge_apply_settings(g_settings);
+    } else if(g_settings.operating_mode==OperatingMode::WifiN2k) {
+        wifi_service_apply_config(g_settings.wifi);
+        n2k_bridge_apply_settings(g_settings);
+    } else {
+        wifi_service_apply_config(g_settings.wifi);
+    }
 }
 
 void persist()
