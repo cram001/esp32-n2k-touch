@@ -592,7 +592,14 @@ void wifi_save_cb(lv_event_t *) {
     AppSettings candidate=g_settings;candidate.wifi=g_wifi_draft;
     if(!settings_save(candidate)) { wifi_feedback("Save failed; settings were not applied");return; }
     g_settings=candidate;
-    if(!wifi_service_apply_config(candidate.wifi)) { wifi_feedback("Saved; Wi-Fi busy. Tap Save again to apply.");return; }
+    if(g_settings.operating_mode==OperatingMode::CanN2kBluetooth) {
+        wifi_feedback("Saved for Wi-Fi N2K / Firmware Update mode");
+        return;
+    }
+    WifiConfig runtime=candidate.wifi;
+    runtime.enabled=true;
+    if(g_settings.operating_mode==OperatingMode::WifiN2k) runtime.mode=WifiMode::Station;
+    if(!wifi_service_apply_config(runtime)) {wifi_feedback("Saved; Wi-Fi is switching or busy");return;}
     wifi_mask_cb(nullptr);
     wifi_feedback("Saved; applying Wi-Fi settings");
 }
