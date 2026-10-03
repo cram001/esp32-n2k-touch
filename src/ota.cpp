@@ -22,6 +22,7 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "wifi_service.hpp"
+#include "smartshunt_ble.hpp"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -213,8 +214,9 @@ void ota_task(void *)
 // HTTP runs in its own server task. It never touches LVGL objects.
 httpd_handle_t g_server = nullptr;
 LocalServerStatus g_server_status{}; // protected by g_mutex
-std::atomic<bool> g_server_request{false};
-TaskHandle_t g_server_worker=nullptr; // startup owner creates once
+TaskHandle_t g_server_worker=nullptr;
+std::atomic<int64_t> g_server_deadline_us{0};
+constexpr int64_t LOCAL_SERVER_WINDOW_US = 120000000LL;
 struct ServerHeap {
     size_t internal_free=0,internal_largest=0,internal_minimum=0;
     size_t psram_free=0,psram_largest=0;
@@ -367,33 +369,73 @@ esp_err_t reboot_handler(httpd_req_t *request) {
 }
 
 void local_server_worker(void *) {
-    LocalServerRetry retry;
+    const bool restore_ble=smartshunt_ble_is_running();
+    if(restore_ble && !smartshunt_ble_pause()) {
+        publish_server_status({LocalServerStage::StartFailed,ESP_FAIL,0,1,false},server_heap());
+        ESP_LOGE(TAG,"Unable to pause SmartShunt BLE for web update");
+        g_server_worker=nullptr;
+        vTaskDelete(nullptr);
+        return;
+    }
+    // Give controller/Bluedroid deinit a short interval to return heap before
+    // creating the 10 KB HTTP task stack.
+    vTaskDelay(pdMS_TO_TICKS(100));
     uint8_t random[16];esp_fill_random(random,sizeof(random));
     for(size_t i=0;i<sizeof(random);++i)std::snprintf(g_upload_token+i*2,3,"%02x",random[i]);
     httpd_uri_t page{};page.uri="/";page.method=HTTP_GET;page.handler=page_handler;
     httpd_uri_t upload{};upload.uri="/upload";upload.method=HTTP_POST;upload.handler=upload_handler;
     httpd_uri_t reboot{};reboot.uri="/reboot";reboot.method=HTTP_POST;reboot.handler=reboot_handler;
     const httpd_uri_t routes[]={page,upload,reboot};
+
+    const auto before=server_heap();
+    publish_server_status({LocalServerStage::Starting,0,0,1,false},before);
+    log_server_heap("before on-demand httpd_start",before);
+    auto result=start_local_http_server(g_server,routes,3);
+    const auto after=server_heap();
+    result.attempts=1;
+    publish_server_status(result,after);
+    ota_log_local_server_status();
+    if(result.stage!=LocalServerStage::Listening) {
+        log_server_heap("after failed on-demand startup",after);
+        if(restore_ble) smartshunt_ble_resume();
+        g_server_deadline_us=0;
+        g_server_worker=nullptr;
+        vTaskDelete(nullptr);
+        return;
+    }
+
+    ESP_LOGI(TAG,"Firmware web server enabled for 120 seconds; SmartShunt BLE paused");
     for(;;) {
         const int64_t now=esp_timer_get_time();
-        if(g_server_request.exchange(false))retry.request(now);
-        if(retry.due(now)) {
-            const auto before=server_heap();
-            publish_server_status({LocalServerStage::Starting,0,0,retry.attempts+1,false},before);
-            ESP_LOGI(TAG,"HTTP startup attempt %u/%u",retry.attempts+1,LocalServerRetry::limit);
-            log_server_heap("before httpd_start",before);
-            auto result=start_local_http_server(g_server,routes,3);
-            const auto after=server_heap();
-            if(result.stage!=LocalServerStage::Listening)log_server_heap("after failed startup",after);
-            retry.complete(result.stage==LocalServerStage::Listening,esp_timer_get_time());
-            result.attempts=retry.attempts;result.retry_pending=retry.active;
-            publish_server_status(result,after);
-            ota_log_local_server_status();
-            if(retry.active)ESP_LOGW(TAG,"HTTP startup retry in 2000 ms");
-            else if(!retry.listening)ESP_LOGE(TAG,"HTTP startup retries exhausted; a new AP start can request another batch");
+        bool busy=false;
+        ensure_mutex();
+        if(g_mutex && xSemaphoreTake(g_mutex,pdMS_TO_TICKS(20))==pdTRUE) {
+            busy=g_active || g_status.state==OtaState::ReadyToReboot;
+            xSemaphoreGive(g_mutex);
+        }
+        // Never expire while receiving/validating an image or while waiting for
+        // the explicit reboot after a successful local upload.
+        if(busy) {
+            g_server_deadline_us=now+LOCAL_SERVER_WINDOW_US;
+        } else {
+            const int64_t deadline=g_server_deadline_us.load();
+            if(deadline<=now) break;
         }
         vTaskDelay(pdMS_TO_TICKS(100));
     }
+
+    if(g_server) {
+        httpd_stop(g_server);
+        g_server=nullptr;
+    }
+    const auto stopped=server_heap();
+    publish_server_status({LocalServerStage::NotStarted,ESP_OK,0,0,false},stopped);
+    log_server_heap("after timed web server stop",stopped);
+    if(restore_ble && !smartshunt_ble_resume()) ESP_LOGE(TAG,"SmartShunt BLE restore failed after web update window");
+    g_server_deadline_us=0;
+    g_server_worker=nullptr;
+    ESP_LOGI(TAG,"Firmware web server disabled; normal BLE operation restored");
+    vTaskDelete(nullptr);
 }
 } // namespace
 
@@ -460,20 +502,47 @@ bool ota_partition_layout_valid()
         next->address!=running->address;
 }
 
-bool ota_start_local_server()
+bool ota_enable_local_server(uint32_t seconds)
 {
     ensure_mutex();
-    if(!g_mutex)return false;
-    // Called by app_main only. AP events just set the atomic request flag.
-    if(!g_server_worker && xTaskCreate(local_server_worker,"http_start",4096,nullptr,1,&g_server_worker)!=pdPASS) {
+    if(!g_mutex || seconds==0 || wifi_service_get_status().state!=WifiState::AccessPoint) return false;
+    const int64_t duration=static_cast<int64_t>(seconds)*1000000LL;
+    g_server_deadline_us=esp_timer_get_time()+duration;
+    if(g_server_worker) return true; // Extend the active window.
+    publish_server_status({LocalServerStage::Starting,ESP_OK,0,0,false},server_heap());
+    if(xTaskCreate(local_server_worker,"http_window",4096,nullptr,1,&g_server_worker)!=pdPASS) {
+        g_server_deadline_us=0;
+        g_server_worker=nullptr;
         publish_server_status({LocalServerStage::StartFailed,ESP_ERR_NO_MEM,0,0,false},server_heap());
-        ota_log_local_server_status();return false;
+        ota_log_local_server_status();
+        return false;
     }
-    ota_request_local_server_start();
-    return true; // scheduling accepted; health checks must inspect Listening
+    return true;
 }
 
-void ota_request_local_server_start(){g_server_request=true;}
+bool ota_disable_local_server()
+{
+    ensure_mutex();
+    if(!g_server_worker) return true;
+    if(!g_mutex || xSemaphoreTake(g_mutex,pdMS_TO_TICKS(50))!=pdTRUE) return false;
+    const bool busy=g_active || g_status.state==OtaState::ReadyToReboot;
+    xSemaphoreGive(g_mutex);
+    if(busy) return false;
+    g_server_deadline_us=esp_timer_get_time();
+    return true;
+}
+
+bool ota_local_server_window_active()
+{
+    return g_server_worker!=nullptr;
+}
+
+uint32_t ota_local_server_seconds_remaining()
+{
+    if(!g_server_worker) return 0;
+    const int64_t remaining=g_server_deadline_us.load()-esp_timer_get_time();
+    return remaining>0?static_cast<uint32_t>((remaining+999999)/1000000):0;
+}
 LocalServerStatus ota_local_server_status(){
     if(!g_mutex)return {LocalServerStage::StartFailed,ESP_ERR_NO_MEM};
     xSemaphoreTake(g_mutex,portMAX_DELAY);const auto status=g_server_status;xSemaphoreGive(g_mutex);return status;
@@ -490,9 +559,9 @@ const char *ota_local_server_stage_name(LocalServerStage stage){
 }
 void ota_log_local_server_status(){
     const auto status=ota_local_server_status();
-    ESP_LOGI(TAG,"HTTP server: %s; error %s (0x%x); socket errno %d (%s); attempt %u/10; retry %s; OTA layout: %s",ota_local_server_stage_name(status.stage),
+    ESP_LOGI(TAG,"HTTP server: %s; error %s (0x%x); socket errno %d (%s); attempt %u; window %us; OTA layout: %s",ota_local_server_stage_name(status.stage),
              esp_err_to_name(status.error),status.error,status.socket_error,status.socket_error?std::strerror(status.socket_error):"none captured",
-             status.attempts,status.retry_pending?"pending":"idle",
+             status.attempts,ota_local_server_seconds_remaining(),
              ota_partition_layout_valid()?"valid":"incompatible (uploads disabled)");
     if(g_mutex){xSemaphoreTake(g_mutex,portMAX_DELAY);const auto heap=g_server_heap;xSemaphoreGive(g_mutex);log_server_heap("last startup snapshot",heap);}
 }
