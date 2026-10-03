@@ -194,7 +194,7 @@ extern "C" void app_main(void)
             }
         }
         if(!web_ok) ESP_LOGE(TAG,"Firmware-update web server could not be started");
-        mode_ok=wifi_ok && web_ok;
+        mode_ok=wifi_ok;
         break;
     }
     }
