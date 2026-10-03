@@ -152,6 +152,7 @@ uint32_t g_wifi_scan_generation = UINT32_MAX;
 lv_obj_t *g_ota_screen = nullptr;
 lv_obj_t *g_ota_url = nullptr;
 lv_obj_t *g_ota_status = nullptr;
+lv_obj_t *g_ota_web_button = nullptr;
 lv_obj_t *g_ota_keyboard = nullptr;
 char g_ota_feedback[128]{};
 uint32_t g_ota_feedback_time=0;
@@ -449,8 +450,9 @@ void update_wifi_status()
     case WifiState::Disconnected: std::snprintf(b,sizeof(b),"%s\nReason %d; retrying",st.message.data(),st.disconnect_reason); break;
     case WifiState::AccessPoint: {
         const auto server=ota_local_server_status();
-        if(server.stage==LocalServerStage::Listening)std::snprintf(b,sizeof(b),"AP: %s\nUpdate page: http://%s",st.ssid.data(),st.ip.data());
-        else std::snprintf(b,sizeof(b),"AP: %s\nWeb: %s (0x%x)\nSocket errno: %d; attempt %u/10%s",st.ssid.data(),ota_local_server_stage_name(server.stage),server.error,server.socket_error,server.attempts,server.retry_pending?"; retry pending":"");
+        if(server.stage==LocalServerStage::Listening)std::snprintf(b,sizeof(b),"AP: %s\nUpdate page: http://%s\n%us remaining",st.ssid.data(),st.ip.data(),ota_local_server_seconds_remaining());
+        else if(!ota_local_server_window_active())std::snprintf(b,sizeof(b),"AP: %s\nWeb update: disabled",st.ssid.data());
+        else std::snprintf(b,sizeof(b),"AP: %s\nWeb: %s (0x%x)\nSocket errno: %d",st.ssid.data(),ota_local_server_stage_name(server.stage),server.error,server.socket_error);
         break;
     }
     case WifiState::Error: std::snprintf(b,sizeof(b),"Wi-Fi error 0x%x\n%s",st.last_error,st.message.data()); break;
@@ -627,8 +629,16 @@ void update_ota_status() {
     if(g_ota_feedback[0] && lv_tick_elaps(g_ota_feedback_time)<6000) return;
     g_ota_feedback[0]=0;
     const auto st=ota_get_status();const auto wifi=wifi_service_get_status();const auto server=ota_local_server_status();char text[360];
-    std::snprintf(text,sizeof(text),"Version: %s\n%s (%d%%)  error: 0x%x\nWeb: %s (0x%x)\nSocket errno: %d; attempt %u/10%s\nOTA layout: %s\nAP page: http://%s",ota_running_version(),st.message[0]?st.message:"Enter HTTPS URL or use AP upload",st.progress_percent,st.last_error,
-        ota_local_server_stage_name(server.stage),server.error,server.socket_error,server.attempts,server.retry_pending?"; retry pending":"",ota_partition_layout_valid()?"ready":"incompatible; use USB",wifi.ip[0]?wifi.ip.data():"connect-to-AP");
+    const uint32_t remaining=ota_local_server_seconds_remaining();
+    if(g_ota_web_button) lv_label_set_text(button_label(g_ota_web_button),
+        ota_local_server_window_active()?"DISABLE WEB UPDATE":"ENABLE WEB UPDATE (120s)");
+    if(server.stage==LocalServerStage::Listening) {
+        std::snprintf(text,sizeof(text),"Version: %s\n%s (%d%%)  error: 0x%x\nWeb: ACTIVE - %us remaining\nBluetooth: paused\nAP page: http://%s\nOTA layout: %s",ota_running_version(),st.message[0]?st.message:"Ready for local upload",st.progress_percent,st.last_error,remaining,wifi.ip[0]?wifi.ip.data():"192.168.4.1",ota_partition_layout_valid()?"ready":"incompatible; use USB");
+    } else {
+        std::snprintf(text,sizeof(text),"Version: %s\n%s (%d%%)  error: 0x%x\nWeb: %s%s\nBluetooth: normal\nOTA layout: %s",ota_running_version(),st.message[0]?st.message:"Enter HTTPS URL or enable AP web update",st.progress_percent,st.last_error,
+            ota_local_server_window_active()?ota_local_server_stage_name(server.stage):"disabled",
+            server.error?" (startup error)":"",ota_partition_layout_valid()?"ready":"incompatible; use USB");
+    }
     lv_label_set_text(g_ota_status,text);
 }
 void ota_screen_cb(lv_event_t *) { hide_wifi_keyboard();lv_screen_load(g_ota_screen);update_ota_status(); }
@@ -636,6 +646,20 @@ void ota_start_cb(lv_event_t *) {
     g_ota_feedback[0]=0;
     if(!wifi_service_is_connected()) {ota_feedback("HTTPS update needs a station connection");return;}
     if(!ota_start_https(lv_textarea_get_text(g_ota_url))) ota_feedback("Invalid HTTPS URL, scan busy, or update already active");
+}
+void ota_web_cb(lv_event_t *) {
+    g_ota_feedback[0]=0;
+    if(ota_local_server_window_active()) {
+        if(!ota_disable_local_server()) ota_feedback("Web update cannot stop during upload or while reboot is ready");
+        else ota_feedback("Stopping web update; Bluetooth will resume");
+        return;
+    }
+    if(wifi_service_get_status().state!=WifiState::AccessPoint) {
+        ota_feedback("Enable and save Access Point mode first");
+        return;
+    }
+    if(!ota_enable_local_server(120)) ota_feedback("Could not start web update window");
+    else ota_feedback("Starting web update; Bluetooth paused for up to 120 seconds");
 }
 void ota_reboot_cb(lv_event_t *) {if(ota_get_status().state==OtaState::ReadyToReboot)esp_restart();}
 void ota_focus_cb(lv_event_t *) {lv_keyboard_set_textarea(g_ota_keyboard,g_ota_url);lv_obj_remove_flag(g_ota_keyboard,LV_OBJ_FLAG_HIDDEN);}
@@ -1183,8 +1207,9 @@ void create_wifi_screen()
     title=lv_label_create(g_ota_screen);lv_label_set_text(title,"Firmware update (HTTPS / AP)");lv_obj_align(title,LV_ALIGN_TOP_MID,0,18);
     g_ota_url=lv_textarea_create(g_ota_screen);lv_obj_set_size(g_ota_url,420,50);lv_obj_align(g_ota_url,LV_ALIGN_TOP_MID,0,70);lv_textarea_set_one_line(g_ota_url,true);lv_textarea_set_max_length(g_ota_url,255);lv_textarea_set_placeholder_text(g_ota_url,"https://.../firmware.bin");lv_obj_add_event_cb(g_ota_url,ota_focus_cb,LV_EVENT_FOCUSED,nullptr);
     b=make_button(g_ota_screen,"DOWNLOAD HTTPS",ota_start_cb,200,48);lv_obj_align(b,LV_ALIGN_TOP_LEFT,24,140);
-    b=make_button(g_ota_screen,"REBOOT IF READY",ota_reboot_cb,200,48);lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-24,140);
-    g_ota_status=lv_label_create(g_ota_screen);lv_obj_set_width(g_ota_status,420);lv_obj_align(g_ota_status,LV_ALIGN_TOP_MID,0,212);
+    g_ota_web_button=make_button(g_ota_screen,"ENABLE WEB UPDATE (120s)",ota_web_cb,200,48);lv_obj_align(g_ota_web_button,LV_ALIGN_TOP_RIGHT,-24,140);
+    b=make_button(g_ota_screen,"REBOOT IF READY",ota_reboot_cb,200,48);lv_obj_align(b,LV_ALIGN_TOP_MID,0,198);
+    g_ota_status=lv_label_create(g_ota_screen);lv_obj_set_width(g_ota_status,420);lv_obj_align(g_ota_status,LV_ALIGN_TOP_MID,0,258);
     b=make_button(g_ota_screen,"BACK",wifi_picker_back_cb,120,48);lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-16);
     g_ota_keyboard=lv_keyboard_create(g_ota_screen);lv_obj_set_size(g_ota_keyboard,460,205);lv_obj_align(g_ota_keyboard,LV_ALIGN_BOTTOM_MID,0,0);lv_obj_add_event_cb(g_ota_keyboard,ota_keyboard_cb,LV_EVENT_ALL,nullptr);lv_obj_add_flag(g_ota_keyboard,LV_OBJ_FLAG_HIDDEN);
 }
