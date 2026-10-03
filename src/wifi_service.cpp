@@ -86,7 +86,7 @@ void event(void *, esp_event_base_t base, int32_t id, void *data) {
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_AP_START) {
         const auto config=snapshot();
         if (!config.enabled || config.mode != WifiMode::AccessPoint) return;
-        ota_request_local_server_start();
+        // Firmware HTTP is user-enabled on demand; AP startup never starts it.
         g_switching = false;
         esp_netif_ip_info_t ip{};
         if (esp_netif_get_ip_info(g_ap_netif, &ip) == ESP_OK) {
