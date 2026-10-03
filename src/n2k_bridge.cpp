@@ -117,7 +117,7 @@ void n2k_task(void *)
         if (previous.mode != settings.n2k_input.mode || previous.ip != settings.n2k_input.ip || previous.port != settings.n2k_input.port) {
             instrument_data_reset_nmea(); n2k_instruments_reset(); previous = settings.n2k_input;
         }
-        g_wireless_input = settings.operating_mode == OperatingMode::WifiN2k;
+        g_wireless_input = settings.n2k_input.mode == N2kInputMode::W2kTcp;
         if (!g_wireless_input) g_nmea2000.ParseMessages();
         if(g_discover_sources.exchange(false) && !g_wireless_input){
             tN2kMsg request;
@@ -160,7 +160,7 @@ bool n2k_bridge_start(const AppSettings &settings)
     if (g_settings_mutex == nullptr) return false;
     g_settings = settings;
 
-    g_wireless_input = settings.operating_mode == OperatingMode::WifiN2k;
+    g_wireless_input = settings.n2k_input.mode == N2kInputMode::W2kTcp;
     if (g_wireless_input) {
         if (!n2k_input_start(settings.n2k_input)) return false;
         ESP_LOGI(TAG, "NMEA 2000 input active over W2K-1 TCP; CAN/TWAI not initialized");
