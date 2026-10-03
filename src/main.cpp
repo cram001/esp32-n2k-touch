@@ -29,9 +29,9 @@ void startup_health_task(void *) {
     const int64_t started=esp_timer_get_time();
     for(;;) {
         const auto decision=startup_health_decision(g_startup_prerequisites,
-            ota_local_server_status().stage==LocalServerStage::Listening,ui_is_healthy(),esp_timer_get_time()-started);
+            ui_is_healthy(),esp_timer_get_time()-started);
         if(decision==StartupHealthDecision::Confirm) {
-            ESP_LOGI(TAG,"Startup health passed: HTTP listener ready and UI healthy");
+            ESP_LOGI(TAG,"Startup health passed: core services and UI healthy");
             ota_confirm_running_image();break;
         }
         if(decision==StartupHealthDecision::Reject) {
@@ -139,10 +139,8 @@ extern "C" void app_main(void)
     const bool wifi_ok = wifi_service_start(settings.wifi);
     if (!wifi_ok) ESP_LOGE(TAG, "Wi-Fi service failed to initialize");
 
-    // Bring the local listener up before BLE/CAN initialization. A readable
-    // page must not depend on those services or on OTA partition compatibility.
-    const bool ota_scheduled = ota_start_local_server();
-    if (!ota_scheduled) ESP_LOGE(TAG, "Local HTTP startup worker failed to initialize");
+    // The local firmware web server is intentionally not started at boot.
+    // It is enabled by the user for a 120-second update window and pauses BLE.
     const bool ota_layout_ok=ota_partition_layout_valid();
 
     const bool ble_ok = smartshunt_ble_start(settings);
@@ -154,11 +152,9 @@ extern "C" void app_main(void)
 
     ESP_LOGI(TAG, "Main stack minimum free after services: %u bytes", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
 
-    // Confirm only after local services initialize. Router availability is not
-    // a health requirement; Wi-Fi initialization itself must succeed.
-    // A late listener counts only if actually Listening within 25 seconds;
-    // scheduling the worker is never sufficient to confirm an OTA trial.
-    g_startup_prerequisites=settings_ok && sources_ok && wifi_ok && ble_ok && n2k_ok && ota_scheduled && ota_layout_ok;
+    // Confirm only after core services initialize. The on-demand HTTP server is
+    // deliberately not a boot-health prerequisite.
+    g_startup_prerequisites=settings_ok && sources_ok && wifi_ok && ble_ok && n2k_ok && ota_layout_ok;
     if(xTaskCreate(startup_health_task,"startup_health",4096,nullptr,1,nullptr)!=pdPASS) {
         ESP_LOGE(TAG,"Startup health task allocation failed; rejecting pending OTA image");
         ota_reject_running_image();
