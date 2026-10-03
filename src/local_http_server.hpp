@@ -9,11 +9,6 @@ inline LocalServerStatus start_local_http_server(httpd_handle_t &server,
                                                  const httpd_uri_t *routes,size_t count) {
     if(server)return {LocalServerStage::Listening,ESP_OK};
     httpd_config_t config=HTTPD_DEFAULT_CONFIG();
-    // The ESP-IDF default control socket uses UDP loopback port 32768. The
-    // physical board consistently reports EADDRINUSE (112) there on a cold
-    // boot, so use a dedicated adjacent control port for this sole server.
-    // This does not change the public HTTP endpoint, which remains TCP/80.
-    config.ctrl_port=ESP_HTTPD_DEF_CTRL_PORT+1;
     config.stack_size=10240;
     config.max_open_sockets=4;
     config.lru_purge_enable=true;
