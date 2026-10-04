@@ -14,8 +14,7 @@ void ota_end_network_change() { fake_network_claim=false; }
 #include "../../src/wifi_service.cpp"
 
 int main() {
-    event(nullptr,WIFI_EVENT,WIFI_EVENT_AP_STACONNECTED,nullptr);
-    assert(server_reports==1);
+    assert(server_reports==0);
     WifiConfig migrated{};
     migrated.enabled=true;
     std::strcpy(migrated.ssid.data(), "BoatWiFi");
@@ -49,9 +48,7 @@ int main() {
         *failure=ESP_OK;
     }
     assert(configure(valid));
-    // AP startup does not start the on-demand firmware HTTP server.
-    event(nullptr,WIFI_EVENT,WIFI_EVENT_AP_START,nullptr);
-    assert(!wifi_service_request_scan()); // Wait for actual start event.
+    assert(!wifi_service_request_scan()); // Wait for actual station start event.
     event(nullptr, WIFI_EVENT, WIFI_EVENT_STA_START, nullptr);
     fake_ota_busy=true;
     assert(!wifi_service_request_scan());
@@ -63,7 +60,7 @@ int main() {
     assert(wifi_service_request_scan());
     complete_scan();
     WifiConfig ap=valid;ap.mode=WifiMode::AccessPoint;
-    assert(configure(ap));
-    event(nullptr,WIFI_EVENT,WIFI_EVENT_AP_START,nullptr);
-    std::puts("PASS: migrated credentials scan; AP stays HTTP-off; stop/mode/config/start recovery; OTA and queue gating");
+    assert(!configure(ap));
+    assert(!wifi_service_apply_config(ap));
+    std::puts("PASS: migrated credentials scan; station-only Wi-Fi; stop/mode/config/start recovery; OTA and queue gating");
 }
