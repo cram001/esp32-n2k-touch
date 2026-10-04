@@ -17,4 +17,5 @@ int xQueueReceive(QueueHandle_t, void *, uint32_t);
 void vQueueDelete(QueueHandle_t);
 int xTaskCreate(void (*)(void *), const char *, unsigned, void *, int, void *);
 TickType_t xTaskGetTickCount();
+inline unsigned uxTaskGetStackHighWaterMark(void *) { return 4096; }
 void vTaskDelay(uint32_t);
