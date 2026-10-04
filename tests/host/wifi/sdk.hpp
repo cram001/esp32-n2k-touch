@@ -18,6 +18,9 @@ extern unsigned fake_commands;
 inline int xQueueSend(void *, const void *, int) { if (fake_queue_full) return 0; ++fake_commands; return pdTRUE; }
 inline int xQueueReceive(void *, void *, int) { return 0; }
 inline int xTaskCreate(void (*)(void *), const char *, unsigned, void *, unsigned, void *) { return pdPASS; }
+using TickType_t=uint32_t;
+inline TickType_t xTaskGetTickCount() { return 5000; }
+inline unsigned uxTaskGetStackHighWaterMark(void *) { return 4096; }
 using esp_event_base_t=int;
 constexpr int WIFI_EVENT=1, IP_EVENT=2, ESP_EVENT_ANY_ID=-1;
 constexpr int WIFI_EVENT_STA_START=1, WIFI_EVENT_AP_START=2, WIFI_EVENT_STA_CONNECTED=3,
