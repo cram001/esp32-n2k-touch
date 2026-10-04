@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include "lwip/sockets.h"
 #include "lwip/inet.h"
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -12,6 +13,7 @@
 #include "wifi_service.hpp"
 
 namespace {
+constexpr const char *TAG="w2k_input";
 struct Packet { uint32_t generation; ActisenseMessage message; };
 SemaphoreHandle_t mutex = nullptr;
 QueueHandle_t queue = nullptr;
@@ -35,6 +37,8 @@ void task(void *) {
     ActisenseAsciiDecoder decoder;
     Packet packet{};
     char bytes[512];
+    const TickType_t started=xTaskGetTickCount();
+    bool stack_logged=false;
     for (;;) {
         xSemaphoreTake(mutex, portMAX_DELAY);
         const N2kInputConfig current = config;
@@ -110,6 +114,11 @@ void task(void *) {
                     set_status("Gateway disconnected; retrying", error);
                 } else if (now - last_data > 5000) set_status("Connected; no recent gateway data");
             }
+        }
+        if(!stack_logged && xTaskGetTickCount()-started>=pdMS_TO_TICKS(5000)) {
+            ESP_LOGI(TAG,"W2K input minimum free stack after startup: %u bytes",
+                     static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+            stack_logged=true;
         }
         vTaskDelay(pdMS_TO_TICKS(20));
     }
