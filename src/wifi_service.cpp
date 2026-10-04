@@ -191,7 +191,6 @@ bool configure(const WifiConfig &config) {
     return true;
 }
 void scan() {
-    const auto config = snapshot();
     // A disabled station may perform a one-shot scan.
     esp_err_t err = ESP_OK;
     if (err == ESP_OK && !g_started) {
