@@ -112,6 +112,8 @@ void n2k_task(void *)
     std::array<uint8_t, MAX_SMARTSHUNTS> sid{};
 
     N2kInputConfig previous{};
+    const TickType_t started=xTaskGetTickCount();
+    bool stack_logged=false;
     for (;;) {
         const AppSettings settings = settings_snapshot();
         if (previous.mode != settings.n2k_input.mode || previous.ip != settings.n2k_input.ip || previous.port != settings.n2k_input.port) {
@@ -147,6 +149,11 @@ void n2k_task(void *)
             if (now_ms - last_dc_ms[i] >= DC_STATUS_PERIOD_MS) {
                 last_dc_ms[i] = now_ms; send_dc_status(cfg, data, sid[i]); sid[i] = sid[i] >= 252 ? 0 : static_cast<uint8_t>(sid[i] + 1);
             }
+        }
+        if(!stack_logged && xTaskGetTickCount()-started>=pdMS_TO_TICKS(5000)) {
+            ESP_LOGI(TAG,"N2K task minimum free stack after startup: %u bytes",
+                     static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+            stack_logged=true;
         }
         vTaskDelay(LOOP_DELAY);
     }
