@@ -557,32 +557,30 @@ bool read_wifi_draft() {
         wifi_feedback("SSID: max 32 bytes; password: max 64 bytes");return false;
     }
     g_wifi_draft.enabled=lv_obj_has_state(g_wifi_enabled,LV_STATE_CHECKED);
-    const bool ap=g_wifi_draft.mode==WifiMode::AccessPoint;
-    auto &ssid=ap?g_wifi_draft.ap_ssid:g_wifi_draft.ssid;
-    auto &password=ap?g_wifi_draft.ap_password:g_wifi_draft.password;
-    std::snprintf(ssid.data(),ssid.size(),"%s",lv_textarea_get_text(g_wifi_ssid));
-    std::snprintf(password.data(),password.size(),"%s",lv_textarea_get_text(g_wifi_password));
-    if(!ap) g_wifi_draft.open_network=lv_obj_has_state(g_wifi_open,LV_STATE_CHECKED);
+    g_wifi_draft.mode=WifiMode::Station;
+    std::snprintf(g_wifi_draft.ssid.data(),g_wifi_draft.ssid.size(),"%s",lv_textarea_get_text(g_wifi_ssid));
+    std::snprintf(g_wifi_draft.password.data(),g_wifi_draft.password.size(),"%s",lv_textarea_get_text(g_wifi_password));
+    g_wifi_draft.open_network=lv_obj_has_state(g_wifi_open,LV_STATE_CHECKED);
     return true;
 }
 void show_wifi_draft() {
-    const bool ap=g_wifi_draft.mode==WifiMode::AccessPoint;
-    lv_dropdown_set_selected(g_wifi_mode,ap?1:0);
+    g_wifi_draft.mode=WifiMode::Station;
+    lv_dropdown_set_selected(g_wifi_mode,0);
     if(g_wifi_draft.enabled) lv_obj_add_state(g_wifi_enabled,LV_STATE_CHECKED); else lv_obj_remove_state(g_wifi_enabled,LV_STATE_CHECKED);
-    lv_textarea_set_text(g_wifi_ssid,(ap?g_wifi_draft.ap_ssid:g_wifi_draft.ssid).data());
-    lv_textarea_set_text(g_wifi_password,(ap?g_wifi_draft.ap_password:g_wifi_draft.password).data());
+    lv_textarea_set_text(g_wifi_ssid,g_wifi_draft.ssid.data());
+    lv_textarea_set_text(g_wifi_password,g_wifi_draft.password.data());
     if(g_wifi_draft.open_network) lv_obj_add_state(g_wifi_open,LV_STATE_CHECKED); else lv_obj_remove_state(g_wifi_open,LV_STATE_CHECKED);
-    if(ap) lv_obj_add_flag(g_wifi_open,LV_OBJ_FLAG_HIDDEN); else lv_obj_remove_flag(g_wifi_open,LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(g_wifi_open,LV_OBJ_FLAG_HIDDEN);
     wifi_mask_cb(nullptr);
 }
 void wifi_mode_cb(lv_event_t *) {
-    if(!read_wifi_draft()) {lv_dropdown_set_selected(g_wifi_mode,g_wifi_draft.mode==WifiMode::AccessPoint?1:0);return;}
-    g_wifi_draft.mode=lv_dropdown_get_selected(g_wifi_mode)==1?WifiMode::AccessPoint:WifiMode::Station;
-    show_wifi_draft();
+    g_wifi_draft.mode=WifiMode::Station;
+    lv_dropdown_set_selected(g_wifi_mode,0);
 }
 void wifi_screen_cb(lv_event_t *) {
     g_wifi_feedback[0]=0;
     g_wifi_draft=g_settings.wifi;
+    g_wifi_draft.mode=WifiMode::Station;
     show_wifi_draft();update_wifi_status();lv_screen_load(g_wifi_screen);
 }
 void wifi_save_cb(lv_event_t *) {
@@ -620,7 +618,6 @@ void wifi_scan_again_cb(lv_event_t *) {
     if(!wifi_service_request_scan()) lv_label_set_text(g_wifi_scan_status,"Scan busy; try again shortly");
 }
 void wifi_scan_cb(lv_event_t *) {
-    if(g_wifi_draft.mode==WifiMode::AccessPoint) {wifi_feedback("Save Station mode before scanning");return;}
     hide_wifi_keyboard();
     lv_screen_load(g_wifi_picker);wifi_scan_again_cb(nullptr);
 }
@@ -1219,7 +1216,7 @@ void create_wifi_screen()
     lv_obj_set_scroll_dir(form,LV_DIR_VER);lv_obj_set_style_pad_all(form,8,0);
     auto label=[form](const char *text,int x,int y){auto *l=lv_label_create(form);lv_label_set_text(l,text);lv_obj_set_pos(l,x,y);return l;};
     label("Mode",4,12);
-    g_wifi_mode=lv_dropdown_create(form);lv_dropdown_set_options(g_wifi_mode,"Station\nAccess Point");lv_obj_set_pos(g_wifi_mode,132,0);lv_obj_set_width(g_wifi_mode,280);lv_obj_add_event_cb(g_wifi_mode,wifi_mode_cb,LV_EVENT_VALUE_CHANGED,nullptr);
+    g_wifi_mode=lv_dropdown_create(form);lv_dropdown_set_options(g_wifi_mode,"Station");lv_obj_set_pos(g_wifi_mode,132,0);lv_obj_set_width(g_wifi_mode,280);lv_obj_add_event_cb(g_wifi_mode,wifi_mode_cb,LV_EVENT_VALUE_CHANGED,nullptr);
     label("Enabled",4,64);g_wifi_enabled=lv_switch_create(form);lv_obj_set_pos(g_wifi_enabled,340,56);
     auto field=[form](int y,int max,bool password){
         auto *ta=lv_textarea_create(form);lv_obj_set_size(ta,280,44);lv_obj_set_pos(ta,132,y);
