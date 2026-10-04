@@ -143,6 +143,10 @@ void complete_scan() {
     if (snapshot().enabled && wifi_service_get_status().state != WifiState::Connected) g_reconnect = true;
 }
 bool configure(const WifiConfig &config) {
+    if (config.mode != WifiMode::Station) {
+        ESP_LOGE(TAG,"Rejecting non-station Wi-Fi configuration in W2K profile");
+        return false;
+    }
     if (!ota_begin_network_change()) return false;
     struct Guard { ~Guard() { ota_end_network_change(); } } guard;
     g_switching = true;
