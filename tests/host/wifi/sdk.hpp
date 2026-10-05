@@ -18,6 +18,10 @@ extern unsigned fake_commands;
 inline int xQueueSend(void *, const void *, int) { if (fake_queue_full) return 0; ++fake_commands; return pdTRUE; }
 inline int xQueueReceive(void *, void *, int) { return 0; }
 inline int xTaskCreate(void (*)(void *), const char *, unsigned, void *, unsigned, void *) { return pdPASS; }
+inline int xTaskCreatePinnedToCore(void (*task)(void *), const char *name, unsigned stack,
+                                   void *arg, unsigned prio, void *handle, int) {
+    return xTaskCreate(task,name,stack,arg,prio,handle);
+}
 using TickType_t=uint32_t;
 inline TickType_t xTaskGetTickCount() { return 5000; }
 inline unsigned uxTaskGetStackHighWaterMark(void *) { return 4096; }
