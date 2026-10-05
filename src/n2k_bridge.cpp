@@ -181,7 +181,7 @@ bool n2k_bridge_start(const AppSettings &settings)
         if (!g_nmea2000.Open()) { ESP_LOGE(TAG, "Failed to open NMEA 2000/TWAI interface"); return false; }
         ESP_LOGI(TAG, "NMEA 2000 node active on TX GPIO6/RX GPIO0; Wi-Fi N2K input not initialized");
     }
-    if (xTaskCreate(n2k_task, "n2k", 6144, nullptr, 5, nullptr) != pdPASS) return false;
+    if (xTaskCreatePinnedToCore(n2k_task, "n2k", 6144, nullptr, 5, nullptr, 1) != pdPASS) return false;
     g_started = true;
     return true;
 }
