@@ -11,6 +11,7 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_memory_utils.h"
 #include "esp_app_desc.h"
 #include "esp_ota_ops.h"
 #include "esp_rom_sys.h"
@@ -31,8 +32,9 @@ constexpr gpio_num_t BOARD_I2C_SCL = GPIO_NUM_7;
 
 void log_internal_heap(const char *phase)
 {
-    ESP_LOGI(TAG,"%s: internal free=%u largest=%u minimum=%u; PSRAM free=%u largest=%u",
+    ESP_LOGI(TAG,"%s: 8-bit free=%u; internal free=%u largest=%u minimum=%u; PSRAM free=%u largest=%u",
              phase,
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_8BIT)),
              static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
              static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
              static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL)),
@@ -145,6 +147,17 @@ extern "C" void app_main(void)
         ota_reject_running_image();
         return;
     }
+    // Verify where the BSP/LVGL port actually placed its large draw buffer.
+    if (lv_draw_buf_t *draw = lv_display_get_buf_active(display)) {
+        const void *data = draw->unaligned_data;
+        const size_t bytes = static_cast<size_t>(draw->header.stride) * draw->header.h;
+        ESP_LOGI(TAG, "LVGL draw buffer: %u bytes at %p (%s)",
+                 static_cast<unsigned>(bytes), data,
+                 data && esp_ptr_external_ram(data) ? "PSRAM" : "internal/default memory");
+    } else {
+        ESP_LOGW(TAG, "LVGL active draw buffer unavailable for residency check");
+    }
+
     // The LVGL port rotates pixels; LVGL rotates the associated input points.
     bsp_display_rotate(display, settings.rotation == DisplayRotation::Normal ? LV_DISPLAY_ROTATION_0 : LV_DISPLAY_ROTATION_180);
     ui_start(settings);
