@@ -255,7 +255,7 @@ bool wifi_service_start(const WifiConfig &config) {
     if (esp_event_handler_register(WIFI_EVENT,ESP_EVENT_ANY_ID,event,nullptr) != ESP_OK ||
         esp_event_handler_register(IP_EVENT,IP_EVENT_STA_GOT_IP,event,nullptr) != ESP_OK) return false;
     if (!configure(config)) return false;
-    if (xTaskCreate(worker,"wifi_worker",6144,nullptr,3,nullptr) != pdPASS) { vQueueDelete(g_commands); g_commands=nullptr; return false; }
+    if (xTaskCreatePinnedToCore(worker,"wifi_worker",6144,nullptr,3,nullptr,1) != pdPASS) { vQueueDelete(g_commands); g_commands=nullptr; return false; }
     g_initialized = true;
     return true;
 }
