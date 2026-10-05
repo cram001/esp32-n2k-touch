@@ -133,7 +133,7 @@ bool n2k_input_start(const N2kInputConfig &initial) {
         mutex = nullptr; queue = nullptr; return false;
     }
     config = initial;
-    if (xTaskCreate(task, "w2k_input", 4096, nullptr, 4, nullptr) == pdPASS) return true;
+    if (xTaskCreatePinnedToCore(task, "w2k_input", 4096, nullptr, 4, nullptr, 1) == pdPASS) return true;
     vSemaphoreDelete(mutex); vQueueDelete(queue); mutex = nullptr; queue = nullptr;
     return false;
 }
