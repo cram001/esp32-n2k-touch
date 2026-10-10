@@ -20,7 +20,9 @@ The VS Code/PlatformIO instructions remain below for developers, custom builds, 
 3. Download **`esp32-n2k-touch-full.bin`**.
 4. Optionally download **`SHA256SUMS.txt`** if you want to verify the file checksum.
 
-Do not download the repository ZIP and do not choose `firmware.bin` for a first installation. The `firmware.bin` file is only the application image. The **full** image also contains the bootloader, partition table and OTA metadata required for a predictable clean install.
+Do not download the repository ZIP and do not choose `firmware.bin` for ESPConnect. The `firmware.bin` file is only the application image. If it is flashed at address `0x0`, it overwrites the bootloader and the display will not boot. The **full** image contains the bootloader, partition table, OTA metadata and application required for a predictable install.
+
+**ESPConnect always uses `esp32-n2k-touch-full.bin` at address `0x0`.**
 
 ### Flash with ESPConnect
 
@@ -310,7 +312,14 @@ This is the simplest and most predictable USB update method because it installs 
 
 **Saved settings:** flashing the full image can clear NVS/application settings. Before updating, note any important Wi-Fi credentials, SmartShunt encryption keys, source selections, page layouts, calibration values and other configuration you may need to re-enter.
 
-Do **not** use the release `firmware.bin` at address `0x0`. It contains only the application image. The `esp32-n2k-touch-full.bin` file is the one intended for this simple ESPConnect procedure.
+Do **not** use the release `firmware.bin` in ESPConnect at any address. It is application-only and intended for compatible OTA/application-update workflows. Flashing it at `0x0` overwrites the bootloader and can leave the display with a black screen.
+
+For every ESPConnect install or USB update, use:
+
+```text
+File:    esp32-n2k-touch-full.bin
+Address: 0x0
+```
 
 If ESPConnect cannot connect, use the same BOOT/RESET download-mode procedure described in the first-install section above.
 
