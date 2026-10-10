@@ -19,7 +19,9 @@ You do **not** need VS Code, PlatformIO, Git or a compiler just to install the f
 
 The **full** image contains the bootloader, partition table, initial OTA metadata and application. It is intended for first installation or clean recovery. Installing the full image can clear saved application settings.
 
-Do **not** substitute `firmware.bin` for the full image on a brand-new board. `firmware.bin` is the application image only.
+**ESPConnect rule:** always use `esp32-n2k-touch-full.bin` at address `0x0`.
+
+Do **not** use `firmware.bin` with ESPConnect. It is the application image only and flashing it at `0x0` will overwrite the bootloader and leave the display unable to boot.
 
 For screenshots, download-mode help, source-code builds and troubleshooting, see the [step-by-step beginner installation guide](docs/beginner-installation.md).
 
@@ -42,7 +44,9 @@ This is the recommended simple USB update method for non-developers. It writes a
 
 **Important:** the full image is a clean-install/recovery image and can clear saved application settings. Be prepared to re-enter Wi-Fi credentials, SmartShunt keys, page layouts and other saved configuration after the update.
 
-Do **not** flash the release `firmware.bin` at address `0x0`. It is application-only and is intended for compatible OTA/application-update workflows.
+**Do not use `firmware.bin` in ESPConnect.** It is application-only and is reserved for compatible OTA/application-update workflows. Flashing `firmware.bin` at `0x0` overwrites the bootloader and can produce a black/non-booting display.
+
+For ESPConnect, always select **`esp32-n2k-touch-full.bin`** and use **`0x0`**.
 
 ### Developers / custom builds
 
