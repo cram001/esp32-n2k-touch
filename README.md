@@ -4,7 +4,28 @@ Marine touchscreen instrument for the Waveshare **ESP32-S3-Touch-LCD-4**.
 
 ## First-time installation
 
-New to GitHub or VS Code? Start with the [step-by-step beginner installation guide](docs/beginner-installation.md). It covers the supported board, software downloads, cloning this repository, building, USB upload, first setup, updates and troubleshooting.
+### Recommended for most users: prebuilt firmware + ESPConnect
+
+You do **not** need VS Code, PlatformIO, Git or a compiler just to install the firmware.
+
+1. Open the [latest GitHub Release](https://github.com/cram001/esp32-n2k-touch/releases/latest).
+2. Under **Assets**, download **`esp32-n2k-touch-full.bin`**.
+3. Connect the Waveshare **ESP32-S3-Touch-LCD-4** to your computer with a USB data cable.
+4. Open [ESPConnect](https://thelastoutpostworkshop.github.io/ESPConnect/) in a Chromium-based browser such as Chrome or Edge.
+5. Click **Connect** and select the ESP32-S3 serial device.
+6. Open **Flash Firmware**, select `esp32-n2k-touch-full.bin`, and set the flash address/offset to **`0x0`**.
+7. Start the flash and leave the board connected until ESPConnect reports completion.
+8. Disconnect/restart the board with BOOT released.
+
+The **full** image contains the bootloader, partition table, initial OTA metadata and application. It is intended for first installation or clean recovery. Installing the full image can clear saved application settings.
+
+Do **not** substitute `firmware.bin` for the full image on a brand-new board. `firmware.bin` is the application image only.
+
+For screenshots, download-mode help, source-code builds and troubleshooting, see the [step-by-step beginner installation guide](docs/beginner-installation.md).
+
+### Developers / custom builds
+
+Developers who want to modify or compile the project can use VS Code + PlatformIO as described in [Development](docs/development.md).
 
 ## 3D printed enclosure
 
@@ -115,7 +136,18 @@ This project targets the Waveshare ESP32-S3-Touch-LCD-4 and follows Waveshare's 
 
 **Marine installation note:** the onboard CAN transceiver is not treated as a certified isolated NMEA 2000 interface. Bench testing is appropriate, but permanent vessel installation should review galvanic isolation, grounding, backbone power and NMEA 2000 physical-layer requirements.
 
-## Build
+## Prebuilt firmware releases
+
+Published releases are available from the [GitHub Releases page](https://github.com/cram001/esp32-n2k-touch/releases). New releases automatically attach:
+
+- **`esp32-n2k-touch-full.bin`** — merged first-install/recovery image for ESPConnect; flash at **`0x0`**.
+- **`firmware.bin`** — application image for compatible application/OTA update workflows.
+- **`SHA256SUMS.txt`** — checksums for verifying downloads.
+- **`commit.txt`** — exact source revision used for the build.
+
+The release binaries are built and validated by GitHub Actions from the release tag, so ordinary users do not need a local build environment.
+
+## Build from source
 
 The [release plan](docs/release-plan.md) tracks completed work, heading reference
 selection and the remaining wireless transport/gesture proposals.

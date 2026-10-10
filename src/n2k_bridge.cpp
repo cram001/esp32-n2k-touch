@@ -112,6 +112,8 @@ void n2k_task(void *)
     std::array<uint8_t, MAX_SMARTSHUNTS> sid{};
 
     N2kInputConfig previous{};
+    const TickType_t started=xTaskGetTickCount();
+    bool stack_logged=false;
     for (;;) {
         const AppSettings settings = settings_snapshot();
         if (previous.mode != settings.n2k_input.mode || previous.ip != settings.n2k_input.ip || previous.port != settings.n2k_input.port) {
@@ -148,6 +150,11 @@ void n2k_task(void *)
                 last_dc_ms[i] = now_ms; send_dc_status(cfg, data, sid[i]); sid[i] = sid[i] >= 252 ? 0 : static_cast<uint8_t>(sid[i] + 1);
             }
         }
+        if(!stack_logged && xTaskGetTickCount()-started>=pdMS_TO_TICKS(5000)) {
+            ESP_LOGI(TAG,"N2K task minimum free stack after startup: %u bytes",
+                     static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+            stack_logged=true;
+        }
         vTaskDelay(LOOP_DELAY);
     }
 }
@@ -174,7 +181,7 @@ bool n2k_bridge_start(const AppSettings &settings)
         if (!g_nmea2000.Open()) { ESP_LOGE(TAG, "Failed to open NMEA 2000/TWAI interface"); return false; }
         ESP_LOGI(TAG, "NMEA 2000 node active on TX GPIO6/RX GPIO0; Wi-Fi N2K input not initialized");
     }
-    if (xTaskCreate(n2k_task, "n2k", 6144, nullptr, 5, nullptr) != pdPASS) return false;
+    if (xTaskCreatePinnedToCore(n2k_task, "n2k", 6144, nullptr, 5, nullptr, 1) != pdPASS) return false;
     g_started = true;
     return true;
 }

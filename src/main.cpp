@@ -11,6 +11,7 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
+#include "esp_memory_utils.h"
 #include "esp_app_desc.h"
 #include "esp_ota_ops.h"
 #include "esp_rom_sys.h"
@@ -21,9 +22,26 @@
 namespace {
 static_assert(CONFIG_ESP_MAIN_TASK_STACK_SIZE >= 8192,
               "Startup requires 8192 bytes of stack; regenerate sdkconfig before building");
+static_assert(CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT == 1,
+              "Memory test requires one LVGL software draw unit; regenerate sdkconfig");
+static_assert(CONFIG_BSP_LCD_RGB_BOUNCE_BUFFER_HEIGHT == 10,
+              "Memory test requires 10-row RGB bounce buffers; regenerate sdkconfig");
 constexpr const char *TAG = "app";
 constexpr gpio_num_t BOARD_I2C_SDA = GPIO_NUM_15;
 constexpr gpio_num_t BOARD_I2C_SCL = GPIO_NUM_7;
+
+void log_internal_heap(const char *phase)
+{
+    ESP_LOGI(TAG,"%s: 8-bit free=%u; internal free=%u largest=%u minimum=%u; PSRAM free=%u largest=%u",
+             phase,
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_8BIT)),
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
+             static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL)),
+             static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+             static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
+}
+
 void finish_startup_health(bool prerequisites) {
     const int64_t started=esp_timer_get_time();
     for(;;) {
@@ -112,11 +130,13 @@ extern "C" void app_main(void)
     const AppSettings settings = settings_load();
     const bool sources_ok = settings_ok && n2k_sources_init();
     ota_prepare();
+    log_internal_heap("After settings/NVS");
 
     if (!board_i2c_recover()) {
         ESP_LOGW(TAG, "I2C recovery was incomplete; continuing so BSP initialization can report the real bus error");
     }
     lv_display_t *display = bsp_display_start();
+    log_internal_heap("After display/BSP");
     if (display == nullptr) {
         ESP_LOGE(TAG, "Display initialization failed");
         ota_reject_running_image();
@@ -127,20 +147,24 @@ extern "C" void app_main(void)
         ota_reject_running_image();
         return;
     }
+    // Verify where the BSP/LVGL port actually placed its large draw buffer.
+    if (lv_draw_buf_t *draw = lv_display_get_buf_active(display)) {
+        const void *data = draw->unaligned_data;
+        const size_t bytes = static_cast<size_t>(draw->header.stride) * draw->header.h;
+        ESP_LOGI(TAG, "LVGL draw buffer: %u bytes at %p (%s)",
+                 static_cast<unsigned>(bytes), data,
+                 data && esp_ptr_external_ram(data) ? "PSRAM" : "internal/default memory");
+    } else {
+        ESP_LOGW(TAG, "LVGL active draw buffer unavailable for residency check");
+    }
+
     // The LVGL port rotates pixels; LVGL rotates the associated input points.
     bsp_display_rotate(display, settings.rotation == DisplayRotation::Normal ? LV_DISPLAY_ROTATION_0 : LV_DISPLAY_ROTATION_180);
     ui_start(settings);
     bsp_display_unlock();
     ESP_LOGI(TAG, "Display and touch UI initialized");
+    log_internal_heap("After UI");
     ESP_LOGI(TAG, "Main stack minimum free after settings/UI: %u bytes", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
-
-    auto log_internal_heap=[](const char *phase) {
-        ESP_LOGI(TAG,"%s: internal free=%u largest=%u; PSRAM free=%u largest=%u",phase,
-                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
-                 static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
-                 static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
-                 static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
-    };
 
     bool source_ok=false;
     const bool ota_layout_ok=ota_partition_layout_valid();
@@ -153,6 +177,7 @@ extern "C" void app_main(void)
         log_internal_heap("CAN source after Bluetooth");
         const bool n2k_ok=n2k_bridge_start(settings);
         if(!n2k_ok) ESP_LOGE(TAG,"CAN NMEA 2000 service failed to initialize");
+        log_internal_heap("CAN source after NMEA2000");
         source_ok=ble_ok && n2k_ok;
     } else {
         ESP_LOGI(TAG,"NMEA 2000 source: Wi-Fi/W2K-1; CAN and Bluetooth disabled");
@@ -165,9 +190,12 @@ extern "C" void app_main(void)
         log_internal_heap("Wi-Fi source after Wi-Fi");
         const bool n2k_ok=n2k_bridge_start(settings);
         if(!n2k_ok) ESP_LOGE(TAG,"Wi-Fi NMEA 2000 input failed to initialize");
+        log_internal_heap("Wi-Fi source after W2K/NMEA2000");
         source_ok=wifi_ok && n2k_ok;
     }
 
     ESP_LOGI(TAG, "Main stack minimum free after services: %u bytes", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+    ESP_LOGI(TAG, "Detailed internal heap regions after startup services:");
+    heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
     finish_startup_health(settings_ok && sources_ok && source_ok && ota_layout_ok);
 }

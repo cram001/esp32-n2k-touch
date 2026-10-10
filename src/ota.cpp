@@ -37,10 +37,10 @@
 #if CONFIG_LWIP_IPV6
 #error "IPv6 is intentionally disabled for the local AP/OTA profile"
 #endif
-static_assert(CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL==256 && CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM==6 &&
-              CONFIG_ESP_WIFI_RX_BA_WIN==6 &&
-              CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM==16 && CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM==6 &&
-              CONFIG_ESP_WIFI_CACHE_TX_BUFFER_NUM==8 && CONFIG_LWIP_MAX_SOCKETS==10 &&
+static_assert(CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL==128 && CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM==4 &&
+              CONFIG_ESP_WIFI_RX_BA_WIN==4 &&
+              CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM==8 && CONFIG_ESP_WIFI_STATIC_TX_BUFFER_NUM==4 &&
+              CONFIG_ESP_WIFI_CACHE_TX_BUFFER_NUM==4 && CONFIG_LWIP_MAX_SOCKETS==10 &&
               CONFIG_LWIP_TCP_SND_BUF_DEFAULT==2880 && CONFIG_LWIP_TCP_WND_DEFAULT==2880 &&
               CONFIG_LWIP_TCP_OOSEQ_MAX_PBUFS==2,
               "Stale low-internal-RAM profile: regenerate sdkconfig.waveshare-touch-4 before building");

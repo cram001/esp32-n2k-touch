@@ -7,7 +7,6 @@
 #include "esp_event.h"
 #include "esp_log.h"
 #include "esp_netif.h"
-#include "esp_netif_sntp.h"
 #include "esp_timer.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
@@ -22,7 +21,6 @@ QueueHandle_t g_commands = nullptr;
 WifiConfig g_config{};
 WifiStatus g_status{};
 WifiScanResults g_scan{};
-esp_netif_t *g_ap_netif = nullptr;
 std::atomic<bool> g_switching{false};
 std::atomic<bool> g_scanning{false};
 std::atomic<bool> g_reconnect{false};
@@ -83,18 +81,6 @@ void event(void *, esp_event_base_t base, int32_t id, void *data) {
         g_switching = false;
         if (snapshot().enabled) connect();
         else state(WifiState::Disabled);
-    } else if (base == WIFI_EVENT && id == WIFI_EVENT_AP_START) {
-        const auto config=snapshot();
-        if (!config.enabled || config.mode != WifiMode::AccessPoint) return;
-        // Firmware HTTP is user-enabled on demand; AP startup never starts it.
-        g_switching = false;
-        esp_netif_ip_info_t ip{};
-        if (esp_netif_get_ip_info(g_ap_netif, &ip) == ESP_OK) {
-            state(WifiState::AccessPoint);
-            xSemaphoreTake(g_mutex, portMAX_DELAY);
-            std::snprintf(g_status.ip.data(), g_status.ip.size(), IPSTR, IP2STR(&ip.ip));
-            xSemaphoreGive(g_mutex);
-        } else state(WifiState::Error, ESP_FAIL, "AP IP unavailable");
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_CONNECTED) {
         const auto config=snapshot();
         if (!g_switching && config.enabled && config.mode == WifiMode::Station)
@@ -112,10 +98,6 @@ void event(void *, esp_event_base_t base, int32_t id, void *data) {
         if (!g_scanning) { esp_wifi_clear_ap_list(); return; }
         g_scan_error = static_cast<wifi_event_sta_scan_done_t *>(data)->status;
         g_scan_finished = true;
-    } else if(base==WIFI_EVENT && id==WIFI_EVENT_AP_STACONNECTED){
-        // Report retained startup diagnostics when USB monitoring is attached
-        // after boot; the event handler never accesses display objects.
-        ota_log_local_server_status();
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         if (g_switching || !snapshot().enabled || snapshot().mode != WifiMode::Station) return;
         auto *got = static_cast<ip_event_got_ip_t *>(data);
@@ -130,8 +112,6 @@ void event(void *, esp_event_base_t base, int32_t id, void *data) {
         std::snprintf(g_status.ip.data(), g_status.ip.size(), IPSTR, IP2STR(&got->ip_info.ip));
         xSemaphoreGive(g_mutex);
         g_reconnect = false;
-        const esp_err_t sync = esp_netif_sntp_start();
-        if (sync != ESP_OK) ESP_LOGW(TAG,"Could not start clock sync: %s",esp_err_to_name(sync));
     }
 }
 // Process AP records on the worker's stack, not the smaller event-loop stack.
@@ -163,6 +143,10 @@ void complete_scan() {
     if (snapshot().enabled && wifi_service_get_status().state != WifiState::Connected) g_reconnect = true;
 }
 bool configure(const WifiConfig &config) {
+    if (config.mode != WifiMode::Station) {
+        ESP_LOGE(TAG,"Rejecting non-station Wi-Fi configuration in W2K profile");
+        return false;
+    }
     if (!ota_begin_network_change()) return false;
     struct Guard { ~Guard() { ota_end_network_change(); } } guard;
     g_switching = true;
@@ -192,16 +176,8 @@ bool configure(const WifiConfig &config) {
         state(WifiState::CredentialsRequired, ESP_ERR_INVALID_ARG, reason);
         return true; // Invalid user configuration is not a service init failure.
     }
-    const bool ap = config.enabled && config.mode == WifiMode::AccessPoint;
-    esp_err_t err = esp_wifi_set_mode(ap ? WIFI_MODE_AP : WIFI_MODE_STA);
-    if (err == ESP_OK && ap) {
-        wifi_config_t cfg{};
-        std::memcpy(cfg.ap.ssid, config.ap_ssid.data(), strnlen(config.ap_ssid.data(),32));
-        cfg.ap.ssid_len = strnlen(config.ap_ssid.data(),32);
-        std::memcpy(cfg.ap.password, config.ap_password.data(), strnlen(config.ap_password.data(),64));
-        cfg.ap.channel = 1; cfg.ap.max_connection = 2; cfg.ap.authmode = WIFI_AUTH_WPA2_PSK;
-        err = esp_wifi_set_config(WIFI_IF_AP, &cfg);
-    } else if (err == ESP_OK) {
+    esp_err_t err = esp_wifi_set_mode(WIFI_MODE_STA);
+    if (err == ESP_OK) {
         wifi_config_t cfg{};
         std::memcpy(cfg.sta.ssid, config.ssid.data(), strnlen(config.ssid.data(),32));
         if (!config.open_network) std::memcpy(cfg.sta.password, config.password.data(), strnlen(config.password.data(),64));
@@ -215,9 +191,8 @@ bool configure(const WifiConfig &config) {
     return true;
 }
 void scan() {
-    const auto config = snapshot();
-    // AP-only mode cannot scan. A disabled station may perform a one-shot scan.
-    esp_err_t err = config.enabled && config.mode == WifiMode::AccessPoint ? ESP_ERR_INVALID_STATE : ESP_OK;
+    // A disabled station may perform a one-shot scan.
+    esp_err_t err = ESP_OK;
     if (err == ESP_OK && !g_started) {
         // Start a station for this explicit scan without changing saved/runtime
         // intent (including an enabled station awaiting credentials).
@@ -238,6 +213,8 @@ void scan() {
     }
 }
 void worker(void *) {
+    const TickType_t started=xTaskGetTickCount();
+    bool stack_logged=false;
     for (;;) {
         Command command{};
         if (xQueueReceive(g_commands, &command, pdMS_TO_TICKS(100)) == pdTRUE) {
@@ -252,11 +229,20 @@ void worker(void *) {
             if (!g_next_retry) g_next_retry = now + std::min<int64_t>(1000000LL << std::min(g_retry_count++,5U),30000000LL);
             if (now >= g_next_retry) { g_reconnect = false; g_next_retry = 0; connect(); }
         }
+        if(!stack_logged && xTaskGetTickCount()-started>=pdMS_TO_TICKS(5000)) {
+            ESP_LOGI(TAG,"Wi-Fi worker minimum free stack after startup: %u bytes",
+                     static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+            stack_logged=true;
+        }
     }
 }
 } // namespace
 
 bool wifi_service_start(const WifiConfig &config) {
+    if (config.mode != WifiMode::Station) {
+        ESP_LOGE(TAG,"Wi-Fi service is station-only in the current NMEA profile");
+        return false;
+    }
     if (g_initialized) return wifi_service_apply_config(config);
     if (!wifi_service_prepare()) return false;
     esp_err_t err = esp_netif_init();
@@ -264,22 +250,17 @@ bool wifi_service_start(const WifiConfig &config) {
     err = esp_event_loop_create_default();
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return false;
     if (!esp_netif_create_default_wifi_sta()) return false;
-    g_ap_netif = esp_netif_create_default_wifi_ap();
-    if (!g_ap_netif) return false;
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     if (esp_wifi_init(&init) != ESP_OK || esp_wifi_set_storage(WIFI_STORAGE_RAM) != ESP_OK) return false;
     if (esp_event_handler_register(WIFI_EVENT,ESP_EVENT_ANY_ID,event,nullptr) != ESP_OK ||
         esp_event_handler_register(IP_EVENT,IP_EVENT_STA_GOT_IP,event,nullptr) != ESP_OK) return false;
-    esp_sntp_config_t clock=ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
-    clock.start=false;
-    if (esp_netif_sntp_init(&clock)!=ESP_OK) return false;
     if (!configure(config)) return false;
-    if (xTaskCreate(worker,"wifi_worker",6144,nullptr,3,nullptr) != pdPASS) { vQueueDelete(g_commands); g_commands=nullptr; return false; }
+    if (xTaskCreatePinnedToCore(worker,"wifi_worker",6144,nullptr,3,nullptr,1) != pdPASS) { vQueueDelete(g_commands); g_commands=nullptr; return false; }
     g_initialized = true;
     return true;
 }
 bool wifi_service_apply_config(const WifiConfig &config) {
-    if (!g_initialized || ota_update_in_progress()) return false;
+    if (!g_initialized || ota_update_in_progress() || config.mode != WifiMode::Station) return false;
     const auto current = snapshot();
     if (current.enabled == config.enabled && current.mode == config.mode && current.open_network == config.open_network &&
         current.ssid == config.ssid && current.password == config.password && current.ap_ssid == config.ap_ssid && current.ap_password == config.ap_password &&
