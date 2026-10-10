@@ -23,6 +23,27 @@ Do **not** substitute `firmware.bin` for the full image on a brand-new board. `f
 
 For screenshots, download-mode help, source-code builds and troubleshooting, see the [step-by-step beginner installation guide](docs/beginner-installation.md).
 
+### Updating to a newer release with ESPConnect
+
+If the display is already running an older release, you can update it without VS Code or compiling anything:
+
+1. Open the [latest GitHub Release](https://github.com/cram001/esp32-n2k-touch/releases/latest).
+2. Under **Assets**, download the new **`esp32-n2k-touch-full.bin`**.
+3. Connect the display to the computer with a USB data cable.
+4. Open [ESPConnect](https://thelastoutpostworkshop.github.io/ESPConnect/) in Chrome, Edge, Brave, or another Chromium-based browser.
+5. Click **Connect** and select the ESP32-S3 serial device.
+6. Open **Flash Firmware**.
+7. Select the downloaded **`esp32-n2k-touch-full.bin`**.
+8. Set the flash address/offset to **`0x0`**.
+9. Start the flash and wait for it to complete.
+10. Restart the board with BOOT released, then confirm the new firmware version on the startup screen.
+
+This is the recommended simple USB update method for non-developers. It writes a complete known-good flash layout, so it avoids ambiguity about which OTA application slot is active.
+
+**Important:** the full image is a clean-install/recovery image and can clear saved application settings. Be prepared to re-enter Wi-Fi credentials, SmartShunt keys, page layouts and other saved configuration after the update.
+
+Do **not** flash the release `firmware.bin` at address `0x0`. It is application-only and is intended for compatible OTA/application-update workflows.
+
 ### Developers / custom builds
 
 Developers who want to modify or compile the project can use VS Code + PlatformIO as described in [Development](docs/development.md).
