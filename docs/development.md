@@ -27,6 +27,26 @@ pio device monitor
 
 GitHub Actions runs the same `pio run` command on feature branches and pull requests.
 
+## Release binaries
+
+Ordinary users should not need to compile the project. When a GitHub Release is
+published, the release workflow builds and validates that release tag, then
+attaches these files to the Release:
+
+- `esp32-n2k-touch-full.bin` — merged first-install/recovery image for
+  [ESPConnect](https://thelastoutpostworkshop.github.io/ESPConnect/), flashed at `0x0`.
+- `firmware.bin` — application-only image.
+- `SHA256SUMS.txt` — binary checksums.
+- `commit.txt` — exact source commit used for the release.
+
+The merged image contains the bootloader at `0x0`, partition table at `0x8000`,
+initial OTA metadata at `0xf000`, and application image at `0x20000`. It is
+intended for a first install or clean recovery and can clear saved settings.
+
+Release maintainers can continue creating Releases through GitHub's normal
+**Releases > Draft a new release** interface. Once the Release is published, the
+workflow attaches the firmware assets automatically.
+
 ## Bench-test sequence
 
 ### Display / touch

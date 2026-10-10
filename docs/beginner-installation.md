@@ -1,8 +1,51 @@
 # Beginner guide: install the marine instrument display
 
-This guide takes you from a new computer setup to a running display. You do not
-need to know how to program or have a GitHub account. The main instructions are
-for Windows 10/11; Mac and Linux notes are at the end.
+For most users, the easiest installation is now **download one prebuilt binary and flash it in a browser with ESPConnect**. You do not need VS Code, PlatformIO, Git, Python, or a compiler.
+
+The VS Code/PlatformIO instructions remain below for developers, custom builds, and troubleshooting.
+
+## Recommended method: ESPConnect + prebuilt release
+
+### What you need
+
+- A **Waveshare ESP32-S3-Touch-LCD-4**.
+- A USB data cable.
+- Chrome, Edge, Brave, or another Chromium browser with Web Serial support.
+- The prebuilt **`esp32-n2k-touch-full.bin`** from this project's GitHub Release.
+
+### Download the firmware
+
+1. Open the [latest release](https://github.com/cram001/esp32-n2k-touch/releases/latest).
+2. Expand **Assets** if GitHub has collapsed the list.
+3. Download **`esp32-n2k-touch-full.bin`**.
+4. Optionally download **`SHA256SUMS.txt`** if you want to verify the file checksum.
+
+Do not download the repository ZIP and do not choose `firmware.bin` for a first installation. The `firmware.bin` file is only the application image. The **full** image also contains the bootloader, partition table and OTA metadata required for a predictable clean install.
+
+### Flash with ESPConnect
+
+1. Connect the display to the computer with a USB data cable.
+2. Open [ESPConnect](https://thelastoutpostworkshop.github.io/ESPConnect/).
+3. Click **Connect**.
+4. When the browser opens the serial-device chooser, select the ESP32-S3 board and click **Connect**.
+5. Open **Flash Firmware** in ESPConnect.
+6. Choose the downloaded **`esp32-n2k-touch-full.bin`**.
+7. Set the flash address/offset to **`0x0`**.
+8. Start the flash.
+9. Do not unplug the board while it is erasing/writing/verifying.
+10. When the operation is complete, disconnect in ESPConnect and restart the board with the physical **BOOT** button released.
+
+The full image is intended for **first installation or clean recovery**. Because it contains the low-flash boot/partition/OTA regions and spans the application-settings area, installing it can clear existing saved settings. Use it when that is acceptable.
+
+If ESPConnect cannot connect, enter the ESP32-S3 download/bootloader mode: hold **BOOT**, press/release **RESET** if available (or reconnect USB while holding BOOT), then release BOOT and try **Connect** again.
+
+After flashing, continue at [Check the first boot and set up the display](#8-check-the-first-boot-and-set-up-the-display).
+
+---
+
+## Build from source instead
+
+The remainder of this guide explains the developer/source-build method. It takes you from a new computer setup to a local build using VS Code and PlatformIO. The main instructions are for Windows 10/11; Mac and Linux notes are at the end.
 
 ## What you are installing
 
@@ -143,16 +186,15 @@ lists `esp32-s3-devkitc-1`, that is an intentional generic target with Waveshare
 flash, PSRAM and display settings supplied by this project. Leave it unchanged.
 Also keep the checked-in dependency versions and partition settings.
 
-After a successful build, the application image is:
+After a successful local build, the application image is:
 
 ```text
 .pio/build/waveshare-touch-4/firmware.bin
 ```
 
-You do not need to find or manually copy this file for the first USB upload.
-PlatformIO uploads the required bootloader, partition table and application.
-A standalone application `firmware.bin` is intended for an already configured
-device's OTA updater; it is not a complete first-install image to flash at address zero.
+That local `firmware.bin` is **application-only**. PlatformIO's normal USB Upload task writes the required bootloader, partition table and application pieces at their correct addresses.
+
+For non-developers, GitHub Releases provide a separately generated **`esp32-n2k-touch-full.bin`** merged image specifically for ESPConnect first installation/recovery at address `0x0`. Do not confuse the two files.
 
 ## 7. Connect the board and upload
 
