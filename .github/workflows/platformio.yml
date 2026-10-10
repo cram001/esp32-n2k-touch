@@ -100,6 +100,18 @@ jobs:
           cp "$build"/ota_data_initial.bin firmware-artifact/ 2>/dev/null || true
           cp "$build"/flash_args firmware-artifact/ 2>/dev/null || true
           cp "$build"/flash_project_args firmware-artifact/ 2>/dev/null || true
+
+          # Browser-friendly first-install/recovery image. This deliberately includes
+          # bootloader, partition table, initial OTA metadata and ota_0 application.
+          # Flash the merged file at address 0x0; it is not an in-place settings-preserving update.
+          python "$HOME/.platformio/packages/tool-esptoolpy/esptool.py" --chip esp32s3 merge_bin \
+            --flash_mode dio --flash_freq 80m --flash_size 16MB \
+            -o firmware-artifact/esp32-n2k-touch-full.bin \
+            0x0 "$build/bootloader.bin" \
+            0x8000 "$build/partitions.bin" \
+            0xf000 "$build/ota_data_initial.bin" \
+            0x20000 "$build/firmware.bin"
+
           printf '%s\n' "${{ github.sha }}" > firmware-artifact/commit.txt
           sha256sum firmware-artifact/*.bin > firmware-artifact/SHA256SUMS.txt
 
