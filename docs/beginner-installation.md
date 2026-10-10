@@ -291,7 +291,30 @@ recognized in an ordinary terminal, open the PlatformIO terminal described above
 
 ## 10. Install later updates
 
-### Get newer code from main
+### Recommended: update with ESPConnect and the latest release
+
+You do not need to install Git, VS Code or PlatformIO for later releases either.
+
+1. Open the [latest GitHub Release](https://github.com/cram001/esp32-n2k-touch/releases/latest).
+2. Expand **Assets** and download **`esp32-n2k-touch-full.bin`**.
+3. Connect the display to the computer using a USB data cable.
+4. Open [ESPConnect](https://thelastoutpostworkshop.github.io/ESPConnect/).
+5. Click **Connect** and choose the ESP32-S3 serial device.
+6. Open **Flash Firmware**.
+7. Select the new **`esp32-n2k-touch-full.bin`**.
+8. Set the flash address/offset to **`0x0`**.
+9. Start the flash and leave the board connected until ESPConnect reports completion.
+10. Restart with BOOT released and check the firmware version/build information on the startup screen.
+
+This is the simplest and most predictable USB update method because it installs the complete bootloader/partition/OTA/application image rather than depending on which OTA slot was previously active.
+
+**Saved settings:** flashing the full image can clear NVS/application settings. Before updating, note any important Wi-Fi credentials, SmartShunt encryption keys, source selections, page layouts, calibration values and other configuration you may need to re-enter.
+
+Do **not** use the release `firmware.bin` at address `0x0`. It contains only the application image. The `esp32-n2k-touch-full.bin` file is the one intended for this simple ESPConnect procedure.
+
+If ESPConnect cannot connect, use the same BOOT/RESET download-mode procedure described in the first-install section above.
+
+### Developers: get newer code from main
 
 1. Open your existing project in VS Code. Close the serial monitor.
 2. If you have not edited project files, open the PlatformIO terminal and run:
