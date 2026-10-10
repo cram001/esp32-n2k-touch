@@ -43,11 +43,27 @@ def validate_network_profile(config):
 
 def validate_bluetooth_profile(config):
     for name, expected in BLUETOOTH_PROFILE.items():
-        match = re.search(r'^#define CONFIG_' + name + r' (\d+)
+        match = re.search(r'^#define CONFIG_' + name + r' (\d+)$', config, re.M)
+        if not match or int(match.group(1)) != expected:
+            raise ValueError(
+                f'Stale Bluetooth memory profile: CONFIG_{name}; regenerate sdkconfig'
+            )
+
+    for name in BLUETOOTH_DISABLED:
+        if re.search(r'^#define CONFIG_' + name + r'\b', config, re.M):
+            raise ValueError(
+                f'Unexpected Bluetooth feature enabled: CONFIG_{name}; regenerate sdkconfig'
+            )
+
+
+def validate_display_profile(config):
     for name, expected in DISPLAY_PROFILE.items():
         match = re.search(r'^#define CONFIG_' + name + r' (\d+)$', config, re.M)
         if not match or int(match.group(1)) != expected:
-            raise ValueError(f'Stale display memory profile: CONFIG_{name}; regenerate sdkconfig')
+            raise ValueError(
+                f'Stale display memory profile: CONFIG_{name}; regenerate sdkconfig'
+            )
+
 
 def validate_startup_stack(config):
     stack = re.search(r'^#define CONFIG_ESP_MAIN_TASK_STACK_SIZE (\d+)$', config, re.M)
