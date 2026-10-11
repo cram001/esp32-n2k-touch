@@ -286,24 +286,31 @@ bool instrument_metric_supported(DataSourceType source, DataMetric metric)
     return (metric > DataMetric::None && metric < DataMetric::BatteryVoltage) || (metric > DataMetric::BatteryTemperature && metric < DataMetric::SolarVoltage);
 }
 
-void format_coordinate(double degrees, bool latitude, LatLonFormat format, char *out, size_t size)
+void format_coordinate(double degrees, bool latitude, LatLonFormat format, char *out, size_t size, bool compact=false)
 {
     const char hemi = latitude ? (degrees < 0 ? 'S' : 'N') : (degrees < 0 ? 'W' : 'E');
     const double a = std::abs(degrees);
     switch (format) {
     case LatLonFormat::DecimalDegrees:
-        std::snprintf(out, size, "%.5f %c", a, hemi);
+        if (compact) std::snprintf(out,size,"%c%.5f",hemi,a);
+        else std::snprintf(out, size, "%.5f %c", a, hemi);
         break;
     case LatLonFormat::DegreesMinutesSeconds: {
         // Round the entire coordinate first, then split it. This carries a
         // rounded 60 seconds/minutes into the next component automatically.
         const unsigned ticks=static_cast<unsigned>(std::lround(a*36000.0));
-        std::snprintf(out, size, "%u %02u %04.1f %c", ticks/36000U,
+        if (compact) std::snprintf(out,size,"%c%u %02u %04.1f",hemi,ticks/36000U,(ticks%36000U)/600U,(ticks%600U)/10.0);
+        else std::snprintf(out, size, "%u %02u %04.1f %c", ticks/36000U,
             (ticks%36000U)/600U,(ticks%600U)/10.0,hemi);
         break;
     }
     case LatLonFormat::DegreesMinutes:
     default: {
+        if (compact) {
+            const unsigned ticks=static_cast<unsigned>(std::lround(a*6000.0));
+            std::snprintf(out,size,"%c%u %02u.%02u",hemi,ticks/6000U,(ticks%6000U)/100U,ticks%100U);
+            break;
+        }
         const unsigned ticks=static_cast<unsigned>(std::lround(a*60000.0));
         std::snprintf(out, size, "%u %06.3f %c", ticks/60000U,(ticks%60000U)/1000.0,hemi);
         break;
@@ -350,10 +357,11 @@ void instrument_format_value(const DataFieldSelection &selection,
     } else if (metric == DataMetric::WaypointName) {
         std::snprintf(value_out,value_out_size,"%s",v.text[0]?v.text.data():"--");
     } else if (metric == DataMetric::Position) {
-        if (!v.secondary_valid) { std::snprintf(value_out,value_out_size,"--"); return; }
+        if (!v.secondary_valid || !std::isfinite(v.value) || !std::isfinite(v.secondary_value) ||
+            std::abs(v.value)>90 || std::abs(v.secondary_value)>180) { std::snprintf(value_out,value_out_size,"--"); return; }
         char lat[32]{}, lon[32]{};
-        format_coordinate(v.value, true, units.lat_lon_format, lat, sizeof(lat));
-        format_coordinate(v.secondary_value, false, units.lat_lon_format, lon, sizeof(lon));
+        format_coordinate(v.value, true, units.lat_lon_format, lat, sizeof(lat), true);
+        format_coordinate(v.secondary_value, false, units.lat_lon_format, lon, sizeof(lon), true);
         std::snprintf(value_out, value_out_size, "%s\n%s", lat, lon);
         std::snprintf(unit_out, unit_out_size, "%s",
             units.lat_lon_format==LatLonFormat::DecimalDegrees?"DD":

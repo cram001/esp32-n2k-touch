@@ -6,15 +6,15 @@ int main(){
     for(int count:{1,2,4,6}){
         const int columns=count>=4?2:1,rows=count/columns;
         const int w=(columns==2?226:460)-20,h=(410-(rows-1)*8)/rows-20;
-        for(int footer:{0,16})for(int unit:{0,22})for(int text_w:{30,90,150,240,440,700}){
-            const auto f=tile_number_fit(w,h,22,unit,footer,text_w,52);
+        for(int footer:{0,16})for(int unit:{0,22})for(int text_w:{30,90,150,240,440,700})for(int text_h:{52,104}){
+            const auto f=tile_number_fit(w,h,22,unit,footer,text_w,text_h);
             assert(f.x>=0 && f.x+f.width<=w);
             assert(f.y>=28);
             assert(f.y+f.height<=h-(unit?unit+6:0)-(footer?footer+6:0));
             if(unit)assert(f.unit_y+unit<=h-(footer?footer+6:0));
             // One more scale step must violate a dimension: largest fitting size.
             assert((text_w*(f.scale+1)+255)/256>w ||
-                (52*(f.scale+1)+255)/256>h-28-(unit?unit+6:0)-(footer?footer+6:0));
+                (text_h*(f.scale+1)+255)/256>h-28-(unit?unit+6:0)-(footer?footer+6:0));
         }
     }
     const auto one=tile_number_fit(440,390,22,22,0,120,52);

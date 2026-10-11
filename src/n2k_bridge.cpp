@@ -8,6 +8,7 @@
 #include "N2kMessages.h"
 #include "third_party/nmea2000_esp32xx/NMEA2000_esp32xx.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "esp_mac.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -114,6 +115,7 @@ void n2k_task(void *)
     N2kInputConfig previous{};
     const TickType_t started=xTaskGetTickCount();
     bool stack_logged=false;
+    TickType_t last_diagnostic=started;
     for (;;) {
         const AppSettings settings = settings_snapshot();
         if (previous.mode != settings.n2k_input.mode || previous.ip != settings.n2k_input.ip || previous.port != settings.n2k_input.port) {
@@ -154,6 +156,25 @@ void n2k_task(void *)
             ESP_LOGI(TAG,"N2K task minimum free stack after startup: %u bytes",
                      static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
             stack_logged=true;
+        }
+        const TickType_t diagnostic_now=xTaskGetTickCount();
+        // Unsigned tick subtraction remains valid across the FreeRTOS tick wrap.
+        if (diagnostic_now-last_diagnostic>=pdMS_TO_TICKS(60000)) {
+            last_diagnostic=diagnostic_now;
+            ESP_LOGI(TAG,"Runtime N2K task minimum free stack: %u bytes",
+                     static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
+            ESP_LOGI(TAG,"Runtime heap (bytes): internal free=%u largest=%u minimum=%u; PSRAM free=%u largest=%u minimum=%u",
+                     static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL)),
+                     static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL)),
+                     static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL)),
+                     static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_SPIRAM)),
+                     static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)),
+                     static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_SPIRAM)));
+            // Internal-capability totals include regions not usable for byte buffers.
+            ESP_LOGI(TAG,"Runtime internal 8-bit heap (bytes): free=%u largest=%u minimum=%u",
+                     static_cast<unsigned>(heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT)),
+                     static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT)),
+                     static_cast<unsigned>(heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT)));
         }
         vTaskDelay(LOOP_DELAY);
     }

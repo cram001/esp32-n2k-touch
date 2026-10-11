@@ -133,3 +133,19 @@ record type; before reception both battery and solar choices are available.
 MPPT data is display-only and does not use the SmartShunt NMEA2000 bridge.
 Cerbo/GX and unsupported BLE record types are excluded from nearby discovery.
 Instant Readout must be enabled for discovery; a key is required for values.
+
+## Combined position layout
+
+The Position field uses one latitude line and one longitude line, with the
+hemisphere first. In degrees/minutes format it shows, for example:
+
+```
+N51 14.34
+W124 03.54
+```
+
+Minutes round to two decimal places, carrying into degrees at 60.00 minutes.
+The two lines are measured and scaled together to fit all page layouts without
+additional wrapping. Decimal-degree and degrees/minutes/seconds selections
+still apply, with leading hemispheres. Standalone Latitude/Longitude fields
+retain their existing precision and trailing hemispheres.

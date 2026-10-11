@@ -233,3 +233,30 @@ GitHub Actions also runs `pio run` for feature branches and pull requests.
 - Waveshare examples: https://github.com/waveshareteam/ESP32-S3-Touch-LCD-4
 - NMEA2000 library: https://github.com/ttlappalainen/NMEA2000
 - ESP32 TWAI transport: https://github.com/jiauka/NMEA2000_esp32xx
+
+## Runtime memory diagnostics
+
+Keep the USB serial monitor open at **115200 baud**. Every 60 seconds after the
+application tasks start, the firmware prints `Runtime heap (bytes)` with internal
+RAM and PSRAM free bytes, largest free blocks and minimum free totals since boot.
+A second `Runtime internal 8-bit heap (bytes)` line reports the byte-addressable
+internal memory available for ordinary buffers. Capability totals overlap and
+must not be added together. No serial command or reboot is needed.
+
+`Runtime N2K task minimum free stack` reports that task's lifetime stack watermark
+in bytes. In Wi-Fi source mode, the existing Wi-Fi worker and W2K input tasks also
+report their own watermarks once per minute. These reports come from the existing
+tasks; no diagnostic task, stack reduction or memory-profile change is involved.
+LVGL draw/system tasks are not included in these periodic stack reports.
+
+For a memory check, operate the display for 15–30 minutes with normal traffic,
+Bluetooth discovery and page navigation, then save the later reports along with
+the startup `LVGL draw buffer` line showing whether its allocation is in PSRAM.
+Compare free memory and largest blocks over time; a persistent decline deserves
+investigation. Minimum heap figures are sums of regional low-water marks and can
+reflect lows reached at different times. Stack watermarks are lifetime minima.
+
+The combined **Position** tile displays latitude/longitude on two fitted lines
+with leading hemispheres, such as `N51 14.34` and `W124 03.54`. Degrees/minutes
+uses two decimal places for minutes; other selected coordinate formats still
+apply. Separate Latitude/Longitude tiles retain their existing formatting.

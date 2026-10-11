@@ -215,6 +215,7 @@ void scan() {
 void worker(void *) {
     const TickType_t started=xTaskGetTickCount();
     bool stack_logged=false;
+    TickType_t last_diagnostic=started;
     for (;;) {
         Command command{};
         if (xQueueReceive(g_commands, &command, pdMS_TO_TICKS(100)) == pdTRUE) {
@@ -233,6 +234,13 @@ void worker(void *) {
             ESP_LOGI(TAG,"Wi-Fi worker minimum free stack after startup: %u bytes",
                      static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
             stack_logged=true;
+        }
+        const TickType_t diagnostic_now=xTaskGetTickCount();
+        // Unsigned tick subtraction remains valid across the FreeRTOS tick wrap.
+        if (diagnostic_now-last_diagnostic>=pdMS_TO_TICKS(60000)) {
+            last_diagnostic=diagnostic_now;
+            ESP_LOGI(TAG,"Runtime Wi-Fi worker minimum free stack: %u bytes",
+                     static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
         }
     }
 }

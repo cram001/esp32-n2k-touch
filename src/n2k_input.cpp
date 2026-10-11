@@ -39,6 +39,7 @@ void task(void *) {
     char bytes[512];
     const TickType_t started=xTaskGetTickCount();
     bool stack_logged=false;
+    TickType_t last_diagnostic=started;
     for (;;) {
         xSemaphoreTake(mutex, portMAX_DELAY);
         const N2kInputConfig current = config;
@@ -119,6 +120,13 @@ void task(void *) {
             ESP_LOGI(TAG,"W2K input minimum free stack after startup: %u bytes",
                      static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
             stack_logged=true;
+        }
+        const TickType_t diagnostic_now=xTaskGetTickCount();
+        // Unsigned tick subtraction remains valid across the FreeRTOS tick wrap.
+        if (diagnostic_now-last_diagnostic>=pdMS_TO_TICKS(60000)) {
+            last_diagnostic=diagnostic_now;
+            ESP_LOGI(TAG,"Runtime W2K input minimum free stack: %u bytes",
+                     static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
         }
         vTaskDelay(pdMS_TO_TICKS(20));
     }
