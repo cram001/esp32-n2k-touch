@@ -62,7 +62,7 @@ navigation and environmental sensors documented in
 
 - Depth — PGN 128267
 - Boat speed / speed through water — PGN 128259
-- SOG / COG — PGN 129026
+- SOG / COG — PGN 129026. Reserved SOG values `0xFFFD`–`0xFFFF` display `--`; a real zero displays `0.0`. An unavailable reading immediately clears the previous value for that source. Invalid COG/reference also displays `--`, independently of SOG.
 - Heading — PGN 127250; Units selects True or Magnetic. Conversion uses received
   magnetic variation (127250 or 127258); labels show `deg T` / `deg M`. Missing
   variation shows `--` when conversion is required. COG remains unchanged.

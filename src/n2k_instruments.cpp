@@ -116,7 +116,17 @@ void n2k_instruments_receive(const tN2kMsg &msg) {
         if(lon!=N2kDoubleNA&&std::abs(lon)<=180)publish(msg,DataMetric::Longitude,lon);
     }break;}
     case 129026:{unsigned char sid;tN2kHeadingReference ref;double cog,sog;
-        if(ParseN2kPGN129026(msg,sid,ref,cog,sog)){publish(msg,DataMetric::CourseOverGround,cog,255,255,reference(ref));publish(msg,DataMetric::SpeedOverGround,sog);}break;}
+        if(ParseN2kPGN129026(msg,sid,ref,cog,sog)){
+            // The library only maps 0xFFFF to NA. 0xFFFD/0xFFFE are also
+            // reserved status values, not 655.33/655.34 m/s (~1273.9 kn).
+            const uint16_t raw_sog=static_cast<uint16_t>(msg.Data[4]) | (static_cast<uint16_t>(msg.Data[5])<<8);
+            if(raw_sog<0xFFFDU && sog!=N2kDoubleNA && std::isfinite(sog))publish(msg,DataMetric::SpeedOverGround,sog);
+            else n2k_sources_invalidate(DataMetric::SpeedOverGround,msg.Source);
+            // Course has a physical range as well as an unavailable sentinel.
+            if(reference(ref)!=HeadingReference::Unknown && cog!=N2kDoubleNA && std::isfinite(cog) && cog>=0 && cog<=6.283185307179586)
+                publish(msg,DataMetric::CourseOverGround,cog,255,255,reference(ref));
+            else n2k_sources_invalidate(DataMetric::CourseOverGround,msg.Source);
+        }break;}
     case 129029:{unsigned char sid,sats,stations;uint16_t days,station;double seconds,lat,lon,alt,hdop,pdop,geoid,age;tN2kGNSStype type,station_type;tN2kGNSSmethod method;
         if(ParseN2kPGN129029(msg,sid,days,seconds,lat,lon,alt,type,method,sats,hdop,pdop,geoid,stations,station_type,station,age) && static_cast<unsigned>(method)>0 && static_cast<unsigned>(method)<=8){
             if(lat!=N2kDoubleNA&&std::abs(lat)<=90)publish(msg,DataMetric::Latitude,lat);

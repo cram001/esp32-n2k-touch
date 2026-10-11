@@ -80,7 +80,7 @@ Wall mounted case 3D printed:  https://cults3d.com/en/3d-model/home/flush-mount-
 
 ## Current UI
 
-The firmware provides six configurable instrument pages with 1, 2, 4, or 6 data fields per page. Fields can mix NMEA 2000 and SmartShunt sources.
+The firmware provides six configurable instrument pages with 1, 2, 4, or 6 data fields per page. Fields can mix NMEA 2000 and SmartShunt sources. PGN 129026 SOG status values are shown as `--`, including the `0xFFFE` value that otherwise decodes to 1273.9 knots; actual zero speed remains `0.0`.
 
 The Settings area includes:
 
