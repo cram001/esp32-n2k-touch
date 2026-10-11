@@ -29,7 +29,7 @@ The service:
 2. Selects Product Advertisement / Battery Monitor Instant Readout records.
 3. Matches the BLE identity bound to each configured SmartShunt slot.
 4. Validates the first encryption-key byte exposed in the record header.
-5. Decrypts the 16-byte battery-monitor payload using AES-CTR and the user-supplied Instant Readout key.
+5. Decrypts the required 15 bytes of the battery-monitor payload using AES-CTR and the user-supplied Instant Readout key.
 6. Converts Victron scale factors and NA values into an internal `SmartShuntData` snapshot.
 7. Marks data stale after 5 seconds without a valid battery-monitor advertisement.
 
