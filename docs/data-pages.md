@@ -45,7 +45,7 @@ Each tile stores three pieces of configuration:
 
 1. Source type: NMEA 2000 or SmartShunt.
 2. Metric: the value to display.
-3. Source index: used only for SmartShunt fields to identify a configured SmartShunt by its friendly name.
+3. Device: for SmartShunt fields, tap the device-name button and select a configured slot from SELECT SMARTSHUNT. Slot numbers distinguish devices with matching names; each tile retains its own selection.
 
 SmartShunt MAC addresses remain internal stable identifiers and are not part of normal field selection.
 

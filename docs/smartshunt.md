@@ -4,7 +4,7 @@
 
 The firmware uses Victron **Instant Readout** BLE manufacturer advertisements. It does not open or hold a GATT connection to a SmartShunt.
 
-The scanner runs continuously so the UI can discover nearby Victron devices and configured monitors can update in the background. Active scanning requests Bluetooth scan-response names; it does not establish a GATT connection. Live battery data remains advertisement-based. Wi-Fi scans remain user-triggered.
+In CAN-source mode, the scanner runs continuously so the UI can discover nearby Victron devices and configured monitors can update in the background. Active scanning requests Bluetooth scan-response names; it does not establish a GATT connection. Live battery data remains advertisement-based. Wi-Fi scans remain user-triggered.
 
 ## Multiple SmartShunts
 
@@ -46,9 +46,9 @@ After selecting a device:
 
 The key is stored in ESP-IDF NVS and is not printed in normal logs.
 
-## Battery pages
+## Instrument tiles
 
-Each configured SmartShunt has its own logical battery page. The battery screen displays the selected device name at the top and provides previous/next controls to move between configured devices.
+Open Settings > Pages, choose a field, set its source type to SMARTSHUNT and choose the metric. Tap the device-name button to open SELECT SMARTSHUNT, then select the configured slot by number and name. Each field stores its own device selection, so different shunts can appear together on one page. Devices remain selectable without live telemetry; missing data displays `--`. BLE is disabled in Wi-Fi-source mode.
 
 Each page shows, when available:
 
@@ -62,7 +62,9 @@ Each page shows, when available:
 
 ## Decoded battery-monitor fields
 
-The 16-byte decrypted battery-monitor record contains:
+The battery-monitor fields occupy 118 bits (15 bytes). Accept 15-byte records and longer records without requiring AES block padding. The product/readout flags byte is not treated as a fixed `0xA0`; manufacturer product record `0x10` and battery-monitor record `0x02` identify supported telemetry. See [Victron’s published field layout](https://communityarchive.victronenergy.com/storage/attachments/extra-manufacturer-data-2022-12-14.pdf).
+
+The decrypted battery-monitor record contains:
 
 - Time-to-go
 - Battery voltage

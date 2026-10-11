@@ -6,7 +6,7 @@
 - ESP-IDF under PlatformIO
 - LVGL 9.5 through the Waveshare BSP
 - ESP32 NVS for persistent settings
-- ESP32 BLE GAP passive scanner for Victron Instant Readout
+- ESP32 BLE GAP active scanner for Victron Instant Readout
 - NMEA2000 library with a vendored ESP-IDF/TWAI transport derived from jiauka/NMEA2000_esp32xx
 
 ## Runtime services
@@ -21,13 +21,13 @@ Day and Night modes have independent brightness values. Brightness changes are s
 
 ### SmartShunt BLE service
 
-`smartshunt_ble` passively scans BLE advertisements. It does not create a GATT connection.
+`smartshunt_ble` uses active scanning for names and advertisement-based telemetry, without a GATT connection. It starts only in CAN-source mode. Wi-Fi-source mode starts Station/W2K-1 with CAN and BLE disabled.
 
 The service:
 
 1. Filters Victron manufacturer data (`0x02E1`).
 2. Selects Product Advertisement / Battery Monitor Instant Readout records.
-3. Optionally filters on the configured SmartShunt MAC address.
+3. Matches the BLE identity bound to each configured SmartShunt slot.
 4. Validates the first encryption-key byte exposed in the record header.
 5. Decrypts the 16-byte battery-monitor payload using AES-CTR and the user-supplied Instant Readout key.
 6. Converts Victron scale factors and NA values into an internal `SmartShuntData` snapshot.
@@ -69,7 +69,7 @@ A network service will join the vessel Wi-Fi and use the Cerbo GX local API/MQTT
 
 ### OTA
 
-The flash layout provides two OTA application slots. HTTPS OTA transport, project/secure-version validation, startup-health confirmation and bootloader rollback are implemented. An HTTPS URL update screen and local AP upload page are available; see `next-release-wifi-ota.md`.
+The flash layout provides two OTA application slots. HTTPS OTA transport, project/secure-version validation, startup-health confirmation and bootloader rollback are implemented. Wireless OTA and AP mode are currently unavailable in the selected-source architecture. The OTA implementation remains in the source; `next-release-wifi-ota.md` describes an earlier architecture.
 
 ## Concurrency rules
 

@@ -242,7 +242,8 @@ routine fix: erasing can remove saved settings, passwords and calibration.
 4. Set your units and comfortable Day/Night brightness. Start with visible levels.
 5. **Swipe down** on an instrument page to edit its layout and displayed values.
    Swipe left/right to change enabled pages.
-6. If using Wi-Fi, choose Station, enable it, tap **Scan Networks**, select your
+6. First select the NMEA input: CAN for wired NMEA 2000 + SmartShunt BLE, or Wi-Fi for W2K-1 TCP (BLE/CAN disabled). Changing source saves it and reboots.
+   In Wi-Fi mode, open Wi-Fi setup, tap **Scan Networks**, select your
    2.4 GHz network and enter its password. Scanning happens only when requested.
    Keep manual SSID entry for a hidden network. Save and check for an IP address.
 7. Choose the data input and configure any sensors using these guides:
@@ -333,7 +334,7 @@ If ESPConnect cannot connect, use the same BOOT/RESET download-mode procedure de
    git pull --ff-only
    ```
 
-3. Build again and wait for SUCCESS. Upload by USB as before, or use OTA below.
+3. Build again and wait for SUCCESS. Upload by USB as before.
 
 If Git reports local changes or refuses the update, stop and save your work;
 do not use reset/discard commands to force it. A separate fresh clone in another
@@ -342,28 +343,9 @@ An unmerged feature branch is a separate version; only use one when specifically
 
 ### Update an already running device over Wi-Fi (OTA)
 
-OTA means **over-the-air update**. The first installation still uses USB.
-For subsequent updates with the project's existing dual-slot layout:
+Wireless OTA and Access Point mode are unavailable in the current selected-source firmware. CAN source starts CAN and SmartShunt BLE; Wi-Fi source starts Station and W2K-1 TCP with BLE/CAN disabled. Use the USB update instructions above.
 
-1. Build the new firmware and retain the previous working download.
-2. On the display, swipe up and open **Wi-Fi**. Choose/enable **Access Point**,
-   set its name and password (8–63 characters), and save.
-3. Connect your laptop's Wi-Fi to that display network. “No Internet” is expected;
-   stay connected to it for the upload.
-4. Open a browser and enter `http://` followed by the IP address shown on the
-   display. Use that displayed address rather than guessing one.
-5. Choose the new `.pio/build/waveshare-touch-4/firmware.bin` in the upload page,
-   upload it and wait for validation. Select **Reboot** when offered.
-6. Check the version on the next boot and test your pages/settings.
-
-The other option is **Wi-Fi > Firmware Update** in Station mode, using a direct
-HTTPS URL to a compatible application image; a GitHub source page URL is not a firmware image.
-See [Wi-Fi/OTA notes](next-release-wifi-ota.md) for details.
-
-OTA can retain a working slot and roll back a failed trial before confirmation.
-It cannot promise recovery from every fault. USB installation can overwrite a
-working slot and reset OTA metadata, so it is not the same rollback-safe trial.
-Normal settings persist in NVS; do not erase NVS or change partitions during an update.
+The dual-slot partition layout remains unchanged. `firmware.bin` is application-only and must never be flashed at `0x0`. ESPConnect uses `esp32-n2k-touch-full.bin` at `0x0`; record your settings first because this method can clear NVS. Historical OTA notes are not instructions for this firmware.
 
 ## Troubleshooting checklist
 

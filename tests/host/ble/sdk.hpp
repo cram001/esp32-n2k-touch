@@ -52,6 +52,24 @@ inline esp_err_t esp_ble_gap_register_callback(void(*)(esp_gap_ble_cb_event_t,es
 inline esp_err_t esp_ble_gap_set_scan_params(esp_ble_scan_params_t *p){fake_scan_params=*p;return ESP_OK;}
 inline esp_err_t esp_ble_gap_start_scanning(int){return ESP_OK;}
 inline esp_err_t esp_ble_gap_stop_scanning(){return ESP_OK;}
+#ifdef SMARTSHUNT_TEST_REAL_AES
+#include <openssl/evp.h>
+struct esp_aes_context { uint8_t key[16]{}; };
+inline void esp_aes_init(esp_aes_context*){}
+inline void esp_aes_free(esp_aes_context*){}
+inline int esp_aes_setkey(esp_aes_context *ctx,const uint8_t *key,int bits){
+    if(bits!=128)return -1;
+    std::memcpy(ctx->key,key,16);return 0;
+}
+inline int esp_aes_crypt_ctr(esp_aes_context *ctx,size_t size,size_t*,unsigned char *nonce,unsigned char*,const uint8_t *input,uint8_t *output){
+    EVP_CIPHER_CTX *cipher=EVP_CIPHER_CTX_new();
+    if(!cipher)return -1;
+    int count=0;
+    const bool ok=EVP_EncryptInit_ex(cipher,EVP_aes_128_ctr(),nullptr,ctx->key,nonce)==1 &&
+        EVP_EncryptUpdate(cipher,output,&count,input,static_cast<int>(size))==1 && count==static_cast<int>(size);
+    EVP_CIPHER_CTX_free(cipher);return ok?0:-1;
+}
+#else
 struct esp_aes_context{};
 inline void esp_aes_init(esp_aes_context*){}
 inline void esp_aes_free(esp_aes_context*){}
@@ -59,3 +77,5 @@ inline int esp_aes_setkey(esp_aes_context*,const uint8_t*,int){return 0;}
 // No simulated successful decryption: these tests exercise discovery and
 // filtering through the real service, not the AES implementation.
 inline int esp_aes_crypt_ctr(esp_aes_context*,size_t,size_t*,unsigned char*,unsigned char*,const uint8_t*,uint8_t*){return -1;}
+
+#endif

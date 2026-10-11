@@ -65,9 +65,9 @@ Wall mounted case 3D printed:  https://cults3d.com/en/3d-model/home/flush-mount-
 - Receive Victron SmartShunt **Instant Readout** BLE advertisements, with active scanning for device names.
 - Display SmartShunt voltage, current, SOC, consumed Ah and time-to-go.
 - Optionally bridge SmartShunt battery data onto NMEA 2000 using a selectable battery instance.
-- Connect to Wi-Fi in station or Access Point mode; separate credentials persist in application NVS.
+- Select CAN + SmartShunt BLE, or Wi-Fi Station + W2K-1 TCP; only the selected transports start.
 - Use the same Wi-Fi transport for future Cerbo GX control.
-- Dual-slot HTTPS pull and local AP-upload OTA with startup validation and rollback support.
+- Preserve dual OTA slots and boot validation; wireless OTA is currently disabled.
 
 ## Development stack
 
@@ -87,7 +87,7 @@ The Settings area includes:
 - Page enable/layout/data-field configuration.
 - Global units for depth, temperature, wind speed, vessel speed, long distance and short distance.
 - Day/Night mode and independent brightness.
-- Wi-Fi Station/AP selection, masked/showable password, on-demand SSID scan/select, diagnostics and firmware updates.
+- Wi-Fi Station configuration, masked/showable password, on-demand SSID scan/select and diagnostics.
 - Multi-SmartShunt setup with per-device Instant Readout key and optional NMEA 2000 bridging.
 
 Settings are persisted in ESP-IDF NVS.
@@ -95,7 +95,9 @@ Settings are persisted in ESP-IDF NVS.
 
 ## Wi-Fi
 
-Choose Station to join a 2.4 GHz router, or Access Point for a direct local firmware upload. Station and AP credentials are stored separately in application NVS and survive reboot. Passwords are masked by default and can be shown explicitly. Open station networks require the Open network checkbox.
+Select Wi-Fi as the NMEA source to join a 2.4 GHz router and receive W2K-1 TCP data. This profile disables CAN and SmartShunt BLE. Select CAN for wired NMEA 2000 and SmartShunt BLE; Wi-Fi does not start in that profile. Source selection persists and changing transport requires reboot. Access Point mode is unavailable in the current architecture.
+
+Station credentials persist in application NVS. Passwords are masked by default and can be shown explicitly. Open station networks require the Open network checkbox.
 
 Tap Scan Networks for a single scan and select an SSID, or enter a hidden SSID manually. There is no continuous Wi-Fi scanning. The status includes IP address, connection state, signal strength and readable/numeric disconnect reasons; reconnect uses capped backoff.
 
@@ -103,11 +105,9 @@ Existing schema-2 settings migrate without erasing NVS. A protected network requ
 
 ## OTA updates
 
-The unchanged 16 MB flash layout provides two 6 MB application slots and OTA metadata. Under Wi-Fi > Firmware Update, enter an HTTPS application-image URL while connected in Station mode. In AP mode, connect a phone/laptop to the display and open its displayed HTTP address to upload `firmware.bin` directly. Both methods validate the image and require an explicit reboot.
+Wireless OTA is currently disabled/unreachable in the selected-source architecture. The unchanged 16 MB flash layout retains two 6 MB application slots, OTA metadata and boot validation. The HTTPS/AP upload implementation remains in the source but is not an available update path in this firmware.
 
-A candidate image is confirmed after local services initialize and a five-second UI heartbeat check succeeds. A pending image that fails health checks is rejected; a crash/reset before confirmation permits bootloader rollback to a valid previous slot. On-board rollback and radio/touch behavior require bench acceptance.
-
-See [release notes and bench checklist](docs/next-release-wifi-ota.md) for setup, migration, validation and future gesture/Actisense planning.
+Use the USB installation/update instructions above. ESPConnect requires `esp32-n2k-touch-full.bin` at `0x0`; this can clear settings. Do not flash `firmware.bin` at `0x0`. Earlier [Wi-Fi/OTA notes](docs/next-release-wifi-ota.md) describe a historical architecture.
 
 ## SmartShunt Instant Readout
 
@@ -127,7 +127,13 @@ Configured battery capacity is intentionally not required because it is not pres
 
 ### Finding the Instant Readout key
 
-In VictronConnect, open the SmartShunt and locate the Instant Readout encryption data under the product information/settings area. Enter the 32 hexadecimal characters into the SmartShunt settings page. The MAC filter is optional when only one Victron battery monitor is in BLE range, but is recommended on installations with multiple monitors.
+In VictronConnect, open the SmartShunt and locate the Instant Readout encryption data under the product information/settings area. Enter the 32 hexadecimal characters into the SmartShunt settings page. Use SELECT NEARBY to bind each configured slot to its device; the stored BLE identity is required for telemetry matching.
+
+### Choose a SmartShunt for each tile
+
+In **Settings > Pages**, open a field, set its source to **SMARTSHUNT**, and choose voltage, current, SOC or another battery metric. Tap the **device-name button** to open **SELECT SMARTSHUNT**, then select the configured slot by number and name. Each tile saves its own selection, so you can show multiple batteries on the same page. Slots remain selectable while offline; missing or expired readings show `--`.
+
+The decoder accepts battery-monitor records containing the required 15 bytes, including longer records, and does not require the product flags byte to equal `0xA0`. Discovery alone does not prove that telemetry is being received. Use **CAN source** for SmartShunt BLE; Wi-Fi source currently disables BLE.
 
 ## SmartShunt -> NMEA 2000
 
