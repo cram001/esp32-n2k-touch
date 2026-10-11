@@ -20,8 +20,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: Beta-0.4.2
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -63,6 +61,12 @@ jobs:
           g++ -std=c++17 -Wall -Wextra -I tests/host/gateway -I src src/n2k_input.cpp src/actisense_ascii.cpp tests/host/n2k_input_test.cpp -o /tmp/n2k_input_test
           /tmp/n2k_input_test
 
+      - name: Test asynchronous CAN transmit ownership
+        shell: bash
+        run: |
+          g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -I tests/host/twai -I src src/third_party/nmea2000_esp32xx/NMEA2000_esp32xx.cpp tests/host/twai_transport_test.cpp -o /tmp/twai_transport_test
+          ASAN_OPTIONS=detect_stack_use_after_return=1 /tmp/twai_transport_test
+
       - name: Build firmware
         shell: bash
         run: |
@@ -101,8 +105,6 @@ jobs:
           cp "$build/firmware.bin" firmware-artifact/
           cp "$build/firmware.elf" firmware-artifact/
           cp "$build"/*.map firmware-artifact/ 2>/dev/null || true
-          "$HOME/.platformio/packages/toolchain-xtensa-esp-elf/bin/xtensa-esp32s3-elf-addr2line" -pfiaCe "$build/firmware.elf" 0x420945eb 0x4208a79d 0x4208a962 0x4037d27d 0x4203c514 0x4203b7be 0x42118eb9 0x4203c6f7 0x4203c81c 0x4203c689 0x42040bbc 0x42041327 0x4203b9a3 0x42053f5b 0x4200dc71 0x4200ea4a 0x4200eeed 0x4204d7fd 0x4204d8ef 0x4203c70a 0x42048bb5 0x4204981b 0x42049b98 0x4204a63b 0x4204f012 0x4204f16d 0x4210133c > firmware-artifact/backtrace.txt
-          cat firmware-artifact/backtrace.txt
           cp "$build/partitions.bin" firmware-artifact/
           cp "$build/bootloader.bin" firmware-artifact/ 2>/dev/null || true
           cp "$build/bootloader/bootloader.bin" firmware-artifact/ 2>/dev/null || true

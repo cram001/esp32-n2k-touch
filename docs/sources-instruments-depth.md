@@ -69,6 +69,27 @@ litres/hour, engine time hours and level/load/torque/humidity percent. Existing
 temperature/speed/distance settings apply. Position uses decimal degrees with
 hemisphere; altitude and cross-track distance use the metres/feet setting.
 
+## Opening the depth source picker
+
+Opening or refreshing the picker requests NMEA2000 device identification on CAN.
+Transmit descriptors and their eight-byte payloads remain owned by the transport
+until the ESP-IDF TX completion callback, including queued frames and bus-off
+recovery. A fixed pool covers one hardware frame plus the existing 20-frame
+queue; exhaustion returns nonblocking backpressure to the NMEA2000 library.
+This fixes the Beta-0.4.2 CAN-connected picker crash without changing RX, task
+stacks, source-selection storage or flash partitions.
+
+An empty picker means no qualifying depth PGN has been received yet; discovery
+requests alone do not create a depth sensor. Check sensor power, CAN wiring and
+PGN 128267 transmission, then Refresh. DEFAULT FOR UNCONFIGURED SENSORS remains
+an automatic policy. Select an actual transducer before setting local installation
+distances, SAVE, and choose the corresponding depth reference on the tile.
+
+Hardware check: with CAN traffic active, repeatedly open and refresh Depth Setup,
+select a sensor, save distances, and reopen it. Confirm no reboot, normal CAN
+telemetry and the expected below-keel/below-surface readings. Repeat with CAN
+disconnected to check that the empty-list message remains usable.
+
 ## Depth references
 
 Settings > Depth Setup first selects the physical depth source. Installation

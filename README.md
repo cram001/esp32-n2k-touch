@@ -260,3 +260,19 @@ The combined **Position** tile displays latitude/longitude on two fitted lines
 with leading hemispheres, such as `N51 14.34` and `W124 03.54`. Degrees/minutes
 uses two decimal places for minutes; other selected coordinate formats still
 apply. Separate Latitude/Longitude tiles retain their existing formatting.
+
+## Depth source and installation offsets
+
+In **Settings > Depth Setup**, tap the source button and select the physical
+transducer before entering keel or water-surface distances. **DEFAULT FOR
+UNCONFIGURED SENSORS** is an automatic-selection policy, not a transducer; local
+installation distances cannot be saved against it. The screen explains this
+until a sensor is selected. Distances apply to the selected sensor after **SAVE**;
+choose **Below keel** or **Below water surface** on the depth tile to use them.
+
+The picker lists sensors from received depth PGNs. With CAN connected, opening
+or refreshing it also requests device identification. If no depth sensor appears,
+check that the transducer is powered and sending PGN 128267, then tap **Refresh**.
+Queued CAN discovery frames now retain their descriptor and payload until transmit
+completion, fixing the reboot when opening this picker with a live CAN bus.
+See [depth setup details](docs/sources-instruments-depth.md).

@@ -28,6 +28,19 @@ private:
     volatile bool recovery_requested_ = false;
     volatile uint32_t last_error_flags_ = 0;
 
+    // esp_twai borrows descriptor and payload until on_tx_done: one hardware
+    // frame plus 20 queued frames. Storage also survives bus-off recovery.
+    static constexpr size_t TX_QUEUE_DEPTH = 20;
+    struct TxSlot {
+        twai_frame_t frame{};
+        uint8_t data[8]{};
+        bool in_use = false;
+    };
+    TxSlot tx_slots_[TX_QUEUE_DEPTH + 1]{};
+    portMUX_TYPE tx_lock_ = portMUX_INITIALIZER_UNLOCKED;
+    static bool tx_done_cb(twai_node_handle_t,
+                           const twai_tx_done_event_data_t *, void *);
+
     gpio_num_t tx_pin_;
     gpio_num_t rx_pin_;
 

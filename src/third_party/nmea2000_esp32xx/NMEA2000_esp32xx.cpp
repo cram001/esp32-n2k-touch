@@ -27,6 +27,23 @@ struct RxFrame {
 
 bool tNMEA2000_esp32xx::can_in_use_ = false;
 
+bool tNMEA2000_esp32xx::tx_done_cb(twai_node_handle_t,
+                                  const twai_tx_done_event_data_t *edata,
+                                  void *user_ctx)
+{
+    auto *self = static_cast<tNMEA2000_esp32xx *>(user_ctx);
+    if (self == nullptr || edata == nullptr) return false;
+    portENTER_CRITICAL_ISR(&self->tx_lock_);
+    for (auto &slot : self->tx_slots_) {
+        if (&slot.frame == edata->done_tx_frame) {
+            slot.in_use = false; // Both successful and failed completions release ownership.
+            break;
+        }
+    }
+    portEXIT_CRITICAL_ISR(&self->tx_lock_);
+    return false;
+}
+
 tNMEA2000_esp32xx::tNMEA2000_esp32xx(gpio_num_t tx_pin, gpio_num_t rx_pin)
     : tNMEA2000(), tx_pin_(tx_pin), rx_pin_(rx_pin)
 {
@@ -94,18 +111,35 @@ bool tNMEA2000_esp32xx::CANSendFrame(unsigned long id, unsigned char len,
     if (!is_open_ || node_ == nullptr) return false;
     service_bus_recovery();
 
-    uint8_t data[8]{};
-    const size_t data_len = std::min<size_t>(len, sizeof(data));
-    if (buf != nullptr && data_len > 0) std::memcpy(data, buf, data_len);
+    TxSlot *slot = nullptr;
+    portENTER_CRITICAL(&tx_lock_);
+    for (auto &candidate : tx_slots_) {
+        if (!candidate.in_use) {
+            candidate.in_use = true;
+            slot = &candidate;
+            break;
+        }
+    }
+    portEXIT_CRITICAL(&tx_lock_);
+    if (slot == nullptr) return false; // Nonblocking backpressure, including missing ACKs.
 
-    twai_frame_t frame{};
+    const size_t data_len = std::min<size_t>(len, sizeof(slot->data));
+    std::memset(slot->data, 0, sizeof(slot->data));
+    if (buf != nullptr && data_len > 0) std::memcpy(slot->data, buf, data_len);
+    auto &frame = slot->frame;
+    frame = {};
     frame.header.id = static_cast<uint32_t>(id);
     frame.header.ide = 1; // NMEA 2000 uses 29-bit extended CAN identifiers.
     frame.header.dlc = static_cast<uint16_t>(data_len);
-    frame.buffer = data;
+    frame.buffer = slot->data;
     frame.buffer_len = data_len;
 
-    return twai_node_transmit(node_, &frame, 0) == ESP_OK;
+    // Completion runs on Core 0; never hold our lock across the driver call.
+    if (twai_node_transmit(node_, &frame, 0) == ESP_OK) return true;
+    portENTER_CRITICAL(&tx_lock_);
+    slot->in_use = false; // A rejected submission receives no completion callback.
+    portEXIT_CRITICAL(&tx_lock_);
+    return false;
 }
 
 bool tNMEA2000_esp32xx::CANOpen()
@@ -126,7 +160,7 @@ bool tNMEA2000_esp32xx::CANOpen()
     config.io_cfg.bus_off_indicator = GPIO_NUM_NC;
     config.bit_timing.bitrate = 250000;
     config.fail_retry_cnt = -1;
-    config.tx_queue_depth = 20;
+    config.tx_queue_depth = TX_QUEUE_DEPTH;
 
     esp_err_t err = twai_new_node_onchip(&config, &node_);
     if (err != ESP_OK) {
@@ -137,6 +171,7 @@ bool tNMEA2000_esp32xx::CANOpen()
     }
 
     twai_event_callbacks_t callbacks{};
+    callbacks.on_tx_done = tx_done_cb;
     callbacks.on_rx_done = rx_done_cb;
     callbacks.on_error = error_cb;
     callbacks.on_state_change = state_change_cb;
