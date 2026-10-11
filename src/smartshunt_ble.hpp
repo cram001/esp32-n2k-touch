@@ -9,6 +9,9 @@
 constexpr size_t MAX_DISCOVERED_SMARTSHUNTS = 8;
 
 struct SmartShuntData {
+    uint8_t record_type = 0; // 0x01 solar charger, 0x02 battery monitor; runtime only.
+    bool power_valid = false;
+    float power_w = 0.0f;
     bool valid = false;
     bool key_valid = false;
     bool stale = true;

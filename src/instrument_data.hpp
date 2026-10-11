@@ -33,6 +33,7 @@ void instrument_data_update_heading(double radians, HeadingReference reference);
 void instrument_data_update_variation(double radians);
 InstrumentValue instrument_data_get(const DataFieldSelection &selection, uint8_t field_id = 255);
 
+const char *instrument_field_name(const DataFieldSelection &selection);
 const char *instrument_metric_name(DataMetric metric);
 const char *instrument_source_name(const DataFieldSelection &selection, const AppSettings &settings, uint8_t field_id = 255);
 bool instrument_metric_supported(DataSourceType source, DataMetric metric);

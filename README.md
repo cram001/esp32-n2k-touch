@@ -109,9 +109,9 @@ Wireless OTA is currently disabled/unreachable in the selected-source architectu
 
 Use the USB installation/update instructions above. ESPConnect requires `esp32-n2k-touch-full.bin` at `0x0`; this can clear settings. Do not flash `firmware.bin` at `0x0`. Earlier [Wi-Fi/OTA notes](docs/next-release-wifi-ota.md) describe a historical architecture.
 
-## SmartShunt Instant Readout
+## Victron BLE Instant Readout
 
-The ESP32 does not create a BLE connection to the SmartShunt. It scans Victron manufacturer advertisements and requests scan-response names, identifies battery-monitor Instant Readout records, decrypts them with the key supplied by VictronConnect, and decodes the published battery-monitor fields. The nearby-device picker refreshes while open and can discover Victron devices before a key is entered. Discovery does not imply that a device supports the decoded battery-monitor record.
+The ESP32 does not create a BLE connection to the SmartShunt. It scans Victron manufacturer advertisements and requests scan-response names, identifies battery-monitor and solar-charger Instant Readout records, decrypts them with the key supplied by VictronConnect, and decodes their published fields. The nearby-device picker refreshes while open and shows supported battery-monitor (0x02) and solar-charger (0x01) Instant Readout records before a key is entered. Cerbo/GX devices and unsupported records are excluded. Enable Instant Readout in VictronConnect first; setup-only advertisements are not listed. Discovery does not prove that the supplied key is correct.
 
 Displayed values:
 
@@ -127,17 +127,35 @@ Configured battery capacity is intentionally not required because it is not pres
 
 ### Finding the Instant Readout key
 
-In VictronConnect, open the SmartShunt and locate the Instant Readout encryption data under the product information/settings area. Enter the 32 hexadecimal characters into the SmartShunt settings page. Use SELECT NEARBY to bind each configured slot to its device; the stored BLE identity is required for telemetry matching.
+In VictronConnect, open the SmartShunt and locate the Instant Readout encryption data under the product information/settings area. Enter the 32 hexadecimal characters into the Victron BLE settings page. Use SELECT NEARBY to bind each configured slot to its device; the stored BLE identity is required for telemetry matching.
 
 ### Choose a SmartShunt for each tile
 
-In **Settings > Pages**, open a field, set its source to **SMARTSHUNT**, and choose voltage, current, SOC or another battery metric. Tap the **device-name button** to open **SELECT SMARTSHUNT**, then select the configured slot by number and name. Each tile saves its own selection, so you can show multiple batteries on the same page. Slots remain selectable while offline; missing or expired readings show `--`.
+In **Settings > Pages**, open a field, set its source to **VICTRON BLE**, and choose voltage, current, SOC or another battery metric. Tap the **device-name button** to open **SELECT VICTRON BLE**, then select the configured slot by number and name. Each tile saves its own selection, so you can show multiple batteries on the same page. Slots remain selectable while offline; missing or expired readings show `--`.
 
 The decoder accepts battery-monitor records containing the required 15 bytes, including longer records, and does not require the product flags byte to equal `0xA0`. Discovery alone does not prove that telemetry is being received. Use **CAN source** for SmartShunt BLE; Wi-Fi source currently disables BLE.
 
+### SmartSolar MPPT fields
+
+Add a compatible SmartSolar MPPT in **Settings > Victron BLE**, using **SELECT NEARBY** and its own Instant Readout key: **VictronConnect > Settings > Product info > Instant readout details > Show**. Enter all **32 hexadecimal characters (16 bytes)**; the Bluetooth pairing PIN is not this key. Instant Readout must be enabled. The existing four slots are shared by SmartShunts and MPPT chargers.
+
+Select the configured MPPT separately for each tile, then choose:
+
+| Field | Meaning |
+| --- | --- |
+| Solar V | Battery-side voltage at the charger; not panel voltage |
+| Solar A | Battery-side charging current; can be negative with a connected load |
+| Solar W | Reported PV input power in watts; not calculated from Solar V × Solar A |
+
+Existing Battery V/A tiles also work with an MPPT and change their titles to Solar V/A once a solar record is decoded. Solar fields can be selected before reception; after detection, the metric picker shows fields appropriate to that device. Multiple MPPTs remain independently selectable. Unavailable fields or readings aged 30 seconds show `--`; valid zero remains zero. MPPT SOC, consumed Ah, time-to-go, panel voltage and panel current are not provided by this record.
+
+MPPT Bluetooth support is display-only. **Shunt to N2K** remains a battery-monitor feature and does not transmit MPPT readings. BLE remains enabled only in CAN source mode. Existing settings, keys and saved tile selections are retained.
+
+Protocol reference: [Victron Extra Manufacturer Data, Solar Charger record](https://communityarchive.victronenergy.com/storage/attachments/extra-manufacturer-data-2022-12-14.pdf).
+
 ## SmartShunt -> NMEA 2000
 
-The bridge is **off by default**. Enable it explicitly in SmartShunt settings to avoid creating a duplicate battery source when another device (for example a Cerbo GX) is already transmitting that battery onto NMEA 2000.
+The bridge is **off by default**. Enable **Shunt to N2K** explicitly in Victron BLE settings to avoid creating a duplicate battery source when another device (for example a Cerbo GX) is already transmitting that battery onto NMEA 2000.
 
 Current mapping:
 

@@ -22,6 +22,14 @@ Scan packet(unsigned mac,float voltage,int current,size_t length=15,uint8_t flag
     assert(decrypt_payload(key,plain,length,0x34,0x12,ad+12));
     return scan;
 }
+Scan solar_packet(unsigned mac,uint16_t voltage,uint16_t current,uint16_t power,size_t length=10){
+    auto scan=packet(mac,0,0,length);
+    uint8_t plain[16]{};
+    bits(plain,16,16,voltage);bits(plain,32,16,current);bits(plain,64,16,power);
+    scan.ble_adv[8]=1;
+    std::array<uint8_t,16> key{};assert(parse_bindkey("000102030405060708090a0b0c0d0e0f",key));
+    assert(decrypt_payload(key,plain,length,0x34,0x12,scan.ble_adv+12));return scan;
+}
 int main(){
     AppSettings settings{};
     for(unsigned i=0;i<2;++i){auto &c=settings.smartshunts[i];c.configured=c.enabled=true;
@@ -41,9 +49,34 @@ int main(){
     assert(std::fabs(a.soc_pct-87.5f)<0.001 && std::fabs(a.consumed_ah+12.3f)<0.001);
     assert(a.time_to_go_min==120 && std::fabs(a.temperature_c-25)<0.01);
     assert(b.valid && std::fabs(b.voltage_v-12.6f)<0.001 && std::fabs(b.current_a-4.567f)<0.001);
+    // Two MPPTs are isolated by MAC; reported PV watts are independent of V*A.
+    auto solar=solar_packet(1,1420,123,187);
+    // Independently generated Python cryptography AES-CTR vector, key 00..0f,
+    // nonce 3412 + fourteen zero bytes, plaintext 00008c057b000000bb00.
+    const uint8_t solar_cipher[]={0x29,0x60,0xca,0x0e,0xbd,0x01,0x08,0xca,0x15,0xe0};
+    std::memcpy(solar.ble_adv+12,solar_cipher,sizeof(solar_cipher));
+    handle_victron_advertisement(solar);
+    auto sa=smartshunt_ble_get_data(0);
+    assert(sa.record_type==1 && sa.valid && sa.power_valid && sa.power_w==187);
+    assert(std::fabs(sa.voltage_v-14.2f)<0.001 && std::fabs(sa.current_a-12.3f)<0.001);
+    assert(!sa.soc_valid && !sa.time_to_go_valid && !sa.temperature_valid);
+    solar=solar_packet(2,1380,static_cast<uint16_t>(-15),25);handle_victron_advertisement(solar);
+    assert(std::fabs(smartshunt_ble_get_data(1).current_a+1.5f)<0.001);
+    assert(smartshunt_ble_get_data(0).power_w==187);
+    solar=solar_packet(1,0x7fff,0x7fff,0xffff);handle_victron_advertisement(solar);
+    sa=smartshunt_ble_get_data(0);assert(sa.valid && !sa.voltage_valid && !sa.current_valid && !sa.power_valid);
+    solar=solar_packet(1,0,0,0);handle_victron_advertisement(solar);
+    sa=smartshunt_ble_get_data(0);assert(sa.voltage_valid && sa.current_valid && sa.power_valid && sa.power_w==0);
+    solar=solar_packet(1,1500,50,100,9);handle_victron_advertisement(solar);
+    assert(smartshunt_ble_get_data(0).power_w==0);
+    solar=solar_packet(1,1500,50,100,16);handle_victron_advertisement(solar);
+    assert(smartshunt_ble_get_data(0).power_w==100);
+    solar.ble_adv[11]=1;handle_victron_advertisement(solar);
+    assert(!smartshunt_ble_get_data(0).valid && smartshunt_ble_get_data(1).valid);
+    handle_victron_advertisement(first);handle_victron_advertisement(second); // Battery decoder still unchanged.
     auto short_packet=packet(1,15,10,14);handle_victron_advertisement(short_packet);
     assert(smartshunt_ble_get_data(0).voltage_v==a.voltage_v);
-    first.ble_adv[8]=1;handle_victron_advertisement(first); // Other product record.
+    first.ble_adv[8]=3;handle_victron_advertisement(first); // Other product record.
     assert(smartshunt_ble_get_data(0).voltage_v==a.voltage_v);
     first=packet(3,15,10);handle_victron_advertisement(first); // Unconfigured identity.
     assert(smartshunt_ble_get_data(0).voltage_v==a.voltage_v);
