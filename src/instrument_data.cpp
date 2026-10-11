@@ -91,8 +91,11 @@ InstrumentValue smartshunt_value(const DataFieldSelection &selection)
     out.stale = d.age_ms >= 30000;
     out.age_ms = d.age_ms;
     switch (selection.metric) {
+    case DataMetric::SolarVoltage: if (d.record_type != 1) break; [[fallthrough]];
     case DataMetric::BatteryVoltage: out.valid = d.voltage_valid; out.value = d.voltage_v; break;
+    case DataMetric::SolarCurrent: if (d.record_type != 1) break; [[fallthrough]];
     case DataMetric::BatteryCurrent: out.valid = d.current_valid; out.value = d.current_a; break;
+    case DataMetric::SolarPower: out.valid = d.record_type == 1 && d.power_valid; out.value = d.power_w; break;
     case DataMetric::BatterySoc: out.valid = d.soc_valid; out.value = d.soc_pct; break;
     case DataMetric::BatteryConsumedAh: out.valid = d.consumed_ah_valid; out.value = d.consumed_ah; break;
     case DataMetric::BatteryTimeToGo: out.valid = d.time_to_go_valid; out.value = d.time_to_go_min; break;
@@ -207,6 +210,9 @@ const char *instrument_metric_name(DataMetric metric)
     case DataMetric::AirTemperature: return "Air temp";
     case DataMetric::DistanceToWaypoint: return "To waypoint";
     case DataMetric::TripDistance: return "Trip";
+    case DataMetric::SolarVoltage: return "Solar V";
+    case DataMetric::SolarCurrent: return "Solar A";
+    case DataMetric::SolarPower: return "Solar W";
     case DataMetric::BatteryVoltage: return "Battery V";
     case DataMetric::BatteryCurrent: return "Battery A";
     case DataMetric::BatterySoc: return "Battery SOC";
@@ -261,12 +267,23 @@ const char *instrument_source_name(const DataFieldSelection &selection, const Ap
     return cfg.name[0] ? cfg.name.data() : "SmartShunt";
 }
 
+const char *instrument_field_name(const DataFieldSelection &selection)
+{
+    if (selection.source == DataSourceType::SmartShunt &&
+        smartshunt_ble_get_data(selection.source_index).record_type == 1) {
+        if (selection.metric == DataMetric::BatteryVoltage) return "Solar V";
+        if (selection.metric == DataMetric::BatteryCurrent) return "Solar A";
+    }
+    return instrument_metric_name(selection.metric);
+}
+
 bool instrument_metric_supported(DataSourceType source, DataMetric metric)
 {
     if (source == DataSourceType::SmartShunt) {
-        return metric >= DataMetric::BatteryVoltage && metric <= DataMetric::BatteryTemperature;
+        return (metric >= DataMetric::BatteryVoltage && metric <= DataMetric::BatteryTemperature) ||
+            (metric >= DataMetric::SolarVoltage && metric <= DataMetric::SolarPower);
     }
-    return (metric > DataMetric::None && metric < DataMetric::BatteryVoltage) || (metric > DataMetric::BatteryTemperature && metric < DataMetric::Count);
+    return (metric > DataMetric::None && metric < DataMetric::BatteryVoltage) || (metric > DataMetric::BatteryTemperature && metric < DataMetric::SolarVoltage);
 }
 
 void format_coordinate(double degrees, bool latitude, LatLonFormat format, char *out, size_t size)
@@ -382,8 +399,9 @@ void instrument_format_value(const DataFieldSelection &selection,
         } else {
             std::snprintf(value_out, value_out_size, "%.1f", nm); std::snprintf(unit_out, unit_out_size, "NM");
         }
-    } else if (metric == DataMetric::BatteryVoltage) { std::snprintf(value_out, value_out_size, "%.2f", v.value); std::snprintf(unit_out, unit_out_size, "V"); }
-    else if (metric == DataMetric::BatteryCurrent) { std::snprintf(value_out, value_out_size, "%+.1f", v.value); std::snprintf(unit_out, unit_out_size, "A"); }
+    } else if (metric == DataMetric::BatteryVoltage || metric == DataMetric::SolarVoltage) { std::snprintf(value_out, value_out_size, "%.2f", v.value); std::snprintf(unit_out, unit_out_size, "V"); }
+    else if (metric == DataMetric::BatteryCurrent || metric == DataMetric::SolarCurrent) { std::snprintf(value_out, value_out_size, "%+.1f", v.value); std::snprintf(unit_out, unit_out_size, "A"); }
+    else if (metric == DataMetric::SolarPower) { std::snprintf(value_out, value_out_size, "%.0f", v.value); std::snprintf(unit_out, unit_out_size, "W"); }
     else if (metric == DataMetric::BatterySoc) { std::snprintf(value_out, value_out_size, "%.1f", v.value); std::snprintf(unit_out, unit_out_size, "%%"); }
     else if (metric == DataMetric::BatteryConsumedAh) { std::snprintf(value_out, value_out_size, "%.1f", v.value); std::snprintf(unit_out, unit_out_size, "Ah"); }
     else if (metric == DataMetric::BatteryTimeToGo) {

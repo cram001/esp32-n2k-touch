@@ -76,6 +76,8 @@ jobs:
           lib=.pio/libdeps/waveshare-touch-4/NMEA2000-library/src
           g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -I tests/host/instrument -I tests/host -I src -I "$lib" src/n2k_sources.cpp src/n2k_instruments.cpp src/n2k_waypoints.cpp src/actisense_ascii.cpp "$lib/N2kMsg.cpp" "$lib/N2kMessages.cpp" "$lib/N2kStream.cpp" tests/host/nvs_fake.cpp tests/host/instruments_test.cpp -o /tmp/instruments_test
           /tmp/instruments_test
+          g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -I tests/host/instrument -I tests/host -I src -I "$lib" src/instrument_data.cpp src/n2k_sources.cpp src/n2k_instruments.cpp src/n2k_waypoints.cpp "$lib/N2kMsg.cpp" "$lib/N2kMessages.cpp" "$lib/N2kStream.cpp" tests/host/nvs_fake.cpp tests/host/sog_test.cpp -o /tmp/sog_test
+          /tmp/sog_test
 
       - name: Reject unknown Kconfig symbols
         if: always()

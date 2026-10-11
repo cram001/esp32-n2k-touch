@@ -97,5 +97,19 @@ int main(){
     instrument_format_value(dir,units,bearing,text,sizeof(text),suffix,sizeof(suffix));
     assert(std::strcmp(suffix,"°T")==0);
 
+    expect(DataMetric::SolarVoltage,14.2,units,"14.20","V");
+    expect(DataMetric::SolarCurrent,12.3,units,"+12.3","A");
+    expect(DataMetric::SolarPower,187,units,"187","W");
+    field.source=DataSourceType::SmartShunt;field.metric=DataMetric::BatteryVoltage;
+    battery.record_type=1;battery.age_ms=0;
+    assert(!std::strcmp(instrument_field_name(field),"Solar V"));
+    field.metric=DataMetric::BatteryCurrent;
+    assert(!std::strcmp(instrument_field_name(field),"Solar A"));
+    field.metric=DataMetric::SolarPower;battery.power_valid=true;battery.power_w=187;
+    assert(instrument_data_get(field).valid && instrument_data_get(field).value==187);
+    battery.record_type=2;assert(!instrument_data_get(field).valid);
+    field.metric=DataMetric::BatteryVoltage;assert(!std::strcmp(instrument_field_name(field),"Battery V"));
+    assert(!instrument_metric_supported(DataSourceType::Nmea2000,DataMetric::SolarPower));
+    assert(instrument_metric_supported(DataSourceType::SmartShunt,DataMetric::SolarPower));
     std::puts("PASS: 30s NMEA/BLE display timeout, depth limit, position formats, directional references, signed keel clearance and instrument units");
 }

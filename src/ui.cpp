@@ -406,7 +406,7 @@ void render_active_page()
     for(size_t i=0;i<MAX_DATA_FIELDS_PER_PAGE;++i){
         if(i>=count){lv_obj_add_flag(g_tile_boxes[i],LV_OBJ_FLAG_HIDDEN);continue;}
         lv_obj_remove_flag(g_tile_boxes[i],LV_OBJ_FLAG_HIDDEN);position_tile(i,active.layout);
-        const auto &sel=active.fields[i];lv_label_set_text(g_tile_titles[i],instrument_metric_name(sel.metric));
+        const auto &sel=active.fields[i];lv_label_set_text(g_tile_titles[i],instrument_field_name(sel));
         const auto field_id=static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+i);
         const InstrumentValue v=depth_display[field_id].apply(sel,g_settings.units.depth,instrument_data_get(sel,field_id));
         if(sel.source==DataSourceType::SmartShunt){
@@ -500,7 +500,7 @@ void update_page_setup()
     if(p.enabled)lv_obj_add_state(g_page_enable_switch,LV_STATE_CHECKED);else lv_obj_remove_state(g_page_enable_switch,LV_STATE_CHECKED);
     std::snprintf(b,sizeof(b),"LAYOUT: %u",static_cast<unsigned>(layout_count(p.layout)));lv_label_set_text(g_layout_button_label,b);
     const size_t count=layout_count(p.layout);
-    for(size_t i=0;i<MAX_DATA_FIELDS_PER_PAGE;++i){if(i>=count){lv_obj_add_flag(g_field_buttons[i],LV_OBJ_FLAG_HIDDEN);continue;}lv_obj_remove_flag(g_field_buttons[i],LV_OBJ_FLAG_HIDDEN);const auto &f=p.fields[i];std::snprintf(b,sizeof(b),"%u. %s\n%s",static_cast<unsigned>(i+1),instrument_metric_name(f.metric),instrument_source_name(f,g_settings,static_cast<uint8_t>(g_edit_page*MAX_DATA_FIELDS_PER_PAGE+i)));lv_label_set_text(g_field_button_labels[i],b);}
+    for(size_t i=0;i<MAX_DATA_FIELDS_PER_PAGE;++i){if(i>=count){lv_obj_add_flag(g_field_buttons[i],LV_OBJ_FLAG_HIDDEN);continue;}lv_obj_remove_flag(g_field_buttons[i],LV_OBJ_FLAG_HIDDEN);const auto &f=p.fields[i];std::snprintf(b,sizeof(b),"%u. %s\n%s",static_cast<unsigned>(i+1),instrument_field_name(f),instrument_source_name(f,g_settings,static_cast<uint8_t>(g_edit_page*MAX_DATA_FIELDS_PER_PAGE+i)));lv_label_set_text(g_field_button_labels[i],b);}
 }
 void page_setup_screen_cb(lv_event_t *){update_page_setup();lv_screen_load(g_page_setup_screen);}
 void edit_prev_page_cb(lv_event_t *){g_edit_page=(g_edit_page+MAX_DATA_PAGES-1)%MAX_DATA_PAGES;update_page_setup();}
@@ -510,7 +510,7 @@ void layout_cb(lv_event_t *){auto &l=g_settings.pages[g_edit_page].layout;if(l==
 
 void update_field_editor()
 {
-    auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];lv_label_set_text(g_field_source_label,f.source==DataSourceType::Nmea2000?"NMEA 2000":"SMARTSHUNT");lv_label_set_text(g_field_metric_label,instrument_metric_name(f.metric));
+    auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];lv_label_set_text(g_field_source_label,f.source==DataSourceType::Nmea2000?"NMEA 2000":"VICTRON BLE");lv_label_set_text(g_field_metric_label,instrument_field_name(f));
     lv_obj_remove_flag(g_field_device_button,LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(g_field_device_label,instrument_source_name(f,g_settings,editing_field_id()));
 }
@@ -547,7 +547,7 @@ void field_device_cb(lv_event_t *)
         lv_obj_set_width(button_label(button),390);lv_label_set_long_mode(button_label(button),LV_LABEL_LONG_MODE_WRAP);
         lv_obj_set_pos(button,0,static_cast<int>(row++*68));
     }
-    if(!row){lv_obj_t *label=lv_label_create(g_shunt_source_list);lv_label_set_text(label,"Add a device in Settings > SmartShunts first.");lv_obj_set_width(label,400);}
+    if(!row){lv_obj_t *label=lv_label_create(g_shunt_source_list);lv_label_set_text(label,"Add a device in Settings > Victron BLE first.");lv_obj_set_width(label,400);}
     lv_screen_load(g_shunt_source_picker);
 }
 void field_done_cb(lv_event_t *){update_page_setup();lv_screen_load(g_page_setup_screen);}
@@ -709,7 +709,7 @@ void ota_web_cb(lv_event_t *) {
 void ota_reboot_cb(lv_event_t *) {if(ota_get_status().state==OtaState::ReadyToReboot)esp_restart();}
 void ota_focus_cb(lv_event_t *) {lv_keyboard_set_textarea(g_ota_keyboard,g_ota_url);lv_obj_remove_flag(g_ota_keyboard,LV_OBJ_FLAG_HIDDEN);}
 void ota_keyboard_cb(lv_event_t *e) {if(lv_event_get_code(e)==LV_EVENT_READY||lv_event_get_code(e)==LV_EVENT_CANCEL)lv_obj_add_flag(g_ota_keyboard,LV_OBJ_FLAG_HIDDEN);}
-void update_shunts_list(){for(size_t i=0;i<MAX_SMARTSHUNTS;++i){char b[48];const auto&c=g_settings.smartshunts[i];std::snprintf(b,sizeof(b),"%u. %s",static_cast<unsigned>(i+1),c.configured?(c.name[0]?c.name.data():"SmartShunt"):"ADD SMARTSHUNT");lv_label_set_text(g_shunt_slot_labels[i],b);}}
+void update_shunts_list(){for(size_t i=0;i<MAX_SMARTSHUNTS;++i){char b[48];const auto&c=g_settings.smartshunts[i];std::snprintf(b,sizeof(b),"%u. %s",static_cast<unsigned>(i+1),c.configured?(c.name[0]?c.name.data():"SmartShunt"):"ADD VICTRON BLE");lv_label_set_text(g_shunt_slot_labels[i],b);}}
 void shunts_screen_cb(lv_event_t *){update_shunts_list();lv_screen_load(g_shunts_screen);}void shunt_slot_cb(lv_event_t *e){g_edit_shunt=static_cast<size_t>(reinterpret_cast<uintptr_t>(lv_event_get_user_data(e)));auto &c=g_settings.smartshunts[g_edit_shunt];lv_textarea_set_text(g_shunt_name,c.name.data());lv_textarea_set_text(g_shunt_key,c.bindkey.data());if(c.n2k_enabled)lv_obj_add_state(g_shunt_n2k,LV_STATE_CHECKED);else lv_obj_remove_state(g_shunt_n2k,LV_STATE_CHECKED);char b[12];std::snprintf(b,sizeof(b),"%u",c.battery_instance);lv_label_set_text(g_shunt_instance,b);lv_screen_load(g_shunt_edit_screen);}
 void update_shunt_picker()
 {
@@ -933,6 +933,12 @@ void metric_picker_cb(lv_event_t *) {
     for(unsigned i=0;i<static_cast<unsigned>(DataMetric::Count);++i){
         const auto metric=static_cast<DataMetric>(i);
         if(metric!=DataMetric::None && !instrument_metric_supported(nmea?DataSourceType::Nmea2000:DataSourceType::SmartShunt,metric))continue;
+        if (!nmea && metric != DataMetric::None) {
+            const auto &field=g_settings.pages[g_edit_page].fields[g_edit_field];
+            const auto type=smartshunt_ble_get_data(field.source_index).record_type;
+            if (type==1 && !(metric>=DataMetric::SolarVoltage && metric<=DataMetric::SolarPower)) continue;
+            if (type==2 && metric>=DataMetric::SolarVoltage) continue;
+        }
         lv_obj_t *button=make_button(g_metric_list,instrument_metric_name(metric),metric_choice_cb,410,48,reinterpret_cast<void *>(i));
         lv_obj_set_pos(button,0,static_cast<int>(row++*54));
     }
@@ -984,7 +990,7 @@ void create_source_depth_screens() {
     g_source_status=lv_label_create(g_source_picker);lv_obj_set_width(g_source_status,440);lv_obj_set_style_text_align(g_source_status,LV_TEXT_ALIGN_CENTER,0);lv_obj_align(g_source_status,LV_ALIGN_TOP_MID,0,45);
     lv_obj_t *button=make_button(g_source_picker,"REFRESH",source_refresh_cb,150,48);lv_obj_align(button,LV_ALIGN_BOTTOM_RIGHT,-35,-18);
     g_metric_picker=picker("SELECT DATA FIELD",g_metric_list);
-    g_shunt_source_picker=picker("SELECT SMARTSHUNT",g_shunt_source_list);
+    g_shunt_source_picker=picker("SELECT VICTRON BLE",g_shunt_source_list);
     g_depth_screen=require_obj(lv_obj_create(nullptr),"depth screen");lv_obj_remove_flag(g_depth_screen,LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *label=lv_label_create(g_depth_screen);lv_label_set_text(label,"DEPTH SETUP");lv_obj_set_style_text_font(label,&lv_font_montserrat_24,0);lv_obj_align(label,LV_ALIGN_TOP_MID,0,18);
     g_depth_source_button=make_button(g_depth_screen,"DEFAULT FOR UNCONFIGURED SENSORS",depth_source_cb,410,54);
@@ -1088,7 +1094,7 @@ void create_settings_screen()
     lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-30,116);
     b=make_button(g_settings_screen,"Wi-Fi",wifi_screen_cb,260,48);
     lv_obj_align(b,LV_ALIGN_TOP_MID,0,170);
-    b=make_button(g_settings_screen,"SmartShunts",shunts_screen_cb,260,48);
+    b=make_button(g_settings_screen,"Victron BLE",shunts_screen_cb,260,48);
     lv_obj_align(b,LV_ALIGN_TOP_MID,0,224);
 
     b=make_button(g_settings_screen,"Day / Night",theme_toggle_cb,150,46);
@@ -1281,7 +1287,7 @@ void create_shunts_screen()
     lv_obj_remove_flag(g_shunts_screen, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *l = require_obj(lv_label_create(g_shunts_screen), "SmartShunts title");
-    lv_label_set_text(l, "SMARTSHUNTS");
+    lv_label_set_text(l, "VICTRON BLE");
     lv_obj_set_style_text_font(l, &lv_font_montserrat_24, 0);
     lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 22);
 
@@ -1301,7 +1307,7 @@ void create_shunt_picker_screen()
     g_shunt_picker_screen = lv_obj_create(nullptr);
     lv_obj_remove_flag(g_shunt_picker_screen, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *l = lv_label_create(g_shunt_picker_screen);
-    lv_label_set_text(l, "Select SmartShunt");
+    lv_label_set_text(l, "Select Victron BLE");
     lv_obj_set_style_text_font(l, &lv_font_montserrat_20, 0);
     lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 16);
 
@@ -1322,7 +1328,7 @@ void create_shunt_edit_screen()
     lv_obj_remove_flag(g_shunt_edit_screen, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *l = require_obj(lv_label_create(g_shunt_edit_screen), "SmartShunt title");
-    lv_label_set_text(l, "SMARTSHUNT");
+    lv_label_set_text(l, "VICTRON BLE");
     lv_obj_set_style_text_font(l, &lv_font_montserrat_24, 0);
     lv_obj_align(l, LV_ALIGN_TOP_MID, 0, 14);
 
@@ -1359,7 +1365,7 @@ void create_shunt_edit_screen()
     lv_obj_add_event_cb(g_shunt_key, textarea_focus_cb, LV_EVENT_FOCUSED, nullptr);
 
     l = require_obj(lv_label_create(g_shunt_edit_screen), "NMEA bridge label");
-    lv_label_set_text(l, "Send to N2K");
+    lv_label_set_text(l, "Shunt to N2K");
     lv_obj_align(l, LV_ALIGN_TOP_LEFT, 30, 220);
     g_shunt_n2k = require_obj(lv_switch_create(g_shunt_edit_screen), "NMEA bridge switch");
     lv_obj_align(g_shunt_n2k, LV_ALIGN_TOP_RIGHT, -45, 207);

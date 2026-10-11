@@ -142,7 +142,7 @@ void n2k_task(void *)
             const auto &cfg = settings.smartshunts[i];
             if (!cfg.configured || !cfg.enabled || !cfg.n2k_enabled || duplicate_instance(settings, i)) continue;
             const SmartShuntData data = smartshunt_ble_get_data(i);
-            if (!data.valid || data.stale) continue;
+            if (!data.valid || data.stale || data.record_type != 2) continue;
             if (now_ms - last_battery_ms[i] >= BATTERY_STATUS_PERIOD_MS) {
                 last_battery_ms[i] = now_ms; send_battery_status(cfg, data, sid[i]);
             }

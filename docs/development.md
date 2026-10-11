@@ -60,7 +60,7 @@ workflow attaches the firmware assets automatically.
 ### SmartShunt BLE
 
 1. In VictronConnect, enable Instant Readout and obtain the encryption key.
-2. Enter the 32-character key under Settings > SmartShunt. Treat this key as device configuration data and do not commit it to the repository.
+2. Enter the 32-character key under Settings > Victron BLE. Treat this key as device configuration data and do not commit it to the repository.
 3. Optionally enter the SmartShunt MAC address.
 4. Enable `Read BLE Instant Readout`.
 5. Open the Battery screen.

@@ -82,6 +82,10 @@ enum class DataMetric : uint8_t {
     DepthWaterline,
     DepthSensorOffset,
     Position,
+    // Append only: persisted metric IDs and settings blob layouts remain stable.
+    SolarVoltage,
+    SolarCurrent,
+    SolarPower,
     Count,
 };
 

@@ -235,6 +235,16 @@ void n2k_sources_publish(DataMetric metric,uint8_t address,uint8_t instance,uint
     }
     portEXIT_CRITICAL(&mux);
 }
+void n2k_sources_invalidate(DataMetric metric,uint8_t address,uint8_t instance,uint8_t kind) {
+    if(address>=254)return;
+    portENTER_CRITICAL(&mux);
+    const Device *d=device(address);
+    N2kSourceChoice source;source.name=d?d->name:0;source.address=address;
+    source.instance=instance;source.kind=kind;
+    for(auto &r:records)
+        if(r.used && r.metric==metric && matches(source,r.source))r.value.valid=false;
+    portEXIT_CRITICAL(&mux);
+}
 bool n2k_depth_adjust(const DepthConfig &c,double raw,bool valid,double offset,double &result) {
     if(!depth_valid(c) || !std::isfinite(raw) || raw<0 || raw>1000)return false;
     result=raw;

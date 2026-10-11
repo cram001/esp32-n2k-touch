@@ -18,6 +18,7 @@
 namespace {
 constexpr const char *TAG = "smartshunt";
 constexpr uint8_t VICTRON_PRODUCT_ADVERTISEMENT = 0x10;
+constexpr uint8_t VICTRON_SOLAR_CHARGER_RECORD = 0x01;
 constexpr uint8_t VICTRON_BATTERY_MONITOR_RECORD = 0x02;
 constexpr size_t VICTRON_HEADER_LEN = 8;
 // Last decoded field ends at bit 118: 15 bytes, not a full AES block.
@@ -163,6 +164,7 @@ bool decrypt_payload(const std::array<uint8_t, 16> &key, const uint8_t *encrypte
 SmartShuntData decode_record(const uint8_t *record, int rssi)
 {
     SmartShuntData next{};
+    next.record_type = VICTRON_BATTERY_MONITOR_RECORD;
     next.valid = true;
     next.key_valid = true;
     next.stale = false;
@@ -186,6 +188,24 @@ SmartShuntData decode_record(const uint8_t *record, int rssi)
     return next;
 }
 
+SmartShuntData decode_solar_record(const uint8_t *record, int rssi)
+{
+    // Victron Extra Manufacturer Data, Solar Charger (0x01). Offsets below
+    // exclude the four-byte record header; V/A are battery-side, W is PV input.
+    SmartShuntData next{};
+    next.record_type = VICTRON_SOLAR_CHARGER_RECORD;
+    next.valid = next.key_valid = true;
+    next.stale = false;
+    next.rssi = rssi;
+    const uint32_t voltage = read_bits_le(record, 16, 16);
+    const uint32_t current = read_bits_le(record, 32, 16);
+    const uint32_t power = read_bits_le(record, 64, 16);
+    if (voltage != 0x7FFFU) { next.voltage_valid = true; next.voltage_v = sign_extend(voltage, 16) * 0.01f; }
+    if (current != 0x7FFFU) { next.current_valid = true; next.current_a = sign_extend(current, 16) * 0.1f; }
+    if (power != 0xFFFFU) { next.power_valid = true; next.power_w = static_cast<float>(power); }
+    return next;
+}
+
 void handle_victron_advertisement(const esp_ble_gap_cb_param_t::ble_scan_result_evt_param &scan)
 {
     if (scan.search_evt != ESP_GAP_SEARCH_INQ_RES_EVT) return;
@@ -197,21 +217,16 @@ void handle_victron_advertisement(const esp_ble_gap_cb_param_t::ble_scan_result_
     const size_t payload_len=manufacturer.size;
     const uint8_t *payload=manufacturer.data;
 
-    // Discovery is intentionally broader than telemetry decoding. A nearby
-    // Victron device should appear in the picker even when Instant Readout is
-    // disabled, uses a record type we do not decode yet, or its key is unknown.
-    // This also lets active scan responses contribute the configured device name.
-    update_discovery(scan,payload!=nullptr);
-
-    if (payload == nullptr || payload_len < VICTRON_HEADER_LEN) return;
-    // Victron manufacturer payload after the 0x02E1 company ID:
-    // [0] 0x10 product advertisement, [1..2] product ID (LE),
-    // [3] product/readout flags (not a fixed 0xA0), [4] record type,
-    // [5..6] AES nonce/counter (LE), [7] key-check byte, [8..] ciphertext.
-    if (payload[0] != VICTRON_PRODUCT_ADVERTISEMENT ||
-        payload[4] != VICTRON_BATTERY_MONITOR_RECORD) {
-        return;
-    }
+    // Only supported Instant Readout record types enter the picker. This
+    // excludes GX/Cerbo regardless of its advertised name or product ID.
+    // Name-only responses may still enrich an already identified device.
+    const bool supported = payload && payload_len >= VICTRON_HEADER_LEN &&
+        payload[0] == VICTRON_PRODUCT_ADVERTISEMENT &&
+        (payload[4] == VICTRON_BATTERY_MONITOR_RECORD || payload[4] == VICTRON_SOLAR_CHARGER_RECORD);
+    if (payload && !supported) return;
+    update_discovery(scan, supported);
+    if (!supported) return;
+    const size_t record_len = payload[4] == VICTRON_SOLAR_CHARGER_RECORD ? 10 : BATTERY_RECORD_LEN;
 
     std::array<uint8_t, 6> incoming{};
     std::memcpy(incoming.data(), scan.bda, incoming.size());
@@ -246,15 +261,16 @@ void handle_victron_advertisement(const esp_ble_gap_cb_param_t::ble_scan_result_
         }
 
         const size_t encrypted_len = payload_len - VICTRON_HEADER_LEN;
-        if (encrypted_len < BATTERY_RECORD_LEN) continue;
+        if (encrypted_len < record_len) continue;
 
         uint8_t decrypted[BATTERY_RECORD_LEN]{};
-        if (!decrypt_payload(runtime_snapshot.key, payload + VICTRON_HEADER_LEN, BATTERY_RECORD_LEN,
+        if (!decrypt_payload(runtime_snapshot.key, payload + VICTRON_HEADER_LEN, record_len,
                              payload[5], payload[6], decrypted)) {
             continue;
         }
 
-        const SmartShuntData decoded = decode_record(decrypted, scan.rssi);
+        const SmartShuntData decoded = payload[4] == VICTRON_SOLAR_CHARGER_RECORD
+            ? decode_solar_record(decrypted, scan.rssi) : decode_record(decrypted, scan.rssi);
         if (xSemaphoreTake(g_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
             if (generation == g_config_generation && incoming == g_runtime[i].mac) {
                 g_runtime[i].data = decoded;

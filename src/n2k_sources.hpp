@@ -28,6 +28,8 @@ void n2k_sources_model(uint8_t address, const char *model);
 void n2k_sources_publish(DataMetric metric, uint8_t address, uint8_t instance, uint8_t kind,
                          double value, HeadingReference reference = HeadingReference::Unknown,
                          bool offset_valid = false, double offset = 0, const char *text = nullptr);
+// Mark an existing reading unavailable without changing its source or timestamp.
+void n2k_sources_invalidate(DataMetric metric, uint8_t address, uint8_t instance = 255, uint8_t kind = 255);
 bool n2k_sources_get(DataMetric metric, uint8_t field_id, InstrumentValue &value);
 size_t n2k_sources_options(DataMetric metric, N2kSourceOption *out, size_t capacity);
 void n2k_sources_label(DataMetric metric, uint8_t field_id, char *out, size_t capacity);

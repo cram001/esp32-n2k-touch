@@ -26,12 +26,12 @@ Day and Night modes have independent brightness values. Brightness changes are s
 The service:
 
 1. Filters Victron manufacturer data (`0x02E1`).
-2. Selects Product Advertisement / Battery Monitor Instant Readout records.
+2. Selects Product Advertisement / Battery Monitor or Solar Charger Instant Readout records.
 3. Matches the BLE identity bound to each configured SmartShunt slot.
 4. Validates the first encryption-key byte exposed in the record header.
 5. Decrypts the required 15 bytes of the battery-monitor payload using AES-CTR and the user-supplied Instant Readout key.
 6. Converts Victron scale factors and NA values into an internal `SmartShuntData` snapshot.
-7. Marks data stale after 5 seconds without a valid battery-monitor advertisement.
+7. Marks data stale after 5 seconds without a valid supported advertisement.
 
 The decoded snapshot is shared with the UI and the NMEA bridge; neither layer parses BLE packets directly.
 
@@ -84,3 +84,14 @@ The flash layout provides two OTA application slots. HTTPS OTA transport, projec
 ## Installation constraints
 
 The current Waveshare board uses an onboard TJA1051 transceiver on GPIO6/GPIO0. It must not automatically be treated as a certified isolated NMEA 2000 interface. Permanent vessel installation requires a separate review of galvanic isolation, grounding, backbone power and physical-layer compliance.
+
+### Solar-charger BLE records
+
+The existing BLE scanner also accepts Instant Readout record 0x01. It decrypts
+at least 10 bytes through the PV-power field, using signed 16-bit battery-side
+voltage/current (0.01 V / 0.1 A) and unsigned PV power (1 W), with individual NA
+checks. Runtime record type identifies MPPT versus battery monitor; persisted
+slot/configuration structures are unchanged. Solar metrics are appended to the
+metric enum to preserve saved IDs. Nearby discovery admits only supported
+0x01/0x02 records; known-device name responses still refresh names. NMEA2000
+bridging remains restricted to record 0x02; MPPT support is display-only.

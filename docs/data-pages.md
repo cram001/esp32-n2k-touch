@@ -43,9 +43,9 @@ screen remains readable on the next restart regardless of the saved value.
 
 Each tile stores three pieces of configuration:
 
-1. Source type: NMEA 2000 or SmartShunt.
+1. Source type: NMEA 2000 or Victron BLE.
 2. Metric: the value to display.
-3. Device: for SmartShunt fields, tap the device-name button and select a configured slot from SELECT SMARTSHUNT. Slot numbers distinguish devices with matching names; each tile retains its own selection.
+3. Device: for SmartShunt fields, tap the device-name button and select a configured slot from SELECT VICTRON BLE. Slot numbers distinguish devices with matching names; each tile retains its own selection.
 
 SmartShunt MAC addresses remain internal stable identifiers and are not part of normal field selection.
 
@@ -62,7 +62,7 @@ navigation and environmental sensors documented in
 
 - Depth — PGN 128267
 - Boat speed / speed through water — PGN 128259
-- SOG / COG — PGN 129026
+- SOG / COG — PGN 129026. Reserved SOG values `0xFFFD`–`0xFFFF` display `--`; a real zero displays `0.0`. An unavailable reading immediately clears the previous value for that source. Invalid COG/reference also displays `--`, independently of SOG.
 - Heading — PGN 127250; Units selects True or Magnetic. Conversion uses received
   magnetic variation (127250 or 127258); labels show `deg T` / `deg M`. Missing
   variation shows `--` when conversion is required. COG remains unchanged.
@@ -120,3 +120,16 @@ Settings includes a Rotation button that toggles Normal/180 degrees immediately
 and saves the choice for reboot. Existing installations default to 180 degrees.
 LVGL rotates touch coordinates with the display; no separate touch transform is
 applied. A failed save leaves the current orientation unchanged and offers retry.
+
+## MPPT solar metrics
+
+Configure a SmartSolar Instant Readout device in Settings > Victron BLE with its
+32-character encryption key. Select that configured slot independently for each
+solar tile. Solar V and Solar A are battery-side voltage and charging current;
+Solar W is the charger-reported PV input power. These are not panel V/A and W is
+not their product. Existing Battery V/A selections work and acquire solar titles
+once the device is decoded. The picker restricts new metrics to the detected
+record type; before reception both battery and solar choices are available.
+MPPT data is display-only and does not use the SmartShunt NMEA2000 bridge.
+Cerbo/GX and unsupported BLE record types are excluded from nearby discovery.
+Instant Readout must be enabled for discovery; a key is required for values.

@@ -9,7 +9,7 @@ int main(){
     AppSettings settings{};assert(smartshunt_ble_start(settings));
     assert(fake_scan_params.scan_type==BLE_SCAN_TYPE_ACTIVE);
     Scan scan{};scan.bda[5]=1;
-    const uint8_t adv[]={5,0xff,0xe1,0x02,0x10,0x01,0,0};
+    const uint8_t adv[]={11,0xff,0xe1,0x02,0x10,0x01,0,0xa0,2,0,0,0};
     const uint8_t name[]={10,0x09,'H','o','u','s','e',' ','B','a','t'};
     scan.adv_data_len=sizeof(adv);scan.scan_rsp_len=sizeof(name);
     std::memcpy(scan.ble_adv,adv,sizeof(adv));std::memcpy(scan.ble_adv+sizeof(adv),name,sizeof(name));
@@ -30,11 +30,22 @@ int main(){
     assert(smartshunt_ble_get_discovered(devices)==1);
     scan.adv_data_len=63;scan.scan_rsp_len=0;handle_victron_advertisement(scan);
     assert(smartshunt_ble_get_discovered(devices)==1);
+    // GX/Cerbo (0x07), other unsupported records and setup-only advertisements
+    // never enter the picker, even with a complete name and Victron company ID.
+    scan.adv_data_len=sizeof(adv);scan.scan_rsp_len=0;
+    std::memcpy(scan.ble_adv,adv,sizeof(adv));scan.ble_adv[8]=7;
+    handle_victron_advertisement(scan);assert(smartshunt_ble_get_discovered(devices)==1);
+    scan.ble_adv[8]=3;handle_victron_advertisement(scan);
+    assert(smartshunt_ble_get_discovered(devices)==1);
+    scan.ble_adv[4]=3;scan.ble_adv[8]=2;handle_victron_advertisement(scan);
+    assert(smartshunt_ble_get_discovered(devices)==1);
     fake_ble_time+=15001000;
     assert(smartshunt_ble_get_discovered(devices)==0); // Stale devices disappear.
     scan.adv_data_len=sizeof(adv);scan.scan_rsp_len=0;std::memcpy(scan.ble_adv,adv,sizeof(adv));
     handle_victron_advertisement(scan);
     assert(smartshunt_ble_get_discovered(devices)==1 && std::strstr(devices[0].name.data(),"Victron"));
+    scan.bda[5]=3;scan.ble_adv[8]=1;handle_victron_advertisement(scan);
+    assert(smartshunt_ble_get_discovered(devices)==2); // MPPT appears before its key is entered.
     assert(smartshunt_ble_is_running());
     assert(smartshunt_ble_pause());
     assert(!smartshunt_ble_is_running());
