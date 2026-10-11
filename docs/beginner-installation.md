@@ -20,9 +20,9 @@ The VS Code/PlatformIO instructions remain below for developers, custom builds, 
 3. Download **`esp32-n2k-touch-full.bin`**.
 4. Optionally download **`SHA256SUMS.txt`** if you want to verify the file checksum.
 
-Do not download the repository ZIP and do not choose `firmware.bin` for ESPConnect. The `firmware.bin` file is only the application image. If it is flashed at address `0x0`, it overwrites the bootloader and the display will not boot. The **full** image contains the bootloader, partition table, OTA metadata and application required for a predictable install.
+For first installation, do not download the repository ZIP and do not choose `firmware.bin`. The `firmware.bin` file is only the application image. If it is flashed at address `0x0`, it overwrites the bootloader and the display will not boot. The **full** image contains the bootloader, partition table, OTA metadata and application required for a predictable install.
 
-**ESPConnect always uses `esp32-n2k-touch-full.bin` at address `0x0`.**
+**First installation / clean recovery uses `esp32-n2k-touch-full.bin` at address `0x0`. Application-only updates use the running slot; see section 9 below.**
 
 ### Flash with ESPConnect
 
@@ -294,35 +294,31 @@ recognized in an ordinary terminal, open the PlatformIO terminal described above
 
 ## 10. Install later updates
 
-### Recommended: update with ESPConnect and the latest release
+### Updating only the application with ESPConnect (retain settings)
 
-You do not need to install Git, VS Code or PlatformIO for later releases either.
+For an already working display with this project's existing partition layout, download **`firmware.bin`** from the new release. This updates the application without writing the bootloader, partition table, NVS/settings or OTA metadata.
 
-1. Open the [latest GitHub Release](https://github.com/cram001/esp32-n2k-touch/releases/latest).
-2. Expand **Assets** and download **`esp32-n2k-touch-full.bin`**.
-3. Connect the display to the computer using a USB data cable.
-4. Open [ESPConnect](https://thelastoutpostworkshop.github.io/ESPConnect/).
-5. Click **Connect** and choose the ESP32-S3 serial device.
-6. Open **Flash Firmware**.
-7. Select the new **`esp32-n2k-touch-full.bin`**.
-8. Set the flash address/offset to **`0x0`**.
-9. Start the flash and leave the board connected until ESPConnect reports completion.
-10. Restart with BOOT released and check the firmware version/build information on the startup screen.
+| File / running application slot | Flash address / offset |
+| --- | --- |
+| `firmware.bin`, running `ota_0` (normal after full-image installation) | **`0x20000`** |
+| `firmware.bin`, running `ota_1` | **`0x620000`** |
+| `esp32-n2k-touch-full.bin`, first installation / clean recovery | **`0x0`** |
 
-This is the simplest and most predictable USB update method because it installs the complete bootloader/partition/OTA/application image rather than depending on which OTA slot was previously active.
+1. Before entering download mode, check the startup serial log at **115200 baud**. It reports `Boot slot ota_0; OTA state ...` or `Boot slot ota_1; OTA state ...`. ESPConnect's **Apps** view can also show the active OTA slot; its **Partitions** view shows the offsets. A partition's existence alone does not tell you which slot boots.
+2. Close the serial monitor, connect with ESPConnect and open **Flash Firmware**.
+3. Select the new **`firmware.bin`**. Enter the offset for the **currently running slot** from the table above. Enter the custom offset explicitly; do not use a generic ESP32 application preset such as `0x10000`.
+4. Leave **Erase entire flash before writing** **unchecked**. Do not erase NVS, OTA metadata or other partitions.
+5. Flash, wait for completion, and restart with BOOT released. Verify the new version in the startup log and check your saved SmartShunts, keys, source selection and page layouts.
 
-**Saved settings:** flashing the full image can clear NVS/application settings. Before updating, note any important Wi-Fi credentials, SmartShunt encryption keys, source selections, page layouts, calibration values and other configuration you may need to re-enter.
+**For the usual full-image installation followed only by USB application updates, the offset is `0x20000`.** If you have previously used OTA or changed the boot selection, confirm the running slot first. Writing the inactive slot alone does not select it for boot; ESPConnect's raw flash operation is not an OTA update. Overwriting the running slot also does not create an automatic rollback trial.
 
-Do **not** use the release `firmware.bin` in ESPConnect at any address. It is application-only and intended for compatible OTA/application-update workflows. Flashing it at `0x0` overwrites the bootloader and can leave the display with a black screen.
+**Never flash `firmware.bin` at `0x0`.** It would overwrite the bootloader. Application-only flashing assumes a working bootloader and this project's matching partition table; it cannot repair a board whose bootloader was overwritten. Use the full-image recovery instructions in that case. With full-chip erase disabled and only the application range written, NVS/settings remain untouched; a future firmware settings migration can still change how those settings are interpreted.
 
-For every ESPConnect install or USB update, use:
+References: [project partition table](../partitions.csv), [ESPConnect Apps/Partitions/Flash features](https://github.com/thelastoutpostworkshop/ESPConnect), and [ESP-IDF OTA boot selection](https://docs.espressif.com/projects/esp-idf/en/v5.5.3/esp32s3/api-reference/system/ota.html).
 
-```text
-File:    esp32-n2k-touch-full.bin
-Address: 0x0
-```
+### Clean recovery / full-image update with ESPConnect
 
-If ESPConnect cannot connect, use the same BOOT/RESET download-mode procedure described in the first-install section above.
+If you need to restore the bootloader or install the complete layout, follow the first-install instructions above with **`esp32-n2k-touch-full.bin` at `0x0`**. This can clear saved settings. For routine updates of a working device while retaining settings, use `firmware.bin` at the confirmed application-slot offset instead.
 
 ### Developers: get newer code from main
 
@@ -345,7 +341,7 @@ An unmerged feature branch is a separate version; only use one when specifically
 
 Wireless OTA and Access Point mode are unavailable in the current selected-source firmware. CAN source starts CAN and SmartShunt BLE; Wi-Fi source starts Station and W2K-1 TCP with BLE/CAN disabled. Use the USB update instructions above.
 
-The dual-slot partition layout remains unchanged. `firmware.bin` is application-only and must never be flashed at `0x0`. ESPConnect uses `esp32-n2k-touch-full.bin` at `0x0`; record your settings first because this method can clear NVS. Historical OTA notes are not instructions for this firmware.
+The dual-slot partition layout remains unchanged. `firmware.bin` is application-only and must never be flashed at `0x0`. For settings-preserving ESPConnect updates, use `firmware.bin` at the confirmed running-slot offset (`0x20000` or `0x620000`) with full-chip erase disabled. Full-image recovery uses `esp32-n2k-touch-full.bin` at `0x0` and can clear NVS. Historical OTA notes are not instructions for this firmware.
 
 ## Troubleshooting checklist
 
