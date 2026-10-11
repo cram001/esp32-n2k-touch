@@ -435,7 +435,12 @@ void render_active_page()
         lv_label_set_text(g_tile_values[i],value);lv_label_set_text(g_tile_units[i],unit);
         const bool text_field=sel.metric==DataMetric::WaypointName || sel.metric==DataMetric::Latitude ||
             sel.metric==DataMetric::Longitude || sel.metric==DataMetric::Position;
-        if(!text_field)fit_numeric_tile(i,count,value,unit);
+        if(!text_field || sel.metric==DataMetric::Position) {
+            // Position is exactly two measured lines. Fit both uniformly rather
+            // than wrapping a hemisphere or truncating to the text-field width.
+            if(sel.metric==DataMetric::Position)lv_label_set_long_mode(g_tile_values[i],LV_LABEL_LONG_MODE_CLIP);
+            fit_numeric_tile(i,count,value,unit);
+        }
         else {
             lv_obj_align(g_tile_values[i],LV_ALIGN_CENTER,-10,count==6?2:5);
             lv_obj_set_width(g_tile_units[i],LV_SIZE_CONTENT);

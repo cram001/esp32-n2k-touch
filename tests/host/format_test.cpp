@@ -83,7 +83,30 @@ int main(){
     DataFieldSelection position{};position.metric=DataMetric::Position;
     InstrumentValue pos{};pos.valid=true;pos.stale=false;pos.value=48.12345;pos.secondary_valid=true;pos.secondary_value=-123.12345;
     instrument_format_value(position,units,pos,text,sizeof(text),suffix,sizeof(suffix));
-    assert(std::strcmp(text,"48 07.407 N\n123 07.407 W")==0 && std::strcmp(suffix,"DM")==0);
+    assert(std::strcmp(text,"N48 07.41\nW123 07.41")==0 && std::strcmp(suffix,"DM")==0);
+
+    pos.value=51+14.34/60;pos.secondary_value=-(124+3.54/60);
+    instrument_format_value(position,units,pos,text,sizeof(text),suffix,sizeof(suffix));
+    assert(!std::strcmp(text,"N51 14.34\nW124 03.54"));
+    pos.value=-89.9999997;pos.secondary_value=179.9999997;
+    instrument_format_value(position,units,pos,text,sizeof(text),suffix,sizeof(suffix));
+    assert(!std::strcmp(text,"S90 00.00\nE180 00.00"));
+    pos.value=0;pos.secondary_value=0;
+    instrument_format_value(position,units,pos,text,sizeof(text),suffix,sizeof(suffix));
+    assert(!std::strcmp(text,"N0 00.00\nE0 00.00"));
+    units.lat_lon_format=LatLonFormat::DecimalDegrees;
+    instrument_format_value(position,units,pos,text,sizeof(text),suffix,sizeof(suffix));
+    assert(!std::strcmp(text,"N0.00000\nE0.00000") && !std::strcmp(suffix,"DD"));
+    units.lat_lon_format=LatLonFormat::DegreesMinutesSeconds;
+    instrument_format_value(position,units,pos,text,sizeof(text),suffix,sizeof(suffix));
+    assert(!std::strcmp(text,"N0 00 00.0\nE0 00 00.0") && !std::strcmp(suffix,"DMS"));
+    pos.secondary_valid=false;
+    instrument_format_value(position,units,pos,text,sizeof(text),suffix,sizeof(suffix));
+    assert(!std::strcmp(text,"--"));
+    pos.secondary_valid=true;pos.value=91;
+    instrument_format_value(position,units,pos,text,sizeof(text),suffix,sizeof(suffix));
+    assert(!std::strcmp(text,"--"));
+    units.lat_lon_format=LatLonFormat::DegreesMinutes;
 
     DataFieldSelection dir{};dir.metric=DataMetric::CourseOverGround;
     InstrumentValue bearing{};bearing.valid=true;bearing.stale=false;bearing.value=1.0;bearing.heading_reference=HeadingReference::True;
