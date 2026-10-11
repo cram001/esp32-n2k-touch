@@ -51,6 +51,12 @@ References: [project partition table](partitions.csv), [ESPConnect Apps/Partitio
 
 If you need to restore the bootloader or install the complete layout, follow the first-install instructions above with **`esp32-n2k-touch-full.bin` at `0x0`**. This can clear saved settings. For routine updates of a working device while retaining settings, use `firmware.bin` at the confirmed application-slot offset instead.
 
+### Support
+
+For software support, consult this thread:
+
+https://www.cruisersforum.com/forums/f13/open-source-sub-100-nmea2000-victron-display-302384.html#post4103041
+
 ### Developers / custom builds
 
 Developers who want to modify or compile the project can use VS Code + PlatformIO as described in [Development](docs/development.md).
