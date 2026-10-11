@@ -242,7 +242,8 @@ routine fix: erasing can remove saved settings, passwords and calibration.
 4. Set your units and comfortable Day/Night brightness. Start with visible levels.
 5. **Swipe down** on an instrument page to edit its layout and displayed values.
    Swipe left/right to change enabled pages.
-6. If using Wi-Fi, choose Station, enable it, tap **Scan Networks**, select your
+6. First select the NMEA input: CAN for wired NMEA 2000 + SmartShunt BLE, or Wi-Fi for W2K-1 TCP (BLE/CAN disabled). Changing source saves it and reboots.
+   In Wi-Fi mode, open Wi-Fi setup, tap **Scan Networks**, select your
    2.4 GHz network and enter its password. Scanning happens only when requested.
    Keep manual SSID entry for a hidden network. Save and check for an IP address.
 7. Choose the data input and configure any sensors using these guides:
