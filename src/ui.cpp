@@ -55,6 +55,7 @@ BootBrightnessRecovery g_boot_recovery;
 lv_indev_t *g_boot_indev = nullptr;
 bool g_boot_brightness_override = false;
 lv_obj_t *g_input_screen = nullptr;
+lv_obj_t *g_shunt_source_picker = nullptr, *g_shunt_source_list = nullptr;
 lv_obj_t *g_source_picker = nullptr, *g_source_list = nullptr, *g_source_status = nullptr;
 lv_obj_t *g_metric_picker = nullptr, *g_metric_list = nullptr;
 lv_obj_t *g_depth_screen = nullptr, *g_depth_mode = nullptr, *g_depth_keel = nullptr, *g_depth_waterline = nullptr;
@@ -275,7 +276,7 @@ void apply_theme_to(lv_obj_t *screen)
 
 void apply_theme()
 {
-    apply_theme_to(g_source_picker);apply_theme_to(g_metric_picker);apply_theme_to(g_depth_screen);
+    apply_theme_to(g_shunt_source_picker);apply_theme_to(g_source_picker);apply_theme_to(g_metric_picker);apply_theme_to(g_depth_screen);
     apply_theme_to(g_input_screen);
     apply_theme_to(g_data_screen); apply_theme_to(g_settings_screen); apply_theme_to(g_page_setup_screen);
     apply_theme_to(g_field_editor_screen); apply_theme_to(g_units_screen); apply_theme_to(g_shunts_screen);
@@ -517,7 +518,38 @@ void open_field_editor_cb(lv_event_t *e){g_edit_field=static_cast<size_t>(reinte
 void field_source_cb(lv_event_t *){if(!n2k_sources_save_choice(editing_field_id(),N2kSourceChoice{}))return;auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];f.source=f.source==DataSourceType::Nmea2000?DataSourceType::SmartShunt:DataSourceType::Nmea2000;f.metric=f.source==DataSourceType::Nmea2000?DataMetric::Depth:DataMetric::BatteryVoltage;persist();update_field_editor();}
 void field_metric_step(int direction){auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];if(f.source==DataSourceType::Nmea2000){if(!n2k_sources_save_choice(editing_field_id(),N2kSourceChoice{}))return;int pos=0;for(size_t i=0;i<NMEA_METRICS.size();++i)if(NMEA_METRICS[i]==f.metric){pos=static_cast<int>(i);break;}const int n=static_cast<int>(NMEA_METRICS.size());pos=(pos+direction+n)%n;f.metric=NMEA_METRICS[static_cast<size_t>(pos)];}else{int pos=0;for(size_t i=0;i<SHUNT_METRICS.size();++i)if(SHUNT_METRICS[i]==f.metric){pos=static_cast<int>(i);break;}const int n=static_cast<int>(SHUNT_METRICS.size());pos=(pos+direction+n)%n;f.metric=SHUNT_METRICS[static_cast<size_t>(pos)];}persist();update_field_editor();}
 void field_metric_prev_cb(lv_event_t *){field_metric_step(-1);}void field_metric_next_cb(lv_event_t *){field_metric_step(1);}
-void field_device_cb(lv_event_t *){auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];if(f.source==DataSourceType::Nmea2000){g_source_depth_picker=false;n2k_bridge_request_sources();source_picker_cb(nullptr);return;}for(size_t step=1;step<=MAX_SMARTSHUNTS;++step){size_t idx=(f.source_index+step)%MAX_SMARTSHUNTS;if(g_settings.smartshunts[idx].configured){f.source_index=idx;break;}}persist();update_field_editor();}
+void field_shunt_choice_cb(lv_event_t *event)
+{
+    const size_t index=reinterpret_cast<uintptr_t>(lv_event_get_user_data(event));
+    if(index>=MAX_SMARTSHUNTS || !g_settings.smartshunts[index].configured)return;
+    AppSettings candidate=g_settings;
+    candidate.pages[g_edit_page].fields[g_edit_field].source_index=index;
+    if(!settings_save(candidate)){
+        ESP_LOGW(TAG,"Could not save SmartShunt field selection");return;
+    }
+    g_settings=candidate;
+    apply_runtime_settings();apply_theme();update_field_editor();lv_screen_load(g_field_editor_screen);
+}
+void field_device_cb(lv_event_t *)
+{
+    const auto &field=g_settings.pages[g_edit_page].fields[g_edit_field];
+    if(field.source==DataSourceType::Nmea2000){g_source_depth_picker=false;n2k_bridge_request_sources();source_picker_cb(nullptr);return;}
+    lv_obj_clean(g_shunt_source_list);
+    size_t row=0;
+    for(size_t i=0;i<MAX_SMARTSHUNTS;++i){
+        const auto &config=g_settings.smartshunts[i];
+        if(!config.configured)continue;
+        char text[80];
+        std::snprintf(text,sizeof(text),"%u. %s%s%s",static_cast<unsigned>(i+1),
+            config.name[0]?config.name.data():"SmartShunt",
+            i==field.source_index?" / selected":"",config.enabled?"":" / disabled");
+        lv_obj_t *button=make_button(g_shunt_source_list,text,field_shunt_choice_cb,410,62,reinterpret_cast<void *>(i));
+        lv_obj_set_width(button_label(button),390);lv_label_set_long_mode(button_label(button),LV_LABEL_LONG_MODE_WRAP);
+        lv_obj_set_pos(button,0,static_cast<int>(row++*68));
+    }
+    if(!row){lv_obj_t *label=lv_label_create(g_shunt_source_list);lv_label_set_text(label,"Add a device in Settings > SmartShunts first.");lv_obj_set_width(label,400);}
+    lv_screen_load(g_shunt_source_picker);
+}
 void field_done_cb(lv_event_t *){update_page_setup();lv_screen_load(g_page_setup_screen);}
 
 const char *depth_name(){return g_settings.units.depth==DepthUnit::Metres?"METRES":"FEET";}const char *temp_name(){return g_settings.units.temperature==TemperatureUnit::Celsius?"CELSIUS":"FAHRENHEIT";}const char *speed_name(SpeedUnit u){return u==SpeedUnit::Knots?"KNOTS":(u==SpeedUnit::KilometresPerHour?"KM/H":"M/S");}const char *distance_name(){return g_settings.units.distance==DistanceUnit::NauticalMiles?"NM":"KM";}const char *short_name(){return g_settings.units.short_distance==ShortDistanceUnit::Metres?"METRES":(g_settings.units.short_distance==ShortDistanceUnit::Feet?"FEET":"YARDS");}
@@ -952,6 +984,7 @@ void create_source_depth_screens() {
     g_source_status=lv_label_create(g_source_picker);lv_obj_set_width(g_source_status,440);lv_obj_set_style_text_align(g_source_status,LV_TEXT_ALIGN_CENTER,0);lv_obj_align(g_source_status,LV_ALIGN_TOP_MID,0,45);
     lv_obj_t *button=make_button(g_source_picker,"REFRESH",source_refresh_cb,150,48);lv_obj_align(button,LV_ALIGN_BOTTOM_RIGHT,-35,-18);
     g_metric_picker=picker("SELECT DATA FIELD",g_metric_list);
+    g_shunt_source_picker=picker("SELECT SMARTSHUNT",g_shunt_source_list);
     g_depth_screen=require_obj(lv_obj_create(nullptr),"depth screen");lv_obj_remove_flag(g_depth_screen,LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *label=lv_label_create(g_depth_screen);lv_label_set_text(label,"DEPTH SETUP");lv_obj_set_style_text_font(label,&lv_font_montserrat_24,0);lv_obj_align(label,LV_ALIGN_TOP_MID,0,18);
     g_depth_source_button=make_button(g_depth_screen,"DEFAULT FOR UNCONFIGURED SENSORS",depth_source_cb,410,54);

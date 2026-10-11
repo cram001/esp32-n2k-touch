@@ -19,9 +19,9 @@ namespace {
 constexpr const char *TAG = "smartshunt";
 constexpr uint8_t VICTRON_PRODUCT_ADVERTISEMENT = 0x10;
 constexpr uint8_t VICTRON_BATTERY_MONITOR_RECORD = 0x02;
-constexpr uint8_t VICTRON_INSTANT_READOUT = 0xA0;
 constexpr size_t VICTRON_HEADER_LEN = 8;
-constexpr size_t BATTERY_RECORD_LEN = 16;
+// Last decoded field ends at bit 118: 15 bytes, not a full AES block.
+constexpr size_t BATTERY_RECORD_LEN = 15;
 constexpr uint32_t STALE_AFTER_MS = 5000;
 constexpr uint32_t DISCOVERY_STALE_MS = 15000;
 
@@ -206,10 +206,9 @@ void handle_victron_advertisement(const esp_ble_gap_cb_param_t::ble_scan_result_
     if (payload == nullptr || payload_len < VICTRON_HEADER_LEN) return;
     // Victron manufacturer payload after the 0x02E1 company ID:
     // [0] 0x10 product advertisement, [1..2] product ID (LE),
-    // [3] 0xA0 instant-readout type, [4] record type,
+    // [3] product/readout flags (not a fixed 0xA0), [4] record type,
     // [5..6] AES nonce/counter (LE), [7] key-check byte, [8..] ciphertext.
     if (payload[0] != VICTRON_PRODUCT_ADVERTISEMENT ||
-        payload[3] != VICTRON_INSTANT_READOUT ||
         payload[4] != VICTRON_BATTERY_MONITOR_RECORD) {
         return;
     }
