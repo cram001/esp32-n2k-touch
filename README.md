@@ -108,6 +108,7 @@ Developers who want to modify or compile the project can use VS Code + PlatformI
 
 Wall mounted case 3D printed:  https://cults3d.com/en/3d-model/home/flush-mount-wall-case-for-waveshare-esp32-s3-touch-lcd-4-instrument-display
 
+Tip: when pulling the 4 wires (can H, can L, DC pos, DC neg) through the pass-through, keep them long. Shorten them and strip them only after. A bit of soap in the pass-thru might help. It's a tight fit!
 
 ## Functions
 
