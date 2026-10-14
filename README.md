@@ -8,14 +8,20 @@ Marine touchscreen instrument for the Waveshare **ESP32-S3-Touch-LCD-4**.
 
 You do **not** need VS Code, PlatformIO, Git or a compiler just to install the firmware.
 
+| Process | File and address | “Erase entire flash before writing” |
+| --- | --- | --- |
+| First installation / full recovery | `esp32-n2k-touch-full.bin` at `0x0` | **Not required.** Leave unchecked unless deliberately wiping the whole chip. The full image restores the bootloader but clears saved settings. |
+| Application-only update / retain settings | `firmware.bin` at the confirmed running slot: `0x20000` or `0x620000` | **MUST remain unchecked.** Checking it removes the bootloader and prevents booting. |
+
 1. Open the [latest GitHub Release](https://github.com/cram001/esp32-n2k-touch/releases/latest).
 2. Under **Assets**, download **`esp32-n2k-touch-full.bin`**.
 3. Connect the Waveshare **ESP32-S3-Touch-LCD-4** to your computer with a USB data cable.
 4. Open [ESPConnect](https://thelastoutpostworkshop.github.io/ESPConnect/) in a Chromium-based browser such as Chrome or Edge.
 5. Click **Connect** and select the ESP32-S3 serial device.
 6. Open **Flash Firmware**, select `esp32-n2k-touch-full.bin`, and set the flash address/offset to **`0x0`**.
-7. Start the flash and leave the board connected until ESPConnect reports completion.
-8. Disconnect/restart the board with BOOT released.
+7. Leave **Erase entire flash before writing unchecked** unless you deliberately want a complete wipe, including the other OTA slot and storage. Full-chip erase is not required: the full image rewrites the bootloader and includes erased bytes across NVS/settings.
+8. Start the flash and leave the board connected until ESPConnect reports completion.
+9. Disconnect/restart the board with BOOT released.
 
 The **full** image contains the bootloader, partition table, initial OTA metadata and application. It is intended for first installation or clean recovery. A normal write of the full image clears saved application settings because the merged file includes erased bytes across NVS.
 
@@ -86,7 +92,7 @@ and [ESPConnect flash/offset handling](https://github.com/thelastoutpostworkshop
 
 ### Clean recovery / full-image update with ESPConnect
 
-If you need to restore the bootloader or install the complete layout, follow the first-install instructions above with **`esp32-n2k-touch-full.bin` at `0x0`**. This clears saved settings during a normal merged-image write. For routine updates of a working device while retaining settings, use `firmware.bin` at the confirmed application-slot offset instead.
+If you need to restore the bootloader or install the complete layout, follow the first-install instructions above with **`esp32-n2k-touch-full.bin` at `0x0`**. This clears saved settings during a normal merged-image write. **Whole-chip erase is optional for a deliberate complete wipe; it is not needed to restore the bootloader. Leave it unchecked otherwise.** For routine updates of a working device while retaining settings, use `firmware.bin` at the confirmed application-slot offset instead.
 
 ### Support
 

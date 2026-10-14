@@ -33,9 +33,10 @@ For first installation, do not download the repository ZIP and do not choose `fi
 5. Open **Flash Firmware** in ESPConnect.
 6. Choose the downloaded **`esp32-n2k-touch-full.bin`**.
 7. Set the flash address/offset to **`0x0`**.
-8. Start the flash.
-9. Do not unplug the board while it is erasing/writing/verifying.
-10. When the operation is complete, disconnect in ESPConnect and restart the board with the physical **BOOT** button released.
+8. Leave **Erase entire flash before writing unchecked** unless deliberately wiping the whole chip, including the other OTA slot and storage. It is not needed to install the full image, which restores the bootloader and clears NVS/settings itself.
+9. Start the flash.
+10. Do not unplug the board while it is erasing/writing/verifying.
+11. When the operation is complete, disconnect in ESPConnect and restart the board with the physical **BOOT** button released.
 
 The full image is intended for **first installation or clean recovery**. Because it contains the low-flash boot/partition/OTA regions and spans the application-settings area, a normal write clears existing saved settings, including when full-chip erase is disabled. Use it when that is acceptable.
 
@@ -355,7 +356,7 @@ and [ESPConnect flash/offset handling](https://github.com/thelastoutpostworkshop
 
 ### Clean recovery / full-image update with ESPConnect
 
-If you need to restore the bootloader or install the complete layout, follow the first-install instructions above with **`esp32-n2k-touch-full.bin` at `0x0`**. This clears saved settings during a normal merged-image write. For routine updates of a working device while retaining settings, use `firmware.bin` at the confirmed application-slot offset instead.
+If you need to restore the bootloader or install the complete layout, follow the first-install instructions above with **`esp32-n2k-touch-full.bin` at `0x0`**. This clears saved settings during a normal merged-image write. **Whole-chip erase is optional for a deliberate complete wipe; it is not needed to restore the bootloader. Leave it unchecked otherwise.** For routine updates of a working device while retaining settings, use `firmware.bin` at the confirmed application-slot offset instead.
 
 ### Developers: get newer code from main
 
