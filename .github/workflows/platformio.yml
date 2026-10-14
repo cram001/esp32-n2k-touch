@@ -61,6 +61,12 @@ jobs:
           g++ -std=c++17 -Wall -Wextra -I tests/host/gateway -I src src/n2k_input.cpp src/actisense_ascii.cpp tests/host/n2k_input_test.cpp -o /tmp/n2k_input_test
           /tmp/n2k_input_test
 
+      - name: Test direct upgrades from historical settings
+        shell: bash
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/host -I src src/app_settings.cpp tests/host/settings_upgrade_test.cpp -o /tmp/settings_upgrade_test
+          /tmp/settings_upgrade_test tests/host/fixtures/settings
+
       - name: Test asynchronous CAN transmit ownership
         shell: bash
         run: |

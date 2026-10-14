@@ -282,3 +282,17 @@ check that the transducer is powered and sending PGN 128267, then tap **Refresh*
 Queued CAN discovery frames now retain their descriptor and payload until transmit
 completion, fixing the reboot when opening this picker with a live CAN bus.
 See [depth setup details](docs/sources-instruments-depth.md).
+
+## Upgrade compatibility checks
+
+Users may skip releases. CI and release builds test direct loading of historical
+settings snapshots written by Beta-0.1 through Beta-0.4.3, without intermediate
+firmware. The tests cover CAN/Wi-Fi selection, credentials, six populated pages,
+four configured Victron devices, units, missing newer preferences, malformed or
+unknown-schema groups, save/reboot and failed commits. NVS initialization failures
+preserve the existing partition instead of automatically erasing it.
+
+These are host tests of application settings, not proof of successful USB flashing
+or hardware startup. USB updates still require the confirmed running-slot offset;
+raw flashing does not establish an OTA trial. See the existing USB instructions
+above and [settings test coverage](tests/host/fixtures/settings/README.md).

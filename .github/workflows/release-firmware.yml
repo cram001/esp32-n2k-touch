@@ -26,6 +26,12 @@ jobs:
       - name: Install PlatformIO
         run: python -m pip install --upgrade platformio
 
+      - name: Test direct upgrades from historical settings
+        shell: bash
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/host -I src src/app_settings.cpp tests/host/settings_upgrade_test.cpp -o /tmp/settings_upgrade_test
+          /tmp/settings_upgrade_test tests/host/fixtures/settings
+
       - name: Build firmware
         shell: bash
         run: |
