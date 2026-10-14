@@ -37,7 +37,7 @@ For first installation, do not download the repository ZIP and do not choose `fi
 9. Do not unplug the board while it is erasing/writing/verifying.
 10. When the operation is complete, disconnect in ESPConnect and restart the board with the physical **BOOT** button released.
 
-The full image is intended for **first installation or clean recovery**. Because it contains the low-flash boot/partition/OTA regions and spans the application-settings area, installing it can clear existing saved settings. Use it when that is acceptable.
+The full image is intended for **first installation or clean recovery**. Because it contains the low-flash boot/partition/OTA regions and spans the application-settings area, a normal write clears existing saved settings, including when full-chip erase is disabled. Use it when that is acceptable.
 
 If ESPConnect cannot connect, enter the ESP32-S3 download/bootloader mode: hold **BOOT**, press/release **RESET** if available (or reconnect USB while holding BOOT), then release BOOT and try **Connect** again.
 
@@ -296,6 +296,12 @@ recognized in an ordinary terminal, open the PlatformIO terminal described above
 
 ### Updating only the application with ESPConnect (retain settings)
 
+> **Application-only updates: leave “Erase entire flash before writing” UNCHECKED.**
+> Whole-chip erase deletes the bootloader at `0x0`, the partition table, saved
+> settings and OTA metadata. Writing only `firmware.bin` afterwards does not
+> restore them—even at the correct application address. This causes a black
+> display and can produce repeated `invalid header: 0xffffffff` messages.
+
 For an already working display with this project's existing partition layout, download **`firmware.bin`** from the new release. This updates the application without writing the bootloader, partition table, NVS/settings or OTA metadata.
 
 | File / running application slot | Flash address / offset |
@@ -307,7 +313,7 @@ For an already working display with this project's existing partition layout, do
 1. Before entering download mode, check the startup serial log at **115200 baud**. It reports `Boot slot ota_0; OTA state ...` or `Boot slot ota_1; OTA state ...`. ESPConnect's **Apps** view can also show the active OTA slot; its **Partitions** view shows the offsets. A partition's existence alone does not tell you which slot boots.
 2. Close the serial monitor, connect with ESPConnect and open **Flash Firmware**.
 3. Select the new **`firmware.bin`**. Enter the offset for the **currently running slot** from the table above. Enter the custom offset explicitly; do not use a generic ESP32 application preset such as `0x10000`.
-4. Leave **Erase entire flash before writing** **unchecked**. Do not erase NVS, OTA metadata or other partitions.
+4. Leave **Erase entire flash before writing** **unchecked**. If checked, it also erases the bootloader; `firmware.bin` cannot replace it. Do not erase NVS, OTA metadata or other partitions.
 5. Flash, wait for completion, and restart with BOOT released. Verify the new version in the startup log and check your saved SmartShunts, keys, source selection and page layouts.
 
 **For the usual full-image installation followed only by USB application updates, the offset is `0x20000`.** If you have previously used OTA or changed the boot selection, confirm the running slot first. Writing the inactive slot alone does not select it for boot; ESPConnect's raw flash operation is not an OTA update. Overwriting the running slot also does not create an automatic rollback trial.
@@ -316,9 +322,40 @@ For an already working display with this project's existing partition layout, do
 
 References: [project partition table](../partitions.csv), [ESPConnect Apps/Partitions/Flash features](https://github.com/thelastoutpostworkshop/ESPConnect), and [ESP-IDF OTA boot selection](https://docs.espressif.com/projects/esp-idf/en/v5.5.3/esp32s3/api-reference/system/ota.html).
 
+### Black screen after an application-only update
+
+If the serial monitor repeatedly shows `invalid header: 0xffffffff`, the ESP32-S3
+ROM cannot read a valid software-bootloader header at `0x0`; the application has
+not started. One confirmed cause is selecting **Erase entire flash before writing**
+and then flashing only `firmware.bin`. Rebuilding or reflashing the application
+alone cannot restore the erased bootloader.
+
+Recover with **`esp32-n2k-touch-full.bin` at `0x0`**, then check the startup version
+and reconfigure saved settings as needed. The full merged image spans NVS and
+contains erased (`0xFF`) bytes there: a normal write clears saved settings even
+with full-chip erase disabled. Whole-chip erase additionally removes the other
+OTA slot and storage, so it is not required for a routine full-image write.
+
+For subsequent application-only updates, confirm the running slot, select
+`firmware.bin`, enter its address **with the `0x` prefix** (`0x20000` or `0x620000`),
+and keep **Erase entire flash before writing unchecked**. ESPConnect interprets
+an address without `0x` as decimal; `20000` is not the same address as `0x20000`.
+Review the confirmation dialog's actual address before flashing. After restarting,
+verify the firmware version and saved configuration. Updating to the same version
+also requires erase to remain unchecked.
+
+If this error occurs with erase disabled, retain the flashing/session log and
+check the actual write address and existing bootloader; the message alone does
+not distinguish erased flash from a flash-read problem. Do not erase settings
+repeatedly as a diagnostic step.
+
+References: [Espressif ESP32-S3 invalid-header explanation](https://docs.espressif.com/projects/esptool/en/latest/esp32s3/advanced-topics/boot-mode-selection.html#early-flash-read-error),
+[flash-sector erase behaviour](https://docs.espressif.com/projects/esptool/en/latest/esp32s3/esptool/basic-commands.html#erasing-flash-before-write),
+and [ESPConnect flash/offset handling](https://github.com/thelastoutpostworkshop/ESPConnect/blob/main/src/App.vue).
+
 ### Clean recovery / full-image update with ESPConnect
 
-If you need to restore the bootloader or install the complete layout, follow the first-install instructions above with **`esp32-n2k-touch-full.bin` at `0x0`**. This can clear saved settings. For routine updates of a working device while retaining settings, use `firmware.bin` at the confirmed application-slot offset instead.
+If you need to restore the bootloader or install the complete layout, follow the first-install instructions above with **`esp32-n2k-touch-full.bin` at `0x0`**. This clears saved settings during a normal merged-image write. For routine updates of a working device while retaining settings, use `firmware.bin` at the confirmed application-slot offset instead.
 
 ### Developers: get newer code from main
 
@@ -341,7 +378,7 @@ An unmerged feature branch is a separate version; only use one when specifically
 
 Wireless OTA and Access Point mode are unavailable in the current selected-source firmware. CAN source starts CAN and SmartShunt BLE; Wi-Fi source starts Station and W2K-1 TCP with BLE/CAN disabled. Use the USB update instructions above.
 
-The dual-slot partition layout remains unchanged. `firmware.bin` is application-only and must never be flashed at `0x0`. For settings-preserving ESPConnect updates, use `firmware.bin` at the confirmed running-slot offset (`0x20000` or `0x620000`) with full-chip erase disabled. Full-image recovery uses `esp32-n2k-touch-full.bin` at `0x0` and can clear NVS. Historical OTA notes are not instructions for this firmware.
+The dual-slot partition layout remains unchanged. `firmware.bin` is application-only and must never be flashed at `0x0`. For settings-preserving ESPConnect updates, use `firmware.bin` at the confirmed running-slot offset (`0x20000` or `0x620000`) with full-chip erase disabled. Full-image recovery uses `esp32-n2k-touch-full.bin` at `0x0` and clears NVS during a normal merged-image write. Historical OTA notes are not instructions for this firmware.
 
 ## Troubleshooting checklist
 
