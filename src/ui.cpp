@@ -913,7 +913,7 @@ void source_picker_cb(lv_event_t *) {
     lv_obj_clean(g_source_list);
     const DataMetric metric=g_source_depth_picker?DataMetric::Depth:field.metric;
     g_source_count=n2k_sources_options(metric,g_source_options.data(),g_source_options.size());
-    lv_label_set_text(g_source_status,g_source_depth_picker?"Select the transducer for these installation distances":n2k_sources_is_gps(metric)?"One GPS for position, altitude, speed and course":"Selection stays locked; missing data shows --");
+    lv_label_set_text(g_source_status,n2k_sources_is_gps(metric)?"One GPS for position, altitude, speed and course":"Selection stays locked; missing data shows --");
     lv_obj_t *button=make_button(g_source_list,g_source_depth_picker?"DEFAULT FOR UNCONFIGURED SENSORS":"AUTOMATIC: FIRST SOURCE (NO FALLBACK)",source_choice_cb,410,54);
     lv_obj_set_pos(button,0,0);
     for(size_t i=0;i<g_source_count;++i){
@@ -922,7 +922,7 @@ void source_picker_cb(lv_event_t *) {
         lv_obj_set_width(button_label(button),390);lv_label_set_long_mode(button_label(button),LV_LABEL_LONG_MODE_WRAP);
         lv_obj_set_pos(button,0,static_cast<int>(60+i*80));
     }
-    if(!g_source_count)lv_label_set_text(g_source_status,g_source_depth_picker?"No depth sensor received yet. Check input, then Refresh.":"No sources received yet. Wait for data, then Refresh.");
+    if(!g_source_count)lv_label_set_text(g_source_status,"No sources received yet. Wait for data, then Refresh.");
     lv_screen_load(g_source_picker);
 }
 void metric_choice_cb(lv_event_t *event) {
@@ -962,7 +962,7 @@ void depth_screen_cb(lv_event_t *) {
     lv_label_set_text(button_label(g_depth_mode),depth_reference_name(g_depth_draft.reference));
     char value[20];std::snprintf(value,sizeof(value),"%.3f",g_depth_draft.transducer_to_keel_m);lv_textarea_set_text(g_depth_keel,g_depth_draft.keel_set?value:"");
     std::snprintf(value,sizeof(value),"%.3f",g_depth_draft.transducer_to_waterline_m);lv_textarea_set_text(g_depth_waterline,g_depth_draft.waterline_set?value:"");
-    lv_label_set_text(g_depth_status,g_depth_source.mode==SourceChoiceMode::Automatic?"Select a depth sensor above before setting keel/surface distances.":"Distances apply to this sensor after SAVE.");lv_screen_load(g_depth_screen);
+    lv_label_set_text(g_depth_status,"Sensor offset is used once; local modes use raw depth.");lv_screen_load(g_depth_screen);
 }
 void depth_back_cb(lv_event_t *) {depth_keyboard_hide();lv_screen_load(g_settings_screen);}
 bool depth_distance(lv_obj_t *field,float &value,bool &set) {

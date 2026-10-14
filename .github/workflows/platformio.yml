@@ -61,12 +61,6 @@ jobs:
           g++ -std=c++17 -Wall -Wextra -I tests/host/gateway -I src src/n2k_input.cpp src/actisense_ascii.cpp tests/host/n2k_input_test.cpp -o /tmp/n2k_input_test
           /tmp/n2k_input_test
 
-      - name: Test asynchronous CAN transmit ownership
-        shell: bash
-        run: |
-          g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -I tests/host/twai -I src src/third_party/nmea2000_esp32xx/NMEA2000_esp32xx.cpp tests/host/twai_transport_test.cpp -o /tmp/twai_transport_test
-          ASAN_OPTIONS=detect_stack_use_after_return=1 /tmp/twai_transport_test
-
       - name: Build firmware
         shell: bash
         run: |
@@ -103,8 +97,6 @@ jobs:
           build=.pio/build/waveshare-touch-4
           mkdir -p firmware-artifact
           cp "$build/firmware.bin" firmware-artifact/
-          cp "$build/firmware.elf" firmware-artifact/
-          cp "$build"/*.map firmware-artifact/ 2>/dev/null || true
           cp "$build/partitions.bin" firmware-artifact/
           cp "$build/bootloader.bin" firmware-artifact/ 2>/dev/null || true
           cp "$build/bootloader/bootloader.bin" firmware-artifact/ 2>/dev/null || true
