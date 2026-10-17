@@ -424,7 +424,7 @@ void render_graph(size_t panel,const DataFieldSelection &selection,const Instrum
             lv_obj_add_flag(chart,LV_OBJ_FLAG_GESTURE_BUBBLE);
         }
         auto *chart=g_graph_charts[panel];lv_obj_remove_flag(chart,LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_pos(chart,8,58);lv_obj_set_size(chart,w-16,h-92);
+        lv_obj_set_pos(chart,8,58);lv_obj_set_size(chart,w-16,h-102);
         lv_obj_set_style_bg_color(chart,ui_bg(),0);lv_obj_set_style_line_color(chart,ui_muted(),LV_PART_MAIN);
         lv_chart_set_series_color(chart,g_graph_series[panel],ui_accent());
         lv_chart_set_series_ext_y_array(chart,g_graph_series[panel],buffer->history.plot.data());
