@@ -84,6 +84,13 @@ jobs:
       - name: Validate OTA partitions, rollback and firmware integrity
         run: python tools/validate_release.py --test
 
+      - name: Test shared keyboard with the firmware LVGL version
+        shell: bash
+        run: |
+          cmake -S tests/lvgl -B /tmp/ui-keyboard-build -DCMAKE_BUILD_TYPE=Release -DLVGL_SOURCE_DIR="$GITHUB_WORKSPACE/managed_components/lvgl__lvgl"
+          cmake --build /tmp/ui-keyboard-build --parallel 2
+          ctest --test-dir /tmp/ui-keyboard-build --output-on-failure
+
       - name: Test actual NMEA2000 library PGNs through the gateway decoder
         shell: bash
         run: |

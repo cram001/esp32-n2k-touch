@@ -22,6 +22,7 @@
 #include "depth_display.hpp"
 #include "graph_history.hpp"
 #include "tile_labels.hpp"
+#include "ui_keyboard.hpp"
 #include "metric_groups.hpp"
 #include "esp_heap_caps.h"
 #include <new>
@@ -68,13 +69,14 @@ void metric_picker_cb(lv_event_t *);
 lv_obj_t *g_graph_window_button=nullptr;
 TileLabels *g_tile_labels=nullptr;
 bool g_tile_labels_writable=false;
-lv_obj_t *g_tile_label_input=nullptr,*g_tile_label_keyboard=nullptr;
+lv_obj_t *g_tile_label_input=nullptr;
+UiKeyboard g_editor_keyboard;
 struct GraphBuffer { GraphHistory history; std::array<char,16> unit{}; };
 std::array<GraphBuffer *,MAX_DATA_PAGES*2> g_graph_buffers{};
 std::array<lv_obj_t *,2> g_graph_charts{};
 std::array<lv_chart_series_t *,2> g_graph_series{};
 lv_obj_t *g_depth_screen = nullptr, *g_depth_mode = nullptr, *g_depth_keel = nullptr, *g_depth_waterline = nullptr;
-lv_obj_t *g_depth_keyboard = nullptr, *g_depth_status = nullptr;
+lv_obj_t *g_depth_status = nullptr;
 std::array<N2kSourceOption,16> g_source_options{};
 size_t g_source_count = 0;
 DepthConfig g_depth_draft{};
@@ -90,7 +92,6 @@ lv_obj_t *g_input_mode = nullptr;
 lv_obj_t *g_input_ip = nullptr;
 lv_obj_t *g_input_port = nullptr;
 lv_obj_t *g_input_status = nullptr;
-lv_obj_t *g_input_keyboard = nullptr;
 N2kInputConfig g_input_draft{};
 bool g_input_feedback = false;
 void update_input_status();
@@ -102,8 +103,6 @@ lv_obj_t *g_shunts_screen = nullptr;
 lv_obj_t *g_shunt_edit_screen = nullptr;
 lv_obj_t *g_wifi_screen = nullptr;
 lv_obj_t *g_shunt_picker_screen = nullptr;
-lv_obj_t *g_keyboard = nullptr;
-lv_obj_t *g_wifi_keyboard = nullptr;
 lv_timer_t *g_refresh_timer = nullptr;
 std::atomic<uint32_t> g_ui_refreshes{0};
 std::atomic<uint32_t> g_ui_last_refresh_ms{0};
@@ -582,13 +581,16 @@ void layout_cb(lv_event_t *){
     persist();update_page_setup();
 }
 
-void tile_label_focus_cb(lv_event_t *){lv_obj_align(g_tile_label_input,LV_ALIGN_TOP_MID,0,224);lv_obj_move_foreground(g_tile_label_input);lv_keyboard_set_textarea(g_tile_label_keyboard,g_tile_label_input);lv_obj_remove_flag(g_tile_label_keyboard,LV_OBJ_FLAG_HIDDEN);lv_obj_move_foreground(g_tile_label_keyboard);}
-void tile_label_keyboard_cb(lv_event_t *event){if(lv_event_get_code(event)==LV_EVENT_READY || lv_event_get_code(event)==LV_EVENT_CANCEL){lv_obj_add_flag(g_tile_label_keyboard,LV_OBJ_FLAG_HIDDEN);lv_keyboard_set_textarea(g_tile_label_keyboard,nullptr);lv_obj_align(g_tile_label_input,LV_ALIGN_TOP_MID,0,338);}}
+void tile_label_closed(){lv_obj_align(g_tile_label_input,LV_ALIGN_TOP_MID,0,338);}
+void tile_label_focus_cb(lv_event_t *){
+    g_editor_keyboard.show(g_field_editor_screen,g_tile_label_input,LV_KEYBOARD_MODE_TEXT_LOWER,480,200,tile_label_closed);
+    lv_obj_align(g_tile_label_input,LV_ALIGN_TOP_MID,0,224);lv_obj_move_foreground(g_tile_label_input);
+}
 void update_field_editor()
 {
     lv_obj_align(g_tile_label_input,LV_ALIGN_TOP_MID,0,338);
     lv_textarea_set_text(g_tile_label_input,g_tile_labels?g_tile_labels->get(editing_field_id()):"");
-    lv_obj_add_flag(g_tile_label_keyboard,LV_OBJ_FLAG_HIDDEN);
+    g_editor_keyboard.hide(g_field_editor_screen);
     auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];lv_label_set_text(g_field_source_label,f.source==DataSourceType::Nmea2000?"NMEA 2000":"VICTRON BLE");lv_label_set_text(g_field_metric_label,instrument_field_name(f));
     lv_obj_remove_flag(g_field_device_button,LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(g_field_device_label,instrument_source_name(f,g_settings,editing_field_id()));
@@ -633,7 +635,7 @@ void field_done_cb(lv_event_t *){
     if(g_tile_labels_writable && !g_tile_labels->save(editing_field_id(),lv_textarea_get_text(g_tile_label_input))){
         lv_label_set_text(g_field_metric_label,"Label save failed; retry DONE");return;
     }
-    lv_obj_add_flag(g_tile_label_keyboard,LV_OBJ_FLAG_HIDDEN);
+    g_editor_keyboard.hide(g_field_editor_screen);
     update_page_setup();lv_screen_load(g_page_setup_screen);
 }
 
@@ -645,22 +647,10 @@ void unit_latlon_cb(lv_event_t *){auto &f=g_settings.units.lat_lon_format;f=f==L
 void units_screen_cb(lv_event_t *){update_units();lv_screen_load(g_units_screen);}void unit_depth_cb(lv_event_t *){g_settings.units.depth=g_settings.units.depth==DepthUnit::Metres?DepthUnit::Feet:DepthUnit::Metres;persist();update_units();}void unit_temp_cb(lv_event_t *){g_settings.units.temperature=g_settings.units.temperature==TemperatureUnit::Celsius?TemperatureUnit::Fahrenheit:TemperatureUnit::Celsius;persist();update_units();}
 SpeedUnit next_speed(SpeedUnit u){return u==SpeedUnit::Knots?SpeedUnit::KilometresPerHour:(u==SpeedUnit::KilometresPerHour?SpeedUnit::MetresPerSecond:SpeedUnit::Knots);}void unit_wind_cb(lv_event_t *){g_settings.units.wind_speed=next_speed(g_settings.units.wind_speed);persist();update_units();}void unit_vessel_cb(lv_event_t *){g_settings.units.vessel_speed=next_speed(g_settings.units.vessel_speed);persist();update_units();}void unit_distance_cb(lv_event_t *){g_settings.units.distance=g_settings.units.distance==DistanceUnit::NauticalMiles?DistanceUnit::Kilometres:DistanceUnit::NauticalMiles;persist();update_units();}void unit_short_cb(lv_event_t *){auto&u=g_settings.units.short_distance;u=u==ShortDistanceUnit::Metres?ShortDistanceUnit::Feet:(u==ShortDistanceUnit::Feet?ShortDistanceUnit::Yards:ShortDistanceUnit::Metres);persist();update_units();}void unit_threshold_down_cb(lv_event_t *){auto&t=g_settings.units.short_distance_threshold_nm;if(t>0.05f)t-=0.05f;persist();update_units();}void unit_threshold_up_cb(lv_event_t *){auto&t=g_settings.units.short_distance_threshold_nm;if(t<1.0f)t+=0.05f;persist();update_units();}
 
-void wifi_keyboard_cb(lv_event_t *e){
-    const auto code=lv_event_get_code(e);
-    if(code==LV_EVENT_READY||code==LV_EVENT_CANCEL){
-        lv_obj_add_flag(g_wifi_keyboard,LV_OBJ_FLAG_HIDDEN);
-        lv_keyboard_set_textarea(g_wifi_keyboard,nullptr);
-    }
-}
 void wifi_textarea_focus_cb(lv_event_t *e){
-    lv_keyboard_set_textarea(g_wifi_keyboard,lv_event_get_target_obj(e));
-    lv_obj_remove_flag(g_wifi_keyboard,LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(g_wifi_keyboard);
+    g_editor_keyboard.show(g_wifi_screen,lv_event_get_target_obj(e),LV_KEYBOARD_MODE_TEXT_LOWER,460,205);
 }
-void hide_wifi_keyboard() {
-    lv_obj_add_flag(g_wifi_keyboard,LV_OBJ_FLAG_HIDDEN);
-    lv_keyboard_set_textarea(g_wifi_keyboard,nullptr);
-}
+void hide_wifi_keyboard(){g_editor_keyboard.hide(g_wifi_screen);}
 void wifi_mask_cb(lv_event_t *) {
     lv_textarea_set_password_mode(g_wifi_password,true);
     lv_obj_remove_state(g_wifi_show,LV_STATE_CHECKED);
@@ -836,7 +826,7 @@ void shunt_picker_select_cb(lv_event_t *e)
 }
 void shunt_picker_back_cb(lv_event_t *) { lv_screen_load(g_shunt_edit_screen); }
 void shunt_instance_down_cb(lv_event_t *){auto&c=g_settings.smartshunts[g_edit_shunt];if(c.battery_instance>0)--c.battery_instance;char b[12];std::snprintf(b,sizeof(b),"%u",c.battery_instance);lv_label_set_text(g_shunt_instance,b);persist();}void shunt_instance_up_cb(lv_event_t *){auto&c=g_settings.smartshunts[g_edit_shunt];if(c.battery_instance<252)++c.battery_instance;char b[12];std::snprintf(b,sizeof(b),"%u",c.battery_instance);lv_label_set_text(g_shunt_instance,b);persist();}
-void shunt_save_cb(lv_event_t *){auto&c=g_settings.smartshunts[g_edit_shunt];std::snprintf(c.name.data(),c.name.size(),"%s",lv_textarea_get_text(g_shunt_name));std::snprintf(c.bindkey.data(),c.bindkey.size(),"%s",lv_textarea_get_text(g_shunt_key));c.n2k_enabled=lv_obj_has_state(g_shunt_n2k,LV_STATE_CHECKED);persist();update_shunts_list();lv_screen_load(g_shunts_screen);}void keyboard_cb(lv_event_t *e){const auto code=lv_event_get_code(e);if(code==LV_EVENT_READY||code==LV_EVENT_CANCEL){lv_obj_add_flag(g_keyboard,LV_OBJ_FLAG_HIDDEN);lv_keyboard_set_textarea(g_keyboard,nullptr);}}void textarea_focus_cb(lv_event_t *e){lv_keyboard_set_textarea(g_keyboard,lv_event_get_target_obj(e));lv_obj_remove_flag(g_keyboard,LV_OBJ_FLAG_HIDDEN);lv_obj_move_foreground(g_keyboard);}
+void shunt_save_cb(lv_event_t *){auto&c=g_settings.smartshunts[g_edit_shunt];std::snprintf(c.name.data(),c.name.size(),"%s",lv_textarea_get_text(g_shunt_name));std::snprintf(c.bindkey.data(),c.bindkey.size(),"%s",lv_textarea_get_text(g_shunt_key));c.n2k_enabled=lv_obj_has_state(g_shunt_n2k,LV_STATE_CHECKED);persist();update_shunts_list();lv_screen_load(g_shunts_screen);}void textarea_focus_cb(lv_event_t *e){g_editor_keyboard.show(g_shunt_edit_screen,lv_event_get_target_obj(e),LV_KEYBOARD_MODE_TEXT_LOWER,460,205);}
 
 void data_gesture_cb(lv_event_t *event)
 {
@@ -906,19 +896,9 @@ void update_input_status()
         }
     }
 }
-void input_keyboard_hide() {
-    lv_obj_add_flag(g_input_keyboard, LV_OBJ_FLAG_HIDDEN);
-    lv_keyboard_set_textarea(g_input_keyboard, nullptr);
-}
-void input_keyboard_cb(lv_event_t *event) {
-    if (lv_event_get_code(event) == LV_EVENT_READY || lv_event_get_code(event) == LV_EVENT_CANCEL) input_keyboard_hide();
-}
-void input_focus_cb(lv_event_t *event) {
-    lv_obj_t *target = lv_event_get_target_obj(event);
-    lv_keyboard_set_mode(g_input_keyboard, LV_KEYBOARD_MODE_NUMBER);
-    lv_keyboard_set_textarea(g_input_keyboard, target);
-    lv_obj_remove_flag(g_input_keyboard, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(g_input_keyboard);
+void input_keyboard_hide(){g_editor_keyboard.hide(g_input_screen);}
+void input_focus_cb(lv_event_t *event){
+    g_editor_keyboard.show(g_input_screen,lv_event_get_target_obj(event),LV_KEYBOARD_MODE_NUMBER,460,220);
 }
 void input_mode_cb(lv_event_t *) {
     g_input_draft.mode=g_input_draft.mode==N2kInputMode::Wired?N2kInputMode::W2kTcp:N2kInputMode::Wired;
@@ -1045,9 +1025,8 @@ const char *depth_reference_name(DepthReference ref) {
     switch(ref){case DepthReference::SensorOffset:return "SENSOR-PROVIDED OFFSET";case DepthReference::Keel:return "BELOW KEEL";
     case DepthReference::Waterline:return "BELOW WATER SURFACE";default:return "BELOW TRANSDUCER";}
 }
-void depth_keyboard_hide(){lv_obj_add_flag(g_depth_keyboard,LV_OBJ_FLAG_HIDDEN);lv_keyboard_set_textarea(g_depth_keyboard,nullptr);}
-void depth_keyboard_cb(lv_event_t *event){if(lv_event_get_code(event)==LV_EVENT_READY||lv_event_get_code(event)==LV_EVENT_CANCEL)depth_keyboard_hide();}
-void depth_focus_cb(lv_event_t *event){lv_keyboard_set_mode(g_depth_keyboard,LV_KEYBOARD_MODE_NUMBER);lv_keyboard_set_textarea(g_depth_keyboard,lv_event_get_target_obj(event));lv_obj_remove_flag(g_depth_keyboard,LV_OBJ_FLAG_HIDDEN);lv_obj_move_foreground(g_depth_keyboard);}
+void depth_keyboard_hide(){g_editor_keyboard.hide(g_depth_screen);}
+void depth_focus_cb(lv_event_t *event){g_editor_keyboard.show(g_depth_screen,lv_event_get_target_obj(event),LV_KEYBOARD_MODE_NUMBER,460,220);}
 void depth_mode_cb(lv_event_t *) {g_depth_draft.reference=static_cast<DepthReference>((static_cast<unsigned>(g_depth_draft.reference)+1)%4);lv_label_set_text(button_label(g_depth_mode),depth_reference_name(g_depth_draft.reference));}
 void depth_screen_cb(lv_event_t *) {
     g_depth_draft=n2k_sources_depth(&g_depth_source);depth_keyboard_hide();
@@ -1105,7 +1084,7 @@ void create_source_depth_screens() {
     g_depth_status=lv_label_create(g_depth_screen);lv_obj_set_width(g_depth_status,430);lv_obj_set_style_text_align(g_depth_status,LV_TEXT_ALIGN_CENTER,0);lv_obj_align(g_depth_status,LV_ALIGN_TOP_MID,0,365);
     button=make_button(g_depth_screen,"SAVE",depth_save_cb,150,48);lv_obj_align(button,LV_ALIGN_BOTTOM_RIGHT,-35,-18);
     button=make_button(g_depth_screen,"BACK",depth_back_cb,150,48);lv_obj_align(button,LV_ALIGN_BOTTOM_LEFT,35,-18);
-    g_depth_keyboard=lv_keyboard_create(g_depth_screen);lv_obj_set_size(g_depth_keyboard,460,220);lv_obj_align(g_depth_keyboard,LV_ALIGN_BOTTOM_MID,0,0);lv_obj_add_event_cb(g_depth_keyboard,depth_keyboard_cb,LV_EVENT_ALL,nullptr);depth_keyboard_hide();
+
 }
 void create_input_screen() {
     g_input_screen = require_obj(lv_obj_create(nullptr), "NMEA input screen");
@@ -1131,9 +1110,7 @@ void create_input_screen() {
     lv_obj_t *button = make_button(g_input_screen, "SAVE", input_save_cb, 150, 48);
     lv_obj_align(button, LV_ALIGN_BOTTOM_RIGHT, -40, -22);
     button = make_button(g_input_screen, "BACK", input_back_cb, 150, 48); lv_obj_align(button, LV_ALIGN_BOTTOM_LEFT, 40, -22);
-    g_input_keyboard = lv_keyboard_create(g_input_screen); lv_obj_set_size(g_input_keyboard, 460, 220);
-    lv_obj_align(g_input_keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_add_event_cb(g_input_keyboard, input_keyboard_cb, LV_EVENT_ALL, nullptr); input_keyboard_hide();
+
 }
 void create_data_screen()
 {
@@ -1306,9 +1283,6 @@ void create_field_editor_screen()
     lv_textarea_set_placeholder_text(g_tile_label_input,g_tile_labels_writable?"Custom label (optional)":"Custom labels unavailable");
     if(g_tile_labels_writable)lv_obj_add_event_cb(g_tile_label_input,tile_label_focus_cb,LV_EVENT_CLICKED,nullptr);
     else lv_obj_add_state(g_tile_label_input,LV_STATE_DISABLED);
-    g_tile_label_keyboard=lv_keyboard_create(g_field_editor_screen);
-    lv_obj_set_size(g_tile_label_keyboard,480,200);lv_obj_align(g_tile_label_keyboard,LV_ALIGN_BOTTOM_MID,0,0);
-    lv_obj_add_event_cb(g_tile_label_keyboard,tile_label_keyboard_cb,LV_EVENT_ALL,nullptr);lv_obj_add_flag(g_tile_label_keyboard,LV_OBJ_FLAG_HIDDEN);
     b = make_button(g_field_editor_screen, "DONE", field_done_cb, 150, 54);
     lv_obj_align(b, LV_ALIGN_BOTTOM_MID, 0, -40);
 }
@@ -1380,8 +1354,6 @@ void create_wifi_screen()
     g_wifi_status=lv_label_create(form);lv_obj_set_width(g_wifi_status,410);lv_obj_set_pos(g_wifi_status,4,300);
     b=make_button(g_wifi_screen,"SAVE / CONNECT",wifi_save_cb,190,48);lv_obj_align(b,LV_ALIGN_BOTTOM_LEFT,24,-8);
     b=make_button(g_wifi_screen,"BACK",settings_screen_cb,120,48);lv_obj_align(b,LV_ALIGN_BOTTOM_RIGHT,-24,-8);
-    g_wifi_keyboard=lv_keyboard_create(g_wifi_screen);lv_obj_set_size(g_wifi_keyboard,460,205);lv_obj_align(g_wifi_keyboard,LV_ALIGN_BOTTOM_MID,0,0);
-    lv_obj_add_event_cb(g_wifi_keyboard,wifi_keyboard_cb,LV_EVENT_ALL,nullptr);lv_obj_add_flag(g_wifi_keyboard,LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_event_cb(g_wifi_screen,wifi_mask_cb,LV_EVENT_SCREEN_UNLOADED,nullptr);
 
     g_wifi_picker=lv_obj_create(nullptr);lv_obj_remove_flag(g_wifi_picker,LV_OBJ_FLAG_SCROLLABLE);
@@ -1496,11 +1468,7 @@ void create_shunt_edit_screen()
     b = make_button(g_shunt_edit_screen, "BACK", shunts_screen_cb, 120, 46);
     lv_obj_align(b, LV_ALIGN_BOTTOM_RIGHT, -45, -18);
 
-    g_keyboard = require_obj(lv_keyboard_create(g_shunt_edit_screen), "SmartShunt keyboard");
-    lv_obj_set_size(g_keyboard, 460, 205);
-    lv_obj_align(g_keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_add_event_cb(g_keyboard, keyboard_cb, LV_EVENT_ALL, nullptr);
-    lv_obj_add_flag(g_keyboard, LV_OBJ_FLAG_HIDDEN);
+
 }
 
 } // namespace
@@ -1515,6 +1483,7 @@ void ui_start(const AppSettings &initial_settings)
     g_active_page = first_enabled_page();
 
     create_data_screen();
+    require_obj(g_editor_keyboard.create(g_data_screen),"shared editor keyboard");
     create_source_depth_screens();
     create_input_screen();
     create_settings_screen();
@@ -1525,6 +1494,11 @@ void ui_start(const AppSettings &initial_settings)
     create_shunts_screen();
     create_shunt_picker_screen();
     create_shunt_edit_screen();
+    g_editor_keyboard.watch_screen(g_depth_screen);
+    g_editor_keyboard.watch_screen(g_input_screen);
+    g_editor_keyboard.watch_screen(g_field_editor_screen);
+    g_editor_keyboard.watch_screen(g_wifi_screen);
+    g_editor_keyboard.watch_screen(g_shunt_edit_screen);
 
     apply_theme();
     render_active_page();

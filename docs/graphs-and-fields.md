@@ -79,10 +79,20 @@ sampling and LVGL updates run in the existing UI owner; there are no new tasks,
 stack reductions, transport initialization changes or memory-profile changes.
 Sample arrays remain external to LVGL, avoiding internal-RAM history buffers.
 
+The depth, W2K endpoint, tile-label, Wi-Fi and Victron editors share one keyboard
+allocated at startup. Each editor restores its numeric/text mode and dimensions;
+closing or leaving an editor detaches the keyboard from its text field. This
+removes four duplicate keyboard widgets without changing task stacks, transport
+buffers or the NMEA source cache. Exact internal-RAM savings require hardware
+heap measurements; the host LVGL test checks typing, target isolation and repeated
+editor switches without heap growth.
+
 Hardware acceptance: update firmware.bin at the confirmed running slot with
 whole-chip erase OFF; verify existing pages, source selections and Victron keys.
 Test one/two graphs on CAN and separately on Wi-Fi/W2K; signed/zero values;
 unit/source/window changes; source loss and reconnect; swiping away/back; labels
 saved, cleared and retained on reboot. Check periodic internal heap/largest block
-and stack watermarks during extended traffic. Host tests and firmware builds do
+and stack watermarks during extended traffic. Switch repeatedly between depth,
+W2K IP/port, label, Wi-Fi password and Victron key editors; verify numeric/text
+keys, closing, reopening and password masking. Host tests and firmware builds do
 not establish hardware performance or runtime memory margins.
