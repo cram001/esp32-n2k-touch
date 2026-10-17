@@ -75,7 +75,7 @@ void label(const Record &r, size_t index, char *out, size_t capacity) {
     const Device *d = device(r.source.address);
     const char *model = d && d->name == r.source.name && d->model[0] ? d->model.data() : "N2K device";
     char instance[32]{};
-    if (r.metric >= DataMetric::EngineRpm && r.metric <= DataMetric::EngineTorque) std::snprintf(instance,sizeof(instance),"Engine %u",r.source.instance);
+    if ((r.metric >= DataMetric::EngineRpm && r.metric <= DataMetric::EngineTorque) || (r.metric >= DataMetric::EngineTrim && r.metric <= DataMetric::EngineInstantFuelRate)) std::snprintf(instance,sizeof(instance),"Engine %u",r.source.instance);
     else if (r.metric == DataMetric::TankLevel || r.metric == DataMetric::TankCapacity) {
         const char *fluid[] = {"Fuel","Water","Grey water","Live well","Oil","Sewage","Gasoline"};
         std::snprintf(instance,sizeof(instance),"%s tank %u",r.source.kind<7?fluid[r.source.kind]:"Fluid",r.source.instance);

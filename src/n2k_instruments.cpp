@@ -71,9 +71,63 @@ void n2k_instruments_receive(const tN2kMsg &msg) {
         }
         waypoint_name(msg);return;
     }
-    const int minimum=msg.PGN==127489?26:msg.PGN==129029?43:msg.PGN==129284?34:msg.PGN==128275?14:8;
+    const int minimum=msg.PGN==127489?26:msg.PGN==127497?9:msg.PGN==127506?11:msg.PGN==129029?43:msg.PGN==129284?34:msg.PGN==128275?14:8;
     if(msg.DataLen<minimum)return;
     switch(msg.PGN){
+    case 126992:{unsigned char sid;uint16_t days;double seconds;tN2kTimeSource source;
+        if(ParseN2kPGN126992(msg,sid,days,seconds,source) && days!=UINT16_MAX && seconds!=N2kDoubleNA && seconds>=0 && seconds<86400)
+            publish(msg,DataMetric::UtcTime,days*86400.0+seconds,255,source);
+        break;}
+    case 127245:{double rudder,order;unsigned char instance;tN2kRudderDirectionOrder direction;
+        if(ParseN2kPGN127245(msg,rudder,instance,direction,order))publish(msg,DataMetric::RudderAngle,rudder,instance);
+        break;}
+    case 127251:{unsigned char sid;double rate;
+        if(ParseN2kPGN127251(msg,sid,rate))publish(msg,DataMetric::RateOfTurn,rate);
+        break;}
+    case 127257:{unsigned char sid;double yaw,pitch,roll;
+        if(ParseN2kPGN127257(msg,sid,yaw,pitch,roll)){publish(msg,DataMetric::Yaw,yaw);publish(msg,DataMetric::Pitch,pitch);publish(msg,DataMetric::Roll,roll);}break;}
+    case 128000:{unsigned char sid;double leeway;
+        if(ParseN2kPGN128000(msg,sid,leeway))publish(msg,DataMetric::Leeway,leeway);
+        break;}
+    case 130576:{int8_t port,starboard;
+        if(ParseN2kPGN130576(msg,port,starboard)){
+            if(port>=0&&port<=100)publish(msg,DataMetric::PortTrimTab,port);
+            if(starboard>=0&&starboard<=100)publish(msg,DataMetric::StarboardTrimTab,starboard);
+        }break;}
+    case 127493:{unsigned char instance,status;tN2kTransmissionGear gear;double pressure,temp;
+        if(ParseN2kPGN127493(msg,instance,gear,pressure,temp,status)){
+            if(static_cast<unsigned>(gear)<=2)publish(msg,DataMetric::TransmissionGear,static_cast<unsigned>(gear),instance);
+            else n2k_sources_invalidate(DataMetric::TransmissionGear,msg.Source,instance);
+            publish(msg,DataMetric::TransmissionOilPressure,pressure,instance);publish(msg,DataMetric::TransmissionOilTemperature,temp,instance);
+        }break;}
+    case 127497:{unsigned char instance;double used,average,economy,instant;
+        if(ParseN2kPGN127497(msg,instance,used,average,economy,instant)){
+            publish(msg,DataMetric::EngineTripFuelUsed,used,instance);publish(msg,DataMetric::EngineAverageFuelRate,average,instance);
+            publish(msg,DataMetric::EngineEconomyFuelRate,economy,instance);publish(msg,DataMetric::EngineInstantFuelRate,instant,instance);
+        }break;}
+    case 127508:{unsigned char instance,sid;double volts,amps,temp;
+        if(ParseN2kPGN127508(msg,instance,volts,amps,temp,sid)){
+            publish(msg,DataMetric::BatteryVoltage,volts,instance);publish(msg,DataMetric::BatteryCurrent,amps,instance);publish(msg,DataMetric::BatteryTemperature,temp,instance);
+        }break;}
+    case 127506:{unsigned char sid,instance,soc,health;tN2kDCType type;double remaining,ripple,capacity;
+        if(ParseN2kPGN127506(msg,sid,instance,type,soc,health,remaining,ripple,capacity)){
+            if(soc<=100)publish(msg,DataMetric::BatterySoc,soc,instance,type);
+            if(health<=100)publish(msg,DataMetric::DcStateOfHealth,health,instance,type);
+            if(remaining!=N2kDoubleNA)publish(msg,DataMetric::BatteryTimeToGo,remaining/60.0,instance,type);
+            publish(msg,DataMetric::DcRippleVoltage,ripple,instance,type);publish(msg,DataMetric::DcCapacity,capacity,instance,type);
+        }break;}
+    case 127751:{
+        // Pinned NMEA2000 Get3ByteDouble does not sign-extend negative current.
+        // Decode the single-frame wire layout directly (CANboat PGN 127751).
+        const uint8_t instance=msg.Data[1];
+        const uint16_t volts=uint16_t(msg.Data[2]) | uint16_t(msg.Data[3])<<8;
+        const uint32_t raw=uint32_t(msg.Data[4]) | uint32_t(msg.Data[5])<<8 | uint32_t(msg.Data[6])<<16;
+        const int32_t amps=(raw&0x800000)?int32_t(raw)-0x1000000:int32_t(raw);
+        if(volts<0xfffd)publish(msg,DataMetric::DcVoltage,volts*0.1,instance);
+        else n2k_sources_invalidate(DataMetric::DcVoltage,msg.Source,instance);
+        if(raw<0x7ffffd || raw>0x7fffff)publish(msg,DataMetric::DcCurrent,amps*0.01,instance);
+        else n2k_sources_invalidate(DataMetric::DcCurrent,msg.Source,instance);
+        break;}
     case 127250:{
         unsigned char sid;double h,d,v;tN2kHeadingReference ref;
         if(ParseN2kPGN127250(msg,sid,h,d,v,ref)){
@@ -85,7 +139,7 @@ void n2k_instruments_receive(const tN2kMsg &msg) {
         if(ParseN2kPGN127258(msg,sid,source,days,v) && v!=N2kDoubleNA && std::abs(v)<=3.141592653589793)publish(msg,DataMetric::MagneticVariation,v);
         break;}
     case 127488:{unsigned char instance;double rpm,boost;int8_t trim;
-        if(ParseN2kPGN127488(msg,instance,rpm,boost,trim)&&instance<2){publish(msg,DataMetric::EngineRpm,rpm,instance);publish(msg,DataMetric::EngineBoostPressure,boost,instance);}break;}
+        if(ParseN2kPGN127488(msg,instance,rpm,boost,trim)&&instance<2){publish(msg,DataMetric::EngineRpm,rpm,instance);publish(msg,DataMetric::EngineBoostPressure,boost,instance);if(trim>=-100&&trim<=100)publish(msg,DataMetric::EngineTrim,trim,instance);}break;}
     case 127489:{unsigned char instance;double oilp,oilt,coolt,voltage,rate,hours,coolp,fuelp;int8_t load,torque;
         if(ParseN2kPGN127489(msg,instance,oilp,oilt,coolt,voltage,rate,hours,coolp,fuelp,load,torque)&&instance<2){
             publish(msg,DataMetric::EngineOilPressure,oilp,instance);publish(msg,DataMetric::EngineOilTemperature,oilt,instance);

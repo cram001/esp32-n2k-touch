@@ -20,6 +20,11 @@
 #include "smartshunt_ble.hpp"
 #include "tile_number_fit.hpp"
 #include "depth_display.hpp"
+#include "graph_history.hpp"
+#include "tile_labels.hpp"
+#include "metric_groups.hpp"
+#include "esp_heap_caps.h"
+#include <new>
 #include "wifi_service.hpp"
 #include "ota.hpp"
 #include "esp_system.h"
@@ -58,6 +63,16 @@ lv_obj_t *g_input_screen = nullptr;
 lv_obj_t *g_shunt_source_picker = nullptr, *g_shunt_source_list = nullptr;
 lv_obj_t *g_source_picker = nullptr, *g_source_list = nullptr, *g_source_status = nullptr;
 lv_obj_t *g_metric_picker = nullptr, *g_metric_list = nullptr;
+MetricGroup g_metric_group=MetricGroup::Count;
+void metric_picker_cb(lv_event_t *);
+lv_obj_t *g_graph_window_button=nullptr;
+TileLabels *g_tile_labels=nullptr;
+bool g_tile_labels_writable=false;
+lv_obj_t *g_tile_label_input=nullptr,*g_tile_label_keyboard=nullptr;
+struct GraphBuffer { GraphHistory history; std::array<char,16> unit{}; };
+std::array<GraphBuffer *,MAX_DATA_PAGES*2> g_graph_buffers{};
+std::array<lv_obj_t *,2> g_graph_charts{};
+std::array<lv_chart_series_t *,2> g_graph_series{};
 lv_obj_t *g_depth_screen = nullptr, *g_depth_mode = nullptr, *g_depth_keel = nullptr, *g_depth_waterline = nullptr;
 lv_obj_t *g_depth_keyboard = nullptr, *g_depth_status = nullptr;
 std::array<N2kSourceOption,16> g_source_options{};
@@ -167,55 +182,14 @@ void update_wifi_scan();
 void update_ota_status();
 void update_shunt_picker();
 
-const std::array<DataMetric, 47> NMEA_METRICS = {
-    DataMetric::None,
-    DataMetric::Depth,
-    DataMetric::BoatSpeed,
-    DataMetric::SpeedOverGround,
-    DataMetric::CourseOverGround,
-    DataMetric::Heading,
-    DataMetric::ApparentWindSpeed,
-    DataMetric::ApparentWindAngle,
-    DataMetric::TrueWindSpeed,
-    DataMetric::TrueWindAngle,
-    DataMetric::WaterTemperature,
-    DataMetric::AirTemperature,
-    DataMetric::DistanceToWaypoint,
-    DataMetric::TripDistance,
-    DataMetric::EngineRpm,
-    DataMetric::EngineCoolantTemperature,
-    DataMetric::EngineOilPressure,
-    DataMetric::EngineOilTemperature,
-    DataMetric::EngineBoostPressure,
-    DataMetric::EngineAlternatorVoltage,
-    DataMetric::EngineFuelRate,
-    DataMetric::EngineHours,
-    DataMetric::EngineCoolantPressure,
-    DataMetric::EngineFuelPressure,
-    DataMetric::EngineLoad,
-    DataMetric::EngineTorque,
-    DataMetric::EngineExhaustTemperature,
-    DataMetric::TankLevel,
-    DataMetric::TankCapacity,
-    DataMetric::Latitude,
-    DataMetric::Longitude,
-    DataMetric::Position,
-    DataMetric::Altitude,
-    DataMetric::WaypointBearing,
-    DataMetric::WaypointVmg,
-    DataMetric::CrossTrackError,
-    DataMetric::WaypointName,
-    DataMetric::CabinTemperature,
-    DataMetric::EngineRoomTemperature,
-    DataMetric::EnvironmentalTemperature,
-    DataMetric::AtmosphericPressure,
-    DataMetric::Humidity,
-    DataMetric::MagneticVariation,
-    DataMetric::DepthTransducer,
-    DataMetric::DepthBelowKeel,
-    DataMetric::DepthWaterline,
-    DataMetric::DepthSensorOffset
-};
+struct MetricList { std::array<DataMetric,static_cast<size_t>(DataMetric::Count)> values{}; size_t count=0; };
+const MetricList NMEA_METRICS=[] {
+    MetricList list;
+    for(unsigned group=0;group<unsigned(MetricGroup::Count);++group)
+        for(unsigned m=0;m<unsigned(DataMetric::Count);++m)
+            if(metric_group(DataMetric(m))==MetricGroup(group) && (m==0 || instrument_metric_supported(DataSourceType::Nmea2000,DataMetric(m))))list.values[list.count++]=DataMetric(m);
+    return list;
+}();
 const std::array<DataMetric, 6> SHUNT_METRICS = {
     DataMetric::BatteryVoltage, DataMetric::BatteryCurrent, DataMetric::BatterySoc,
     DataMetric::BatteryConsumedAh, DataMetric::BatteryTimeToGo, DataMetric::BatteryTemperature
@@ -389,8 +363,86 @@ void fit_numeric_tile(size_t index,size_t count,const char *text,const char *uni
     lv_obj_set_pos(g_tile_units[index],0,fit.unit_y);
 }
 
+uint64_t graph_context(const DataFieldSelection &selection,const InstrumentValue &value,const char *unit) {
+    uint64_t hash=1469598103934665603ULL;
+    auto add=[&](uint64_t v){for(unsigned i=0;i<8;++i){hash^=(v>>(i*8))&255;hash*=1099511628211ULL;}};
+    add(unsigned(selection.source));add(unsigned(selection.metric));add(selection.source_index);
+    add(value.source_identity);add(value.display_context);
+    const auto &u=g_settings.units;
+    add(unsigned(u.depth));add(unsigned(u.temperature));add(unsigned(u.wind_speed));add(unsigned(u.vessel_speed));
+    add(unsigned(u.heading_reference));add(unsigned(u.distance));add(unsigned(u.short_distance));
+    if(selection.source==DataSourceType::SmartShunt && selection.source_index<MAX_SMARTSHUNTS)
+        for(char c:g_settings.smartshunts[selection.source_index].mac)add(static_cast<unsigned char>(c));
+    for(const char *c=unit;*c;++c)add(static_cast<unsigned char>(*c));
+    return hash;
+}
+void sample_graph_pages() {
+    const int64_t now=esp_timer_get_time();
+    for(size_t page=0;page<MAX_DATA_PAGES;++page){
+        if(!g_settings.pages[page].enabled)continue;
+        const auto &config=g_settings.graphs[page];
+        for(size_t panel=0;panel<config.panels;++panel){
+            const auto &selection=g_settings.pages[page].fields[panel];
+            auto *&buffer=g_graph_buffers[page*2+panel];
+            if(!buffer){
+                void *memory=heap_caps_malloc(sizeof(GraphBuffer),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT);
+                if(!memory){ESP_LOGE(TAG,"Graph PSRAM allocation failed");continue;}
+                buffer=new(memory) GraphBuffer{};
+                ESP_LOGI(TAG,"Graph history: %u bytes in PSRAM, page %u panel %u",unsigned(sizeof(GraphBuffer)),unsigned(page+1),unsigned(panel+1));
+            }
+            const auto value=instrument_data_get(selection,static_cast<uint8_t>(page*MAX_DATA_FIELDS_PER_PAGE+panel));
+            char text[80],unit[16];instrument_format_value(selection,g_settings.units,value,text,sizeof(text),unit,sizeof(unit));
+            char *end=nullptr;const double number=std::strtod(text,&end);
+            const bool valid=metric_graphable(selection.metric)&&value.valid&&!value.stale&&end!=text&&*end=='\0'&&std::isfinite(number);
+            if(valid)std::snprintf(buffer->unit.data(),buffer->unit.size(),"%s",unit);
+            buffer->history.sample(now,graph_context(selection,value,buffer->unit.data()),config.window,valid,number);
+        }
+    }
+}
+void render_graph(size_t panel,const DataFieldSelection &selection,const InstrumentValue &value) {
+    auto *buffer=g_graph_buffers[g_active_page*2+panel];
+    const auto &config=g_settings.graphs[g_active_page];
+    auto *box=g_tile_boxes[panel];const int w=440,h=(410-(config.panels-1)*8)/config.panels-20;
+    lv_obj_set_style_transform_scale_x(g_tile_values[panel],256,0);lv_obj_set_style_transform_scale_y(g_tile_values[panel],256,0);
+    lv_obj_set_style_text_font(g_tile_values[panel],&lv_font_montserrat_24,0);
+    lv_obj_set_size(g_tile_values[panel],w,LV_SIZE_CONTENT);lv_obj_set_style_text_align(g_tile_values[panel],LV_TEXT_ALIGN_RIGHT,0);
+    lv_obj_align(g_tile_values[panel],LV_ALIGN_TOP_RIGHT,-2,26);
+    char text[80],unit[16];instrument_format_value(selection,g_settings.units,value,text,sizeof(text),unit,sizeof(unit));
+    lv_label_set_text(g_tile_values[panel],text);
+    if(!buffer || !metric_graphable(selection.metric)) {
+        if(g_graph_charts[panel])lv_obj_add_flag(g_graph_charts[panel],LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(g_tile_units[panel],buffer?"Choose a numeric field":"Graph memory unavailable");
+    } else {
+        buffer->history.prepare_plot();
+        if(!g_graph_charts[panel]){
+            auto *chart=lv_chart_create(box);g_graph_charts[panel]=chart;
+            lv_chart_set_type(chart,LV_CHART_TYPE_LINE);
+            g_graph_series[panel]=lv_chart_add_series(chart,ui_accent(),LV_CHART_AXIS_PRIMARY_Y);
+            lv_obj_set_style_size(chart,0,0,LV_PART_INDICATOR);
+            lv_obj_set_style_pad_all(chart,0,0);lv_chart_set_div_line_count(chart,4,5);
+            lv_obj_remove_flag(chart,LV_OBJ_FLAG_SCROLLABLE);lv_obj_remove_flag(chart,LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_add_flag(chart,LV_OBJ_FLAG_GESTURE_BUBBLE);
+        }
+        auto *chart=g_graph_charts[panel];lv_obj_remove_flag(chart,LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_pos(chart,8,58);lv_obj_set_size(chart,w-16,h-92);
+        lv_obj_set_style_bg_color(chart,ui_bg(),0);lv_obj_set_style_line_color(chart,ui_muted(),LV_PART_MAIN);
+        lv_chart_set_series_color(chart,g_graph_series[panel],ui_accent());
+        lv_chart_set_series_ext_y_array(chart,g_graph_series[panel],buffer->history.plot.data());
+        lv_chart_set_point_count(chart,buffer->history.capacity);lv_chart_set_axis_range(chart,LV_CHART_AXIS_PRIMARY_Y,0,1000);lv_chart_refresh(chart);
+        char range[80];
+        if(buffer->history.has_range)std::snprintf(range,sizeof(range),"%.3g .. %.3g %s",buffer->history.minimum,buffer->history.maximum,buffer->unit.data());
+        else std::snprintf(range,sizeof(range),"Waiting for fresh data");
+        lv_label_set_text(g_tile_units[panel],range);
+    }
+    lv_obj_set_width(g_tile_units[panel],w);lv_obj_set_style_text_align(g_tile_units[panel],LV_TEXT_ALIGN_LEFT,0);
+    lv_obj_align(g_tile_units[panel],LV_ALIGN_BOTTOM_LEFT,2,-18);
+    char footer[100];std::snprintf(footer,sizeof(footer),"%s | %s",GraphHistory::window_name(config.window),instrument_source_name(selection,g_settings,static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+panel)));
+    lv_label_set_text(g_tile_sources[panel],footer);lv_obj_remove_flag(g_tile_sources[panel],LV_OBJ_FLAG_HIDDEN);
+}
+
 void render_active_page()
 {
+    sample_graph_pages();
     static std::array<DepthDisplay,MAX_DATA_PAGES*MAX_DATA_FIELDS_PER_PAGE> depth_display{};
     if(!g_settings.pages[g_active_page].enabled) g_active_page=first_enabled_page();
     auto &active=g_settings.pages[g_active_page];
@@ -402,13 +454,20 @@ void render_active_page()
         lv_obj_set_style_bg_color(g_page_dots[i], i==g_active_page ? ui_accent() : ui_muted(), 0);
         lv_obj_set_style_bg_opa(g_page_dots[i], g_settings.pages[i].enabled ? LV_OPA_COVER : LV_OPA_30, 0);
     }
-    const size_t count=layout_count(active.layout);
+    const size_t count=g_settings.graphs[g_active_page].panels?g_settings.graphs[g_active_page].panels:layout_count(active.layout);
     for(size_t i=0;i<MAX_DATA_FIELDS_PER_PAGE;++i){
         if(i>=count){lv_obj_add_flag(g_tile_boxes[i],LV_OBJ_FLAG_HIDDEN);continue;}
-        lv_obj_remove_flag(g_tile_boxes[i],LV_OBJ_FLAG_HIDDEN);position_tile(i,active.layout);
+        lv_obj_remove_flag(g_tile_boxes[i],LV_OBJ_FLAG_HIDDEN);
+        const bool graph=g_settings.graphs[g_active_page].panels!=0;
+        position_tile(i,graph?(count==1?PageLayout::One:PageLayout::Two):active.layout);
+        lv_obj_set_style_text_align(g_tile_values[i],LV_TEXT_ALIGN_LEFT,0);
+        if(i<2 && g_graph_charts[i])lv_obj_add_flag(g_graph_charts[i],LV_OBJ_FLAG_HIDDEN);
         const auto &sel=active.fields[i];lv_label_set_text(g_tile_titles[i],instrument_field_name(sel));
         const auto field_id=static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+i);
         const InstrumentValue v=depth_display[field_id].apply(sel,g_settings.units.depth,instrument_data_get(sel,field_id));
+        const char *custom=g_tile_labels?g_tile_labels->get(field_id):"";
+        if(custom[0])lv_label_set_text(g_tile_titles[i],custom);
+        if(graph){render_graph(i,sel,v);continue;}
         if(sel.source==DataSourceType::SmartShunt){
             lv_label_set_text(g_tile_sources[i],instrument_source_name(sel,g_settings,static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+i)));
             lv_obj_remove_flag(g_tile_sources[i],LV_OBJ_FLAG_HIDDEN);
@@ -419,7 +478,7 @@ void render_active_page()
         }else{
             lv_obj_add_flag(g_tile_sources[i],LV_OBJ_FLAG_HIDDEN);
         }
-        if(sel.metric==DataMetric::Depth){
+        if(sel.metric==DataMetric::Depth && !custom[0]){
             const char *depth_titles[]={"Depth (transducer)","Depth (sensor)","Depth (keel)","Depth (surface)"};
             lv_label_set_text(g_tile_titles[i],depth_titles[v.depth_reference<4?v.depth_reference:0]);
         }
@@ -503,25 +562,39 @@ void update_page_setup()
 {
     auto &p=g_settings.pages[g_edit_page];char b[120];std::snprintf(b,sizeof(b),"PAGE %u - %s",static_cast<unsigned>(g_edit_page+1),p.name.data());lv_label_set_text(g_page_setup_title,b);
     if(p.enabled)lv_obj_add_state(g_page_enable_switch,LV_STATE_CHECKED);else lv_obj_remove_state(g_page_enable_switch,LV_STATE_CHECKED);
-    std::snprintf(b,sizeof(b),"LAYOUT: %u",static_cast<unsigned>(layout_count(p.layout)));lv_label_set_text(g_layout_button_label,b);
-    const size_t count=layout_count(p.layout);
-    for(size_t i=0;i<MAX_DATA_FIELDS_PER_PAGE;++i){if(i>=count){lv_obj_add_flag(g_field_buttons[i],LV_OBJ_FLAG_HIDDEN);continue;}lv_obj_remove_flag(g_field_buttons[i],LV_OBJ_FLAG_HIDDEN);const auto &f=p.fields[i];std::snprintf(b,sizeof(b),"%u. %s\n%s",static_cast<unsigned>(i+1),instrument_field_name(f),instrument_source_name(f,g_settings,static_cast<uint8_t>(g_edit_page*MAX_DATA_FIELDS_PER_PAGE+i)));lv_label_set_text(g_field_button_labels[i],b);}
+    const auto &graph=g_settings.graphs[g_edit_page];
+    std::snprintf(b,sizeof(b),graph.panels?"GRAPHS: %u":"NUMBERS: %u",static_cast<unsigned>(graph.panels?graph.panels:layout_count(p.layout)));lv_label_set_text(g_layout_button_label,b);
+    if(graph.panels)lv_obj_remove_flag(g_graph_window_button,LV_OBJ_FLAG_HIDDEN);else lv_obj_add_flag(g_graph_window_button,LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(button_label(g_graph_window_button),GraphHistory::window_name(graph.window));
+    const size_t count=g_settings.graphs[g_edit_page].panels?g_settings.graphs[g_edit_page].panels:layout_count(p.layout);
+    for(size_t i=0;i<MAX_DATA_FIELDS_PER_PAGE;++i){if(i>=count){lv_obj_add_flag(g_field_buttons[i],LV_OBJ_FLAG_HIDDEN);continue;}lv_obj_remove_flag(g_field_buttons[i],LV_OBJ_FLAG_HIDDEN);const auto &f=p.fields[i];const char *label=g_tile_labels?g_tile_labels->get(g_edit_page*MAX_DATA_FIELDS_PER_PAGE+i):"";std::snprintf(b,sizeof(b),"%u. %s\n%s",static_cast<unsigned>(i+1),label[0]?label:instrument_field_name(f),instrument_source_name(f,g_settings,static_cast<uint8_t>(g_edit_page*MAX_DATA_FIELDS_PER_PAGE+i)));lv_label_set_text(g_field_button_labels[i],b);}
 }
 void page_setup_screen_cb(lv_event_t *){update_page_setup();lv_screen_load(g_page_setup_screen);}
 void edit_prev_page_cb(lv_event_t *){g_edit_page=(g_edit_page+MAX_DATA_PAGES-1)%MAX_DATA_PAGES;update_page_setup();}
 void edit_next_page_cb(lv_event_t *){g_edit_page=(g_edit_page+1)%MAX_DATA_PAGES;update_page_setup();}
 void page_enabled_cb(lv_event_t *e){g_settings.pages[g_edit_page].enabled=lv_obj_has_state(lv_event_get_target_obj(e),LV_STATE_CHECKED);bool any=false;for(const auto&p:g_settings.pages)any|=p.enabled;if(!any){g_settings.pages[g_edit_page].enabled=true;lv_obj_add_state(g_page_enable_switch,LV_STATE_CHECKED);}persist();update_page_setup();}
-void layout_cb(lv_event_t *){auto &l=g_settings.pages[g_edit_page].layout;if(l==PageLayout::One)l=PageLayout::Two;else if(l==PageLayout::Two)l=PageLayout::Four;else if(l==PageLayout::Four)l=PageLayout::Six;else l=PageLayout::One;persist();update_page_setup();}
+void graph_window_cb(lv_event_t *){auto &graph=g_settings.graphs[g_edit_page];graph.window=(graph.window+1)%3;persist();update_page_setup();}
+void layout_cb(lv_event_t *){
+    auto &graph=g_settings.graphs[g_edit_page];auto &l=g_settings.pages[g_edit_page].layout;
+    if(graph.panels==1)graph.panels=2;
+    else if(graph.panels==2){graph.panels=0;l=PageLayout::One;}
+    else if(l==PageLayout::One)l=PageLayout::Two;else if(l==PageLayout::Two)l=PageLayout::Four;else if(l==PageLayout::Four)l=PageLayout::Six;else graph.panels=1;
+    persist();update_page_setup();
+}
 
+void tile_label_focus_cb(lv_event_t *){lv_keyboard_set_textarea(g_tile_label_keyboard,g_tile_label_input);lv_obj_remove_flag(g_tile_label_keyboard,LV_OBJ_FLAG_HIDDEN);lv_obj_move_foreground(g_tile_label_keyboard);}
+void tile_label_keyboard_cb(lv_event_t *event){if(lv_event_get_code(event)==LV_EVENT_READY || lv_event_get_code(event)==LV_EVENT_CANCEL){lv_obj_add_flag(g_tile_label_keyboard,LV_OBJ_FLAG_HIDDEN);lv_keyboard_set_textarea(g_tile_label_keyboard,nullptr);}}
 void update_field_editor()
 {
+    lv_textarea_set_text(g_tile_label_input,g_tile_labels?g_tile_labels->get(editing_field_id()):"");
+    lv_obj_add_flag(g_tile_label_keyboard,LV_OBJ_FLAG_HIDDEN);
     auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];lv_label_set_text(g_field_source_label,f.source==DataSourceType::Nmea2000?"NMEA 2000":"VICTRON BLE");lv_label_set_text(g_field_metric_label,instrument_field_name(f));
     lv_obj_remove_flag(g_field_device_button,LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(g_field_device_label,instrument_source_name(f,g_settings,editing_field_id()));
 }
 void open_field_editor_cb(lv_event_t *e){g_edit_field=static_cast<size_t>(reinterpret_cast<uintptr_t>(lv_event_get_user_data(e)));update_field_editor();lv_screen_load(g_field_editor_screen);}
 void field_source_cb(lv_event_t *){if(!n2k_sources_save_choice(editing_field_id(),N2kSourceChoice{}))return;auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];f.source=f.source==DataSourceType::Nmea2000?DataSourceType::SmartShunt:DataSourceType::Nmea2000;f.metric=f.source==DataSourceType::Nmea2000?DataMetric::Depth:DataMetric::BatteryVoltage;persist();update_field_editor();}
-void field_metric_step(int direction){auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];if(f.source==DataSourceType::Nmea2000){if(!n2k_sources_save_choice(editing_field_id(),N2kSourceChoice{}))return;int pos=0;for(size_t i=0;i<NMEA_METRICS.size();++i)if(NMEA_METRICS[i]==f.metric){pos=static_cast<int>(i);break;}const int n=static_cast<int>(NMEA_METRICS.size());pos=(pos+direction+n)%n;f.metric=NMEA_METRICS[static_cast<size_t>(pos)];}else{int pos=0;for(size_t i=0;i<SHUNT_METRICS.size();++i)if(SHUNT_METRICS[i]==f.metric){pos=static_cast<int>(i);break;}const int n=static_cast<int>(SHUNT_METRICS.size());pos=(pos+direction+n)%n;f.metric=SHUNT_METRICS[static_cast<size_t>(pos)];}persist();update_field_editor();}
+void field_metric_step(int direction){auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];if(f.source==DataSourceType::Nmea2000){if(!n2k_sources_save_choice(editing_field_id(),N2kSourceChoice{}))return;int pos=0;for(size_t i=0;i<NMEA_METRICS.count;++i)if(NMEA_METRICS.values[i]==f.metric){pos=static_cast<int>(i);break;}const int n=static_cast<int>(NMEA_METRICS.count);pos=(pos+direction+n)%n;f.metric=NMEA_METRICS.values[static_cast<size_t>(pos)];}else{int pos=0;for(size_t i=0;i<SHUNT_METRICS.size();++i)if(SHUNT_METRICS[i]==f.metric){pos=static_cast<int>(i);break;}const int n=static_cast<int>(SHUNT_METRICS.size());pos=(pos+direction+n)%n;f.metric=SHUNT_METRICS[static_cast<size_t>(pos)];}persist();update_field_editor();}
 void field_metric_prev_cb(lv_event_t *){field_metric_step(-1);}void field_metric_next_cb(lv_event_t *){field_metric_step(1);}
 void field_shunt_choice_cb(lv_event_t *event)
 {
@@ -555,7 +628,13 @@ void field_device_cb(lv_event_t *)
     if(!row){lv_obj_t *label=lv_label_create(g_shunt_source_list);lv_label_set_text(label,"Add a device in Settings > Victron BLE first.");lv_obj_set_width(label,400);}
     lv_screen_load(g_shunt_source_picker);
 }
-void field_done_cb(lv_event_t *){update_page_setup();lv_screen_load(g_page_setup_screen);}
+void field_done_cb(lv_event_t *){
+    if(g_tile_labels_writable && !g_tile_labels->save(editing_field_id(),lv_textarea_get_text(g_tile_label_input))){
+        lv_label_set_text(g_field_metric_label,"Label save failed; retry DONE");return;
+    }
+    lv_obj_add_flag(g_tile_label_keyboard,LV_OBJ_FLAG_HIDDEN);
+    update_page_setup();lv_screen_load(g_page_setup_screen);
+}
 
 const char *depth_name(){return g_settings.units.depth==DepthUnit::Metres?"METRES":"FEET";}const char *temp_name(){return g_settings.units.temperature==TemperatureUnit::Celsius?"CELSIUS":"FAHRENHEIT";}const char *speed_name(SpeedUnit u){return u==SpeedUnit::Knots?"KNOTS":(u==SpeedUnit::KilometresPerHour?"KM/H":"M/S");}const char *distance_name(){return g_settings.units.distance==DistanceUnit::NauticalMiles?"NM":"KM";}const char *short_name(){return g_settings.units.short_distance==ShortDistanceUnit::Metres?"METRES":(g_settings.units.short_distance==ShortDistanceUnit::Feet?"FEET":"YARDS");}
 const char *latlon_name(){switch(g_settings.units.lat_lon_format){case LatLonFormat::DecimalDegrees:return "DECIMAL";case LatLonFormat::DegreesMinutesSeconds:return "DMS";default:return "DEG + MIN";}}
@@ -904,6 +983,7 @@ void source_choice_cb(lv_event_t *event) {
     update_field_editor();lv_screen_load(g_field_editor_screen);
 }
 void source_back_cb(lv_event_t *) {
+    if(lv_screen_active()==g_metric_picker && g_metric_group!=MetricGroup::Count){g_metric_group=MetricGroup::Count;metric_picker_cb(nullptr);return;}
     if(lv_screen_active()==g_source_picker && g_source_depth_picker){lv_screen_load(g_depth_screen);return;}
     update_field_editor();lv_screen_load(g_field_editor_screen);
 }
@@ -931,12 +1011,23 @@ void metric_choice_cb(lv_event_t *event) {
     if(field.source==DataSourceType::Nmea2000 && field.metric!=metric && !n2k_sources_save_choice(editing_field_id(),N2kSourceChoice{}))return;
     field.metric=metric;persist();update_field_editor();lv_screen_load(g_field_editor_screen);
 }
-void metric_picker_cb(lv_event_t *) {
+void metric_group_cb(lv_event_t *event){g_metric_group=static_cast<MetricGroup>(reinterpret_cast<uintptr_t>(lv_event_get_user_data(event)));metric_picker_cb(nullptr);}
+void metric_picker_cb(lv_event_t *event) {
+    if(event)g_metric_group=MetricGroup::Count;
     lv_obj_clean(g_metric_list);
     const bool nmea=g_settings.pages[g_edit_page].fields[g_edit_field].source==DataSourceType::Nmea2000;
     size_t row=0;
+    if(nmea && g_metric_group==MetricGroup::Count){
+        auto *none=make_button(g_metric_list,"None",metric_choice_cb,410,48,nullptr);lv_obj_set_pos(none,0,0);row=1;
+        for(unsigned g=1;g<unsigned(MetricGroup::Count);++g){
+            auto *button=make_button(g_metric_list,metric_group_name(MetricGroup(g)),metric_group_cb,410,48,reinterpret_cast<void *>(g));
+            lv_obj_set_pos(button,0,static_cast<int>(row++*54));
+        }
+        lv_screen_load(g_metric_picker);return;
+    }
     for(unsigned i=0;i<static_cast<unsigned>(DataMetric::Count);++i){
         const auto metric=static_cast<DataMetric>(i);
+        if(nmea && metric_group(metric)!=g_metric_group)continue;
         if(metric!=DataMetric::None && !instrument_metric_supported(nmea?DataSourceType::Nmea2000:DataSourceType::SmartShunt,metric))continue;
         if (!nmea && metric != DataMetric::None) {
             const auto &field=g_settings.pages[g_edit_page].fields[g_edit_field];
@@ -1148,6 +1239,8 @@ void create_page_setup_screen()
     b = make_button(g_page_setup_screen, "", layout_cb, 180, 44);
     g_layout_button_label = button_label(b);
     lv_obj_align(b, LV_ALIGN_TOP_MID, 0, 106);
+    g_graph_window_button=make_button(g_page_setup_screen,"5 min",graph_window_cb,112,44);
+    lv_obj_align(g_graph_window_button,LV_ALIGN_TOP_LEFT,16,106);
 
     for (size_t i = 0; i < MAX_DATA_FIELDS_PER_PAGE; ++i) {
         b = make_button(g_page_setup_screen, "", open_field_editor_cb, 216, 74, nullptr);
@@ -1204,6 +1297,17 @@ void create_field_editor_screen()
     g_field_device_label = button_label(g_field_device_button);
     lv_obj_align(g_field_device_button, LV_ALIGN_TOP_RIGHT, -40, 232);
 
+    g_tile_label_input=lv_textarea_create(g_field_editor_screen);
+    lv_obj_set_size(g_tile_label_input,380,42);lv_obj_align(g_tile_label_input,LV_ALIGN_TOP_MID,0,338);
+    lv_textarea_set_one_line(g_tile_label_input,true);lv_textarea_set_max_length(g_tile_label_input,20);
+    // ASCII keeps the byte-based persistent length and on-screen limit identical.
+    lv_textarea_set_accepted_chars(g_tile_label_input," ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_/().:%+");
+    lv_textarea_set_placeholder_text(g_tile_label_input,g_tile_labels_writable?"Custom label (optional)":"Custom labels unavailable");
+    if(g_tile_labels_writable)lv_obj_add_event_cb(g_tile_label_input,tile_label_focus_cb,LV_EVENT_FOCUSED,nullptr);
+    else lv_obj_add_state(g_tile_label_input,LV_STATE_DISABLED);
+    g_tile_label_keyboard=lv_keyboard_create(g_field_editor_screen);
+    lv_obj_set_size(g_tile_label_keyboard,480,200);lv_obj_align(g_tile_label_keyboard,LV_ALIGN_BOTTOM_MID,0,0);
+    lv_obj_add_event_cb(g_tile_label_keyboard,tile_label_keyboard_cb,LV_EVENT_ALL,nullptr);lv_obj_add_flag(g_tile_label_keyboard,LV_OBJ_FLAG_HIDDEN);
     b = make_button(g_field_editor_screen, "DONE", field_done_cb, 150, 54);
     lv_obj_align(b, LV_ALIGN_BOTTOM_MID, 0, -40);
 }
@@ -1403,6 +1507,9 @@ void create_shunt_edit_screen()
 void ui_start(const AppSettings &initial_settings)
 {
     g_settings = initial_settings;
+    if(void *memory=heap_caps_malloc(sizeof(TileLabels),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)){
+        g_tile_labels=new(memory) TileLabels{};g_tile_labels_writable=g_tile_labels->load();
+    }
     g_boot_brightness_override=true;
     g_active_page = first_enabled_page();
 

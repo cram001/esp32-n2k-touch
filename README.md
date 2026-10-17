@@ -326,3 +326,12 @@ check that the transducer is powered and sending PGN 128267, then tap **Refresh*
 Queued CAN discovery frames now retain their descriptor and payload until transmit
 completion, fixing the reboot when opening this picker with a live CAN bus.
 See [depth setup details](docs/sources-instruments-depth.md).
+
+## Graph pages and field selection
+
+Pages can show one or two trend graphs with 1-, 5- or 30-minute history, alongside
+the existing numeric layouts. History uses PSRAM and continues while viewing other
+pages; unavailable data leaves gaps. The NMEA field picker is grouped by function,
+with additional steering, attitude, transmission, fuel, electrical and trim-tab
+fields. Each tile can have an optional custom label, saved separately from the
+existing settings format. See [setup, PGNs and hardware checks](docs/graphs-and-fields.md).
