@@ -23,6 +23,7 @@
 #include "graph_history.hpp"
 #include "tile_labels.hpp"
 #include "ui_keyboard.hpp"
+#include "psram_object.hpp"
 #include "metric_groups.hpp"
 #include "esp_heap_caps.h"
 #include <new>
@@ -77,7 +78,19 @@ std::array<lv_obj_t *,2> g_graph_charts{};
 std::array<lv_chart_series_t *,2> g_graph_series{};
 lv_obj_t *g_depth_screen = nullptr, *g_depth_mode = nullptr, *g_depth_keel = nullptr, *g_depth_waterline = nullptr;
 lv_obj_t *g_depth_status = nullptr;
-std::array<N2kSourceOption,16> g_source_options{};
+struct PickerTables {
+    std::array<N2kSourceOption,16> sources{};
+    std::array<DiscoveredSmartShunt,MAX_DISCOVERED_SMARTSHUNTS> devices{};
+};
+PsramObject<PickerTables> g_picker_tables;
+bool ensure_picker_tables(){
+    if(g_picker_tables.get())return true;
+    if(!g_picker_tables.initialize()){
+        ESP_LOGE(TAG,"Picker PSRAM allocation failed");return false;
+    }
+    ESP_LOGI(TAG,"Picker tables: %u bytes at %p (PSRAM)",unsigned(sizeof(PickerTables)),static_cast<void *>(g_picker_tables.get()));
+    return true;
+}
 size_t g_source_count = 0;
 DepthConfig g_depth_draft{};
 N2kSourceChoice g_depth_source{};
@@ -143,7 +156,6 @@ lv_obj_t *g_shunt_n2k = nullptr;
 lv_obj_t *g_shunt_instance = nullptr;
 std::array<lv_obj_t *, MAX_DISCOVERED_SMARTSHUNTS> g_shunt_picker_buttons{};
 std::array<lv_obj_t *, MAX_DISCOVERED_SMARTSHUNTS> g_shunt_picker_labels{};
-std::array<DiscoveredSmartShunt, MAX_DISCOVERED_SMARTSHUNTS> g_picker_devices{};
 size_t g_picker_count = 0;
 
 lv_obj_t *g_wifi_enabled = nullptr;
@@ -792,16 +804,24 @@ void update_shunt_picker()
     // cannot select a different device when the finger is released.
     for(lv_indev_t *input=lv_indev_get_next(nullptr);input;input=lv_indev_get_next(input))
         if(lv_indev_get_state(input)==LV_INDEV_STATE_PRESSED)return;
-    g_picker_devices = {};
-    g_picker_count = smartshunt_ble_get_discovered(g_picker_devices);
+    if(!ensure_picker_tables()){
+        g_picker_count=0;
+        for(auto *button:g_shunt_picker_buttons)lv_obj_add_flag(button,LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(g_shunt_picker_labels[0],"Discovery memory unavailable; reopen to retry");
+        lv_obj_remove_flag(g_shunt_picker_buttons[0],LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_state(g_shunt_picker_buttons[0],LV_STATE_DISABLED);return;
+    }
+    g_picker_tables.get()->devices = {};
+    g_picker_count = smartshunt_ble_get_discovered(g_picker_tables.get()->devices);
     for (size_t i = 0; i < MAX_DISCOVERED_SMARTSHUNTS; ++i) {
         if (i >= g_picker_count) {
             lv_obj_add_flag(g_shunt_picker_buttons[i], LV_OBJ_FLAG_HIDDEN);
             continue;
         }
+        lv_obj_remove_state(g_shunt_picker_buttons[i],LV_STATE_DISABLED);
         lv_obj_remove_flag(g_shunt_picker_buttons[i], LV_OBJ_FLAG_HIDDEN);
         char b[64]{};
-        std::snprintf(b, sizeof(b), "%s   %d dBm", g_picker_devices[i].name.data(), g_picker_devices[i].rssi);
+        std::snprintf(b, sizeof(b), "%s   %d dBm", g_picker_tables.get()->devices[i].name.data(), g_picker_tables.get()->devices[i].rssi);
         lv_label_set_text(g_shunt_picker_labels[i], b);
     }
 }
@@ -813,8 +833,8 @@ void choose_nearby_cb(lv_event_t *)
 void shunt_picker_select_cb(lv_event_t *e)
 {
     const size_t idx = static_cast<size_t>(reinterpret_cast<uintptr_t>(lv_event_get_user_data(e)));
-    if (idx >= g_picker_count) return;
-    const auto &picked = g_picker_devices[idx];
+    if (idx >= g_picker_count || !g_picker_tables.get()) return;
+    const auto &picked = g_picker_tables.get()->devices[idx];
     auto &c = g_settings.smartshunts[g_edit_shunt];
     c.configured = true;
     c.enabled = true;
@@ -954,10 +974,11 @@ void input_save_cb(lv_event_t *) {
 }
 void source_choice_cb(lv_event_t *event) {
     const size_t item=reinterpret_cast<uintptr_t>(lv_event_get_user_data(event));
-    const N2kSourceChoice choice=item?g_source_options[item-1].choice:N2kSourceChoice{};
+    if(item>g_source_count || (item && !g_picker_tables.get()))return;
+    const N2kSourceChoice choice=item?g_picker_tables.get()->sources[item-1].choice:N2kSourceChoice{};
     if(g_source_depth_picker){
         g_depth_source=choice;
-        lv_label_set_text(button_label(g_depth_source_button),item?g_source_options[item-1].label.data():"DEFAULT FOR UNCONFIGURED SENSORS");
+        lv_label_set_text(button_label(g_depth_source_button),item?g_picker_tables.get()->sources[item-1].label.data():"DEFAULT FOR UNCONFIGURED SENSORS");
         depth_screen_cb(nullptr);return;
     }
     if(!n2k_sources_save_choice(editing_choice_id(),choice)){lv_label_set_text(g_source_status,"Could not save selection; please retry");return;}
@@ -973,17 +994,19 @@ void source_picker_cb(lv_event_t *) {
     const auto &field=g_settings.pages[g_edit_page].fields[g_edit_field];
     lv_obj_clean(g_source_list);
     const DataMetric metric=g_source_depth_picker?DataMetric::Depth:field.metric;
-    g_source_count=n2k_sources_options(metric,g_source_options.data(),g_source_options.size());
+    const bool memory_ready=ensure_picker_tables();
+    g_source_count=memory_ready?n2k_sources_options(metric,g_picker_tables.get()->sources.data(),g_picker_tables.get()->sources.size()):0;
     lv_label_set_text(g_source_status,g_source_depth_picker?"Select the transducer for these installation distances":n2k_sources_is_gps(metric)?"One GPS for position, altitude, speed and course":"Selection stays locked; missing data shows --");
     lv_obj_t *button=make_button(g_source_list,g_source_depth_picker?"DEFAULT FOR UNCONFIGURED SENSORS":"AUTOMATIC: FIRST SOURCE (NO FALLBACK)",source_choice_cb,410,54);
     lv_obj_set_pos(button,0,0);
     for(size_t i=0;i<g_source_count;++i){
-        char text[110];std::snprintf(text,sizeof(text),"%s%s",g_source_options[i].label.data(),g_source_options[i].stale?" / stale":"");
+        char text[110];std::snprintf(text,sizeof(text),"%s%s",g_picker_tables.get()->sources[i].label.data(),g_picker_tables.get()->sources[i].stale?" / stale":"");
         button=make_button(g_source_list,text,source_choice_cb,410,74,reinterpret_cast<void *>(i+1));
         lv_obj_set_width(button_label(button),390);lv_label_set_long_mode(button_label(button),LV_LABEL_LONG_MODE_WRAP);
         lv_obj_set_pos(button,0,static_cast<int>(60+i*80));
     }
-    if(!g_source_count)lv_label_set_text(g_source_status,g_source_depth_picker?"No depth sensor received yet. Check input, then Refresh.":"No sources received yet. Wait for data, then Refresh.");
+    if(!memory_ready)lv_label_set_text(g_source_status,"Source memory unavailable; press Refresh to retry.");
+    else if(!g_source_count)lv_label_set_text(g_source_status,g_source_depth_picker?"No depth sensor received yet. Check input, then Refresh.":"No sources received yet. Wait for data, then Refresh.");
     lv_screen_load(g_source_picker);
 }
 void metric_choice_cb(lv_event_t *event) {
@@ -1476,6 +1499,7 @@ void create_shunt_edit_screen()
 void ui_start(const AppSettings &initial_settings)
 {
     g_settings = initial_settings;
+    ensure_picker_tables();
     if(void *memory=heap_caps_malloc(sizeof(TileLabels),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)){
         g_tile_labels=new(memory) TileLabels{};g_tile_labels_writable=g_tile_labels->load();
     }

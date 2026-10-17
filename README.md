@@ -299,6 +299,14 @@ report their own watermarks once per minute. These reports come from the existin
 tasks; no diagnostic task, stack reduction or memory-profile change is involved.
 LVGL draw/system tasks are not included in these periodic stack reports.
 
+Startup also reports `Picker tables` and `Navigation tables` with their sizes,
+addresses and confirmed PSRAM residency. These hold UI source/discovery list
+copies and task-owned navigation metadata; their capacities are unchanged.
+The shared NMEA source cache, locks and CAN/TWAI buffers remain in internal RAM.
+Allocations do not fall back to internal RAM. A failed picker allocation reports
+memory unavailable and permits retry; a failed navigation allocation prevents
+the NMEA service from starting and fails the existing startup-health check.
+
 For a memory check, operate the display for 15–30 minutes with normal traffic,
 Bluetooth discovery and page navigation, then save the later reports along with
 the startup `LVGL draw buffer` line showing whether its allocation is in PSRAM.

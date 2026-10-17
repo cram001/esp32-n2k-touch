@@ -7,13 +7,27 @@
 #include "n2k_sources.hpp"
 #include "n2k_waypoints.hpp"
 #include "esp_timer.h"
+#include "psram_object.hpp"
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#endif
 
 namespace {
 struct Waypoint { bool used=false;uint8_t source=255;N2kWaypoint item; };
-std::array<Waypoint,32> waypoints{};
-std::array<uint64_t,254> names{};
-std::array<int64_t,254> navigation_updated{};
-std::array<uint32_t,254> targets = [] {std::array<uint32_t,254> t{};t.fill(UINT32_MAX);return t;}();
+// Read/reset exclusively by the N2K task. ISR/driver buffers and shared source
+// records remain in internal RAM. Capacities and wire/settings formats are fixed.
+struct NavigationTables {
+    std::array<Waypoint,32> waypoints{};
+    std::array<uint64_t,254> names{};
+    std::array<int64_t,254> navigation_updated{};
+    std::array<uint32_t,254> targets{};
+    NavigationTables(){targets.fill(UINT32_MAX);}
+    void reset(){
+        waypoints.fill(Waypoint{});names.fill(0);navigation_updated.fill(0);
+        targets.fill(UINT32_MAX);
+    }
+};
+PsramObject<NavigationTables> navigation;
 void publish(const tN2kMsg &msg,DataMetric metric,double value,uint8_t instance=255,uint8_t kind=255,HeadingReference reference=HeadingReference::Unknown) {
     if(value!=N2kDoubleNA && std::isfinite(value))n2k_sources_publish(metric,msg.Source,instance,kind,value,reference);
 }
@@ -33,19 +47,34 @@ void temperature(const tN2kMsg &msg,tN2kTempSource source,uint8_t instance,doubl
     publish(msg,metric,value,instance,static_cast<uint8_t>(source));
 }
 void waypoint_name(const tN2kMsg &msg) {
+    const auto &tables=*navigation.get();
     // Route lists can continue after navigation stops. They must not keep an
     // obsolete active target alive beyond the display's 30-second deadline.
-    if(!navigation_updated[msg.Source] || esp_timer_get_time()-navigation_updated[msg.Source]>=30000000)return;
-    for(const auto &w:waypoints)if(w.used && w.source==msg.Source && w.item.id==targets[msg.Source] && w.item.name[0]){
+    if(!tables.navigation_updated[msg.Source] || esp_timer_get_time()-tables.navigation_updated[msg.Source]>=30000000)return;
+    for(const auto &w:tables.waypoints)if(w.used && w.source==msg.Source && w.item.id==tables.targets[msg.Source] && w.item.name[0]){
         n2k_sources_publish(DataMetric::WaypointName,msg.Source,255,255,0,HeadingReference::Unknown,false,0,w.item.name.data());return;
     }
     // A changed target without a matching name must not retain the old name.
     n2k_sources_publish(DataMetric::WaypointName,msg.Source,255,255,0,HeadingReference::Unknown,false,0,"");
 }
 }
-void n2k_instruments_reset(){waypoints={};names={};navigation_updated={};targets.fill(UINT32_MAX);}
+bool n2k_instruments_init(){
+    if(navigation.get())return true;
+    const bool ready=navigation.initialize();
+#ifdef ESP_PLATFORM
+    if(ready)ESP_LOGI("n2k_instruments","Navigation tables: %u bytes at %p (PSRAM)",unsigned(sizeof(NavigationTables)),static_cast<void *>(navigation.get()));
+    else ESP_LOGE("n2k_instruments","Navigation PSRAM allocation failed");
+#endif
+    return ready;
+}
+void n2k_instruments_reset(){if(navigation.get())navigation.get()->reset();}
 void n2k_instruments_receive(const tN2kMsg &msg) {
     if(msg.Source>=254)return;
+    if(!navigation.get() && !n2k_instruments_init())return;
+    auto &waypoints=navigation.get()->waypoints;
+    auto &names=navigation.get()->names;
+    auto &navigation_updated=navigation.get()->navigation_updated;
+    auto &targets=navigation.get()->targets;
     if(msg.PGN==60928 && msg.DataLen==8){
         uint64_t name=0;for(unsigned i=0;i<8;++i)name|=static_cast<uint64_t>(msg.Data[i])<<(8*i);
         if(!name || name==UINT64_MAX)return;

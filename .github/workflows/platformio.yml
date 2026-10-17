@@ -75,6 +75,12 @@ jobs:
           g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/host -I src src/tile_labels.cpp tests/host/nvs_fake.cpp tests/host/tile_labels_test.cpp -o /tmp/tile_labels_test
           /tmp/tile_labels_test
 
+      - name: Test explicit PSRAM object allocation and failure handling
+        shell: bash
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -DESP_PLATFORM -I tests/host/psram -I src tests/host/psram_object_test.cpp -o /tmp/psram_object_test
+          /tmp/psram_object_test
+
       - name: Build firmware
         shell: bash
         run: |

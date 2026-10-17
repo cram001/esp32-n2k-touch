@@ -87,6 +87,23 @@ buffers or the NMEA source cache. Exact internal-RAM savings require hardware
 heap measurements; the host LVGL test checks typing, target isolation and repeated
 editor switches without heap growth.
 
+Selected application tables also use explicit, residency-checked PSRAM storage:
+32 cached waypoint names, 254 device NAMEs/navigation timestamps/destination IDs,
+16 UI source options and 8 UI Victron discovery rows. The navigation tables are
+allocated before the N2K service starts, then owned by its existing task. Picker
+copies are owned by LVGL; shared source records, locks, BLE runtime data and
+driver/ISR buffers retain their existing placement. Storage is allocated once
+and reused on refresh/reset; capacities, persistence formats and transport logic
+are unchanged. Initialization runs constructors so unavailable source IDs and
+destination sentinels retain their defaults. Table reset avoids constructing a
+large temporary on the N2K task stack.
+
+Startup logs `Picker tables` and `Navigation tables` with sizes and confirmed
+PSRAM addresses. Allocation failure never consumes internal RAM as a fallback:
+pickers report memory unavailable and allow retry; navigation allocation failure
+returns a service-start error and prevents startup-health confirmation. The
+memory-profile settings and flash layout are unchanged.
+
 Hardware acceptance: update firmware.bin at the confirmed running slot with
 whole-chip erase OFF; verify existing pages, source selections and Victron keys.
 Test one/two graphs on CAN and separately on Wi-Fi/W2K; signed/zero values;
