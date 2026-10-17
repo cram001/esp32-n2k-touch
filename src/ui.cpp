@@ -582,10 +582,11 @@ void layout_cb(lv_event_t *){
     persist();update_page_setup();
 }
 
-void tile_label_focus_cb(lv_event_t *){lv_keyboard_set_textarea(g_tile_label_keyboard,g_tile_label_input);lv_obj_remove_flag(g_tile_label_keyboard,LV_OBJ_FLAG_HIDDEN);lv_obj_move_foreground(g_tile_label_keyboard);}
-void tile_label_keyboard_cb(lv_event_t *event){if(lv_event_get_code(event)==LV_EVENT_READY || lv_event_get_code(event)==LV_EVENT_CANCEL){lv_obj_add_flag(g_tile_label_keyboard,LV_OBJ_FLAG_HIDDEN);lv_keyboard_set_textarea(g_tile_label_keyboard,nullptr);}}
+void tile_label_focus_cb(lv_event_t *){lv_obj_align(g_tile_label_input,LV_ALIGN_TOP_MID,0,224);lv_obj_move_foreground(g_tile_label_input);lv_keyboard_set_textarea(g_tile_label_keyboard,g_tile_label_input);lv_obj_remove_flag(g_tile_label_keyboard,LV_OBJ_FLAG_HIDDEN);lv_obj_move_foreground(g_tile_label_keyboard);}
+void tile_label_keyboard_cb(lv_event_t *event){if(lv_event_get_code(event)==LV_EVENT_READY || lv_event_get_code(event)==LV_EVENT_CANCEL){lv_obj_add_flag(g_tile_label_keyboard,LV_OBJ_FLAG_HIDDEN);lv_keyboard_set_textarea(g_tile_label_keyboard,nullptr);lv_obj_align(g_tile_label_input,LV_ALIGN_TOP_MID,0,338);}}
 void update_field_editor()
 {
+    lv_obj_align(g_tile_label_input,LV_ALIGN_TOP_MID,0,338);
     lv_textarea_set_text(g_tile_label_input,g_tile_labels?g_tile_labels->get(editing_field_id()):"");
     lv_obj_add_flag(g_tile_label_keyboard,LV_OBJ_FLAG_HIDDEN);
     auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];lv_label_set_text(g_field_source_label,f.source==DataSourceType::Nmea2000?"NMEA 2000":"VICTRON BLE");lv_label_set_text(g_field_metric_label,instrument_field_name(f));
@@ -1303,7 +1304,7 @@ void create_field_editor_screen()
     // ASCII keeps the byte-based persistent length and on-screen limit identical.
     lv_textarea_set_accepted_chars(g_tile_label_input," ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_/().:%+");
     lv_textarea_set_placeholder_text(g_tile_label_input,g_tile_labels_writable?"Custom label (optional)":"Custom labels unavailable");
-    if(g_tile_labels_writable)lv_obj_add_event_cb(g_tile_label_input,tile_label_focus_cb,LV_EVENT_FOCUSED,nullptr);
+    if(g_tile_labels_writable)lv_obj_add_event_cb(g_tile_label_input,tile_label_focus_cb,LV_EVENT_CLICKED,nullptr);
     else lv_obj_add_state(g_tile_label_input,LV_STATE_DISABLED);
     g_tile_label_keyboard=lv_keyboard_create(g_field_editor_screen);
     lv_obj_set_size(g_tile_label_keyboard,480,200);lv_obj_align(g_tile_label_keyboard,LV_ALIGN_BOTTOM_MID,0,0);
