@@ -14,6 +14,7 @@ uint64_t N2kMillis64(){return fake_time_us/1000;}
 void close_to(DataMetric m,double expected,uint8_t field=255){InstrumentValue v;assert(n2k_sources_get(m,field,v)&&v.valid&&!v.stale);assert(std::abs(v.value-expected)<0.01);}
 void send(tN2kMsg &message,uint8_t source=10){message.Source=source;n2k_instruments_receive(message);}
 int main(){
+    n2k_instruments_reset();assert(n2k_instruments_init());assert(n2k_instruments_init());
     fake_nvs::clear();assert(n2k_sources_init());tN2kMsg message;
     // Exercise the full wireless path with real library-encoded PGN bytes.
     SetN2kPGN128267(message,0,10,-2);std::string wire="A123456.789 0AFF3 1F50B ";
@@ -67,5 +68,15 @@ int main(){
     assert(n2k_sources_get(DataMetric::WaypointName,5,name)&&!name.stale&&!std::strcmp(name.text.data(),"Third"));
     fake_time_us+=30000000;send(message);
     assert(n2k_sources_get(DataMetric::WaypointName,5,name)&&name.stale); // Periodic route lists cannot refresh an expired navigation target.
+    // Transport resets retain the allocated table while clearing navigation
+    // metadata, including the last usable CAN source address.
+    n2k_instruments_reset();n2k_sources_reset();
+    SetN2kPGN129284(message,0,1852,N2khr_true,false,false,N2kdct_GreatCircle,40000,20000,1,1.2,1,42,48,-123,3);send(message,253);
+    assert(n2k_sources_get(DataMetric::WaypointName,255,name)&&!name.text[0]);
+    SetN2kPGN129285(message,0,1,1,N2kdir_forward,"Route");assert(AppendN2kPGN129285(message,42,"Boundary",48,-123));send(message,253);
+    assert(n2k_sources_get(DataMetric::WaypointName,255,name)&&!std::strcmp(name.text.data(),"Boundary"));
+    n2k_instruments_reset();n2k_sources_reset();
+    SetN2kPGN129284(message,0,1852,N2khr_true,false,false,N2kdct_GreatCircle,40000,20000,1,1.2,1,42,48,-123,3);send(message,253);
+    assert(n2k_sources_get(DataMetric::WaypointName,255,name)&&!name.text[0]);
     std::puts("PASS: actual N2K library PGNs through wireless framing, depth/SID, two engines, tank types, GPS, navigation/name and environmental sensors");
 }

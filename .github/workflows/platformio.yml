@@ -67,6 +67,20 @@ jobs:
           g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -I tests/host/twai -I src src/third_party/nmea2000_esp32xx/NMEA2000_esp32xx.cpp tests/host/twai_transport_test.cpp -o /tmp/twai_transport_test
           ASAN_OPTIONS=detect_stack_use_after_return=1 /tmp/twai_transport_test
 
+      - name: Test graph history, groups and tile labels
+        shell: bash
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -I src tests/host/graph_history_test.cpp -o /tmp/graph_history_test
+          /tmp/graph_history_test
+          g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/host -I src src/tile_labels.cpp tests/host/nvs_fake.cpp tests/host/tile_labels_test.cpp -o /tmp/tile_labels_test
+          /tmp/tile_labels_test
+
+      - name: Test explicit PSRAM object allocation and failure handling
+        shell: bash
+        run: |
+          g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -DESP_PLATFORM -I tests/host/psram -I src tests/host/psram_object_test.cpp -o /tmp/psram_object_test
+          /tmp/psram_object_test
+
       - name: Build firmware
         shell: bash
         run: |
@@ -76,12 +90,21 @@ jobs:
       - name: Validate OTA partitions, rollback and firmware integrity
         run: python tools/validate_release.py --test
 
+      - name: Test shared keyboard with the firmware LVGL version
+        shell: bash
+        run: |
+          cmake -S tests/lvgl -B /tmp/ui-keyboard-build -DCMAKE_BUILD_TYPE=Release -DLVGL_SOURCE_DIR="$GITHUB_WORKSPACE/managed_components/lvgl__lvgl"
+          cmake --build /tmp/ui-keyboard-build --parallel 2
+          ctest --test-dir /tmp/ui-keyboard-build --output-on-failure
+
       - name: Test actual NMEA2000 library PGNs through the gateway decoder
         shell: bash
         run: |
           lib=.pio/libdeps/waveshare-touch-4/NMEA2000-library/src
           g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -I tests/host/instrument -I tests/host -I src -I "$lib" src/n2k_sources.cpp src/n2k_instruments.cpp src/n2k_waypoints.cpp src/actisense_ascii.cpp "$lib/N2kMsg.cpp" "$lib/N2kMessages.cpp" "$lib/N2kStream.cpp" tests/host/nvs_fake.cpp tests/host/instruments_test.cpp -o /tmp/instruments_test
           /tmp/instruments_test
+          g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/host/instrument -I tests/host -I src -I "$lib" src/n2k_sources.cpp src/n2k_instruments.cpp src/n2k_waypoints.cpp "$lib/N2kMsg.cpp" "$lib/N2kMessages.cpp" "$lib/N2kStream.cpp" tests/host/nvs_fake.cpp tests/host/additional_fields_test.cpp -o /tmp/additional_fields_test
+          /tmp/additional_fields_test
           g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -I tests/host/instrument -I tests/host -I src -I "$lib" src/instrument_data.cpp src/n2k_sources.cpp src/n2k_instruments.cpp src/n2k_waypoints.cpp "$lib/N2kMsg.cpp" "$lib/N2kMessages.cpp" "$lib/N2kStream.cpp" tests/host/nvs_fake.cpp tests/host/sog_test.cpp -o /tmp/sog_test
           /tmp/sog_test
 

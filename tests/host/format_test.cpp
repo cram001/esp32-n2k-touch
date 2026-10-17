@@ -21,6 +21,16 @@ void expect(DataMetric metric,double value,const UnitsSettings &units,const char
 }
 int main(){
     UnitsSettings distance{};
+    expect(DataMetric::RateOfTurn,0.01,distance,"+34.4","deg/min");
+    expect(DataMetric::RudderAngle,-0.2,distance,"-11.5","deg");
+    expect(DataMetric::TransmissionOilPressure,250000,distance,"2.50","bar");
+    expect(DataMetric::TransmissionOilTemperature,300,distance,"26.9","C");
+    expect(DataMetric::DcCapacity,360000,distance,"100.0","Ah");
+    expect(DataMetric::EngineTripFuelUsed,15,distance,"15.0","L");
+    expect(DataMetric::EngineAverageFuelRate,3.5,distance,"3.5","L/h");
+    expect(DataMetric::TransmissionGear,2,distance,"REV","");
+    expect(DataMetric::UtcTime,20000.0*86400+45296,distance,"12:34:56","UTC");
+
     DepthDisplay filter;DataFieldSelection depth{};depth.metric=DataMetric::Depth;
     n2k_sources_publish(DataMetric::Depth,10,255,255,10.1);
     auto initial=instrument_data_get(depth,0);assert(initial.sample_us==fake_time_us);

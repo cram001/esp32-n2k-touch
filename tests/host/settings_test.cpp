@@ -92,6 +92,7 @@ int main(){
     fail_commit=false;migrated=settings_load();assert(commits==1); // Retry migration.
 
     reset();auto expected=defaults;expected.wifi.enabled=true;
+    expected.graphs[0]={2,2};expected.graphs[5]={1,0};
     expected.rotation=DisplayRotation::Normal;
     expected.wifi.ssid.fill('S');expected.wifi.ssid.back()=0;
     expected.wifi.password.fill('a');expected.wifi.password.back()=0; // 64 hex digits.
@@ -104,6 +105,7 @@ int main(){
     std::strcpy(expected.n2k_input.ip.data(),"192.168.4.1");expected.n2k_input.port=60003;
     expected.units.heading_reference=HeadingReference::Magnetic;
     assert(settings_save(expected));reboot=settings_load();
+    assert(reboot.graphs[0].panels==2 && reboot.graphs[0].window==2 && reboot.graphs[5].panels==1 && reboot.graphs[5].window==0);
     assert(reboot.wifi.enabled && reboot.wifi.ssid==expected.wifi.ssid && reboot.wifi.password==expected.wifi.password);
     assert(reboot.wifi.ap_ssid==expected.wifi.ap_ssid && reboot.wifi.ap_password==expected.wifi.ap_password && reboot.wifi.mode==WifiMode::AccessPoint);
     assert(reboot.smartshunts[0].bindkey==expected.smartshunts[0].bindkey && reboot.smartshunts[0].battery_instance==17 && reboot.smartshunts[0].n2k_enabled);
@@ -117,6 +119,13 @@ int main(){
     durable["n2k_in_v1"]=saved_input;durable["n2k_in_v1"][4]=255;
     assert(settings_load().n2k_input.mode==N2kInputMode::Wired);
     durable["n2k_in_v1"]=saved_input;
+    const auto graph_blob=durable["graphs_v1"];
+    durable["graphs_v1"][4]=255;durable["graphs_v1"][5]=255;
+    assert(settings_load().graphs[0].panels==0 && settings_load().graphs[0].window==1);
+    assert(durable["graphs_v1"][4]==255); // Invalid optional preferences are not rewritten.
+    durable["graphs_v1"]=graph_blob;durable["graphs_v1"][0]=99;
+    assert(settings_load().graphs[5].panels==0);
+    durable["graphs_v1"]=graph_blob;
     // Original display_v1 padding must not be treated as a heading preference.
     durable.erase("heading_ref");
     durable["display_v1"][4+6]=255;

@@ -26,6 +26,11 @@ constexpr uint32_t SHUNTS_SCHEMA = 2;
 constexpr uint32_t DISPLAY_SCHEMA = 1;
 constexpr uint32_t WIFI_SCHEMA = 3;
 
+struct PersistedGraphs {
+    uint32_t schema = 1;
+    std::array<GraphPageConfig, MAX_DATA_PAGES> pages{};
+};
+static_assert(sizeof(PersistedGraphs) == 16, "Graph preferences ABI changed");
 struct PersistedSmartShunts {
     uint32_t schema = SHUNTS_SCHEMA;
     std::array<SmartShuntConfig, MAX_SMARTSHUNTS> devices{};
@@ -226,6 +231,14 @@ AppSettings settings_load()
         settings.n2k_input.port = input.port;
     }
 
+    PersistedGraphs graphs{};
+    size = sizeof(graphs);
+    if (nvs_get_blob(handle,"graphs_v1",&graphs,&size)==ESP_OK && size==sizeof(graphs) && graphs.schema==1) {
+        for(size_t i=0;i<settings.graphs.size();++i) {
+            if(graphs.pages[i].panels<=2)settings.graphs[i].panels=graphs.pages[i].panels;
+            if(graphs.pages[i].window<=2)settings.graphs[i].window=graphs.pages[i].window;
+        }
+    }
     sanitize_display_settings(settings);
 
     // Old display blobs contain arbitrary padding at the new field's offset.
@@ -252,6 +265,7 @@ AppSettings settings_load()
 bool settings_save(const AppSettings &settings)
 {
     if (static_cast<uint8_t>(settings.rotation) > 1) return false;
+    for(const auto &g:settings.graphs)if(g.panels>2 || g.window>2)return false;
     nvs_handle_t handle;
     esp_err_t err = nvs_open(NAMESPACE, NVS_READWRITE, &handle);
     if (err != ESP_OK) {
@@ -296,6 +310,9 @@ bool settings_save(const AppSettings &settings)
     if (err == ESP_OK) err = nvs_set_blob(handle, KEY_DISPLAY, &persisted_display, sizeof(persisted_display));
     if (err == ESP_OK) err = nvs_set_blob(handle, KEY_WIFI, &persisted_wifi, sizeof(persisted_wifi));
     if (err == ESP_OK) err = nvs_set_blob(handle, "n2k_in_v1", &input, sizeof(input));
+    PersistedGraphs graphs{};
+    graphs.pages=settings.graphs;
+    if (err == ESP_OK) err = nvs_set_blob(handle,"graphs_v1",&graphs,sizeof(graphs));
     if (err == ESP_OK) err = nvs_commit(handle);
 
     nvs_close(handle);
