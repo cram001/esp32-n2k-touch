@@ -25,3 +25,9 @@ Fixed in `n2k_input.cpp`: 10-second receive silence closes the socket, resets fr
 Fixed: socket drain is bounded by 4096 bytes or 5 ms per iteration, ending at EAGAIN. Shared `n2k_receive_pgns.hpp` retains RECEIVE_PGNS and accepts 60928/126996 before queueing. Increased packet queue and bridge drain from 16 to 64; queue drop count already appears in the Sources status and is preserved. No new per-packet allocation.
 
 Files: `n2k_input.cpp`, `n2k_bridge.cpp`, shared PGN header, existing CI gateway test. The 1200-line burst fails before and passes after; unsupported PGN is filtered, backpressure remains counted. All 19 host tests pass. Firmware attempt timed out waiting for package installation; initial installation continues in a separate build attempt and has had mirror checksum failures followed by retries. Hardware throughput unverified.
+
+## 5 — Bridge snapshot timeout and CAN guard
+
+Fixed: `settings_snapshot()` retains a task-owned last-good cache, initialized before task creation. `g_wireless_input` is atomic; `ParseMessages()` requires successful CAN open. The extracted snapshot implementation is shared verbatim with the host test, avoiding an unrelated bridge refactor.
+
+Files: `n2k_bridge.cpp`, `n2k_settings_snapshot.inc`, `bridge_snapshot_test.cpp`, CI. Snapshot regression fails before/pass after; checks brightness and wireless mode survive timeout, then a successful snapshot accepts changes. All 20 host tests pass. CAN-open guard inspected; not independently simulated by this test. Firmware attempted, installation lock timeout; no firmware pass claimed.

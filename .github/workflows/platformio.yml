@@ -64,6 +64,8 @@ jobs:
           /tmp/actisense_test
           g++ -std=c++17 -Wall -Wextra -I tests/host/gateway -I src src/n2k_input.cpp src/actisense_ascii.cpp tests/host/n2k_input_test.cpp -o /tmp/n2k_input_test
           /tmp/n2k_input_test
+          g++ -std=c++17 -Wall -Wextra -I tests/host -I src tests/host/bridge_snapshot_test.cpp -o /tmp/bridge_snapshot_test
+          /tmp/bridge_snapshot_test
 
       - name: Test asynchronous CAN transmit ownership
         shell: bash
