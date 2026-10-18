@@ -61,15 +61,29 @@ uint16_t selected(DataMetric metric, uint8_t field) {
     if (m >= METRICS) return NO_RECORD;
     const uint8_t id = choice_id(metric,field);
     const N2kSourceChoice choice = id <= N2K_GPS_CHOICE ? preferences.sources[id] : N2kSourceChoice{};
-    if (choice.mode != SourceChoiceMode::Automatic || n2k_sources_is_gps(metric)) {
-        const auto &target = choice.mode != SourceChoiceMode::Automatic ? choice : automatic_gps;
-        for (size_t i=0;i<records.size();++i) {
+    const bool gps=n2k_sources_is_gps(metric);
+    uint16_t current=(gps || choice.mode!=SourceChoiceMode::Automatic)?NO_RECORD:automatic[m];
+    if (choice.mode != SourceChoiceMode::Automatic || gps) {
+        const auto &target=choice.mode != SourceChoiceMode::Automatic?choice:automatic_gps;
+        for(size_t i=0;i<records.size();++i) {
             const auto &r=records[i];
-            if (r.used && r.metric==metric && (n2k_sources_is_gps(metric) ? same_device(target,r.source) : matches(target,r.source))) return i;
+            if(r.used && r.metric==metric && (gps?same_device(target,r.source):matches(target,r.source))) {current=i;break;}
         }
-        return NO_RECORD;
+        if(choice.mode!=SourceChoiceMode::Automatic)return current;
     }
-    return automatic[m];
+    const int64_t now=esp_timer_get_time();
+    if(current==NO_RECORD || !records[current].used || !records[current].value.valid || now-records[current].updated>=30000000) {
+        uint16_t best=current;
+        for(size_t i=0;i<records.size();++i) {
+            const auto &r=records[i];
+            if(!r.used || r.metric!=metric || !r.value.valid)continue;
+            if(best==NO_RECORD || !records[best].used || r.updated>records[best].updated)best=i;
+        }
+        current=best;
+        if(gps && current!=NO_RECORD)automatic_gps=records[current].source;
+        else if(!gps)automatic[m]=current;
+    }
+    return current;
 }
 void label(const Record &r, size_t index, char *out, size_t capacity) {
     const Device *d = device(r.source.address);
@@ -219,6 +233,10 @@ void n2k_sources_publish(DataMetric metric,uint8_t address,uint8_t instance,uint
     source.mode=source.name?SourceChoiceMode::Name:SourceChoiceMode::ThisBootAddress;
     size_t index=records.size(),free=records.size();
     for(size_t i=0;i<records.size();++i){
+        if(records[i].used && now-records[i].updated>=600000000) {
+            for(auto &selected:automatic)if(selected==i)selected=NO_RECORD;
+            records[i]={};
+        }
         if(records[i].used && records[i].metric==metric && matches(source,records[i].source)){index=i;break;}
         if(!records[i].used && free==records.size())free=i;
     }
