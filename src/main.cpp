@@ -162,6 +162,7 @@ extern "C" void app_main(void)
     // The LVGL port rotates pixels; LVGL rotates the associated input points.
     bsp_display_rotate(display, settings.rotation == DisplayRotation::Normal ? LV_DISPLAY_ROTATION_0 : LV_DISPLAY_ROTATION_180);
     ui_start(settings);
+    if(settings_take_reset_notice())ui_post_startup_notice(UI_NOTICE_NVS_RESET);
     bsp_display_unlock();
     ESP_LOGI(TAG, "Display and touch UI initialized");
     log_internal_heap("After UI");

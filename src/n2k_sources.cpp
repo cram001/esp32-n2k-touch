@@ -154,7 +154,7 @@ void load_profiles() {
         p.config.keel_set=flags&1;p.config.waterline_set=flags&2;
         std::memcpy(&p.config.transducer_to_keel_m,bytes.data()+at,4);at+=4;
         std::memcpy(&p.config.transducer_to_waterline_m,bytes.data()+at,4);at+=4;
-        p.used=mode==1 && p.source.name && p.source.name!=UINT64_MAX && depth_valid(p.config);
+        p.used=mode==1 && !(flags&~3U) && p.source.name && p.source.name!=UINT64_MAX && depth_valid(p.config);
         p.source.mode=SourceChoiceMode::Name;
     }
 }

@@ -177,3 +177,6 @@ AppSettings settings_load();
 bool settings_save(const AppSettings &settings);
 // Recovery changes only the two brightness keys, preserving every other setting.
 bool settings_restore_brightness();
+
+// Consume a one-time notice after NVS recovery erased settings; no persisted field.
+bool settings_take_reset_notice();
