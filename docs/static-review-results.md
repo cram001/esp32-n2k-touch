@@ -43,3 +43,9 @@ Files: `ota.cpp`, `ota.hpp`, window policy/API include, `ota_window_test.cpp`, C
 Fixed: `set_active` and `set_status` use portMAX_DELAY, so transient contention cannot drop clears or progress/error updates. Failed claims never set active; successful ReadyToReboot deliberately retains the claim until reboot.
 
 Files: `ota.cpp`, shared `ota_state.inc`, `ota_state_test.cpp`, CI. Contention fake rejects timed takes and accepts blocking takes: old implementation fails clearing active, replacement passes active/status/clamping/null-message checks. All 22 host tests pass. Firmware attempted, package installation still incomplete; no firmware pass claimed.
+
+## 8 — Scan timeout
+
+Fixed in `wifi_service.cpp`: worker stops/clears a scan after 10 s without SCAN_DONE, records ESP_ERR_TIMEOUT, clears scanning and permits reconnect/new scan. Late completion is ignored while idle.
+
+Extended Wi-Fi SDK fake with time/worker stepping/scan-stop count; existing CI `wifi_service_test.cpp` runs the actual worker without completion. Regression fails before and passes after. All 22 host tests pass. Firmware attempted, dependency installation incomplete. Radio timing unverified on hardware.

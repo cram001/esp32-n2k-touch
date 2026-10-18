@@ -1,4 +1,6 @@
 #include <cassert>
+#include <cstdint>
+unsigned fake_worker_steps=0,fake_scan_stops=0;int64_t fake_wifi_time=1000000;
 #include <cstdio>
 #include <cstring>
 bool fake_queue_full=false;
@@ -59,6 +61,14 @@ int main() {
     fake_queue_full=false;
     assert(wifi_service_request_scan());
     complete_scan();
+    // No SCAN_DONE: run the actual worker through its timeout.
+    assert(wifi_service_request_scan());scan();
+    const unsigned before_stops=fake_scan_stops;
+    fake_worker_steps=11;
+    try {worker(nullptr);}catch(const FakeWifiWorkerStop &){}
+    assert(!wifi_service_scan_active() && fake_scan_stops==before_stops+1);
+    assert(wifi_service_get_scan().state==WifiScanState::Failed);
+    assert(wifi_service_request_scan());complete_scan();
     WifiConfig ap=valid;ap.mode=WifiMode::AccessPoint;
     assert(!configure(ap));
     assert(!wifi_service_apply_config(ap));

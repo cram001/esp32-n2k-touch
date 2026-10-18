@@ -3,6 +3,7 @@
 #include "esp_err.h"
 #include <cstdint>
 #include <cstddef>
+constexpr int ESP_ERR_TIMEOUT=8;
 constexpr int ESP_ERR_INVALID_STATE=5, ESP_ERR_INVALID_ARG=6, ESP_ERR_NO_MEM=7;
 constexpr int pdTRUE=1, pdPASS=1, portMAX_DELAY=-1;
 #define pdMS_TO_TICKS(x) (x)
@@ -16,7 +17,13 @@ inline void vQueueDelete(void *) {}
 extern bool fake_queue_full;
 extern unsigned fake_commands;
 inline int xQueueSend(void *, const void *, int) { if (fake_queue_full) return 0; ++fake_commands; return pdTRUE; }
-inline int xQueueReceive(void *, void *, int) { return 0; }
+extern unsigned fake_worker_steps,fake_scan_stops;
+extern int64_t fake_wifi_time;
+struct FakeWifiWorkerStop {};
+inline int xQueueReceive(void *, void *, int) {
+    if(!fake_worker_steps--)throw FakeWifiWorkerStop{};
+    fake_wifi_time+=1000000;return 0;
+}
 inline int xTaskCreate(void (*)(void *), const char *, unsigned, void *, unsigned, void *) { return pdPASS; }
 inline int xTaskCreatePinnedToCore(void (*task)(void *), const char *name, unsigned stack,
                                    void *arg, unsigned prio, void *handle, int) {
@@ -45,7 +52,7 @@ struct esp_sntp_config_t { bool start=true; };
 #define ESP_NETIF_SNTP_DEFAULT_CONFIG(server) esp_sntp_config_t{}
 inline int esp_netif_sntp_init(esp_sntp_config_t *) { return ESP_OK; }
 inline int esp_netif_sntp_start() { return ESP_OK; }
-inline int64_t esp_timer_get_time() { return 0; }
+inline int64_t esp_timer_get_time() { return fake_wifi_time; }
 constexpr int WIFI_REASON_NO_AP_FOUND=1, WIFI_REASON_AUTH_FAIL=2, WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT=3,
  WIFI_REASON_HANDSHAKE_TIMEOUT=4, WIFI_REASON_BEACON_TIMEOUT=5, WIFI_REASON_ASSOC_FAIL=6,
  WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY=7, WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD=8;
@@ -72,7 +79,7 @@ inline int esp_wifi_stop() { return fake_stop_error; }
 inline int esp_wifi_start() { ++fake_starts; return fake_start_error; }
 inline int esp_wifi_set_mode(int) { return fake_mode_error; }
 inline int esp_wifi_set_config(int, wifi_config_t *) { return fake_config_error; }
-inline int esp_wifi_scan_stop() { return ESP_OK; }
+inline int esp_wifi_scan_stop() { ++fake_scan_stops;return ESP_OK; }
 inline int esp_wifi_scan_start(wifi_scan_config_t *, bool) { ++fake_scans; return ESP_OK; }
 inline int esp_wifi_clear_ap_list() { return ESP_OK; }
 inline int esp_wifi_sta_get_ap_info(wifi_ap_record_t *) { return ESP_OK; }
