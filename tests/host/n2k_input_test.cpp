@@ -98,8 +98,16 @@ int main(){
     connect_error=false;wait_connect=true;eof=false;cfg.port=60001;n2k_input_apply(cfg);
     run(260);assert(n2k_input_status().socket_error==ETIMEDOUT);
     wait_connect=false;cfg.port=60003;n2k_input_apply(cfg);
-    for(unsigned i=0;i<20;++i)reads.push_back(line);
-    run(22);assert(packets.size()==16 && n2k_input_status().dropped==4);
+    for(unsigned i=0;i<68;++i)reads.push_back(line);
+    run(22);assert(packets.size()==64 && n2k_input_status().dropped==4);
+    // 1200 supported lines plus unrelated PGNs drain in a bounded burst.
+    packets.clear();reads.clear();cfg.port=60006;n2k_input_apply(cfg);
+    for(unsigned i=0;i<1200;++i)reads.push_back(line);
+    reads.push_back("A173321 01FF2 1FFFF 0102030405060708\r\n");
+    hook=[&](){while(n2k_input_receive(msg)){};};
+    run(12);hook={};
+    assert(reads.empty() && n2k_input_status().received==1200);
+    assert(n2k_input_status().dropped>0); // Burst backpressure remains observable.
     // A connected, silent peer must be closed at 10 s, then retried at 5 s.
     packets.clear();reads.clear();cfg.port=60004;n2k_input_apply(cfg);
     unsigned silence_step=0;const unsigned silent_closes=closes,silent_opens=opens;

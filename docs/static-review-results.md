@@ -19,3 +19,9 @@ Files: `n2k_sources.cpp`, `source_failover_test.cpp`, CI workflow. New test fail
 ## 3 — Silent W2K connections
 
 Fixed in `n2k_input.cpp`: 10-second receive silence closes the socket, resets framing and schedules the existing 5-second retry. TCP keepalive uses 10 s idle, 3 s interval, 3 probes; setup failures close/retry. Extended gateway socket fake and existing CI-registered `n2k_input_test.cpp`; new silent-peer assertion fails before and passes after, including the retry interval. All 19 host tests pass. `pio run` attempted, package-install lock did not resolve within the bounded local attempt; no firmware pass claimed.
+
+## 4 — W2K throughput
+
+Fixed: socket drain is bounded by 4096 bytes or 5 ms per iteration, ending at EAGAIN. Shared `n2k_receive_pgns.hpp` retains RECEIVE_PGNS and accepts 60928/126996 before queueing. Increased packet queue and bridge drain from 16 to 64; queue drop count already appears in the Sources status and is preserved. No new per-packet allocation.
+
+Files: `n2k_input.cpp`, `n2k_bridge.cpp`, shared PGN header, existing CI gateway test. The 1200-line burst fails before and passes after; unsupported PGN is filtered, backpressure remains counted. All 19 host tests pass. Firmware attempt timed out waiting for package installation; initial installation continues in a separate build attempt and has had mirror checksum failures followed by retries. Hardware throughput unverified.

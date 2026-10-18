@@ -1,4 +1,6 @@
 #include "n2k_input.hpp"
+#include "n2k_receive_pgns.hpp"
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
@@ -99,12 +101,16 @@ void task(void *) {
                 } else if (ready > 0) { connecting = false; last_data = now; set_status("Connected; waiting for N2K ASCII"); }
             }
             if (socket_fd >= 0 && !connecting) {
-                const int count = recv(socket_fd, bytes, sizeof(bytes), 0);
+                const TickType_t drain_started=xTaskGetTickCount();
+                for(size_t drained=0;drained<4096 && xTaskGetTickCount()-drain_started<pdMS_TO_TICKS(5);) {
+                const int count = recv(socket_fd, bytes, std::min(sizeof(bytes),4096-drained), 0);
                 if (count > 0) {
+                    drained+=count;
                     last_data = now;
                     const uint32_t rejected_before = decoder.rejected();
                     for (int i = 0; i < count; ++i) {
                         if (!decoder.feed(bytes[i], packet.message)) continue;
+                        if (!n2k_receive_pgn(packet.message.pgn)) continue;
                         ++connection_received;
                         packet.generation = gen;
                         const bool queued = xQueueSend(queue, &packet, 0) == pdTRUE;
@@ -126,6 +132,8 @@ void task(void *) {
                     close(socket_fd);socket_fd=-1;retry_at=now+5000;
                     decoder.reset();set_status("Gateway silent; reconnecting",ETIMEDOUT);
                 }
+                if(count<=0)break;
+                }
             }
         }
         if(!stack_logged && xTaskGetTickCount()-started>=pdMS_TO_TICKS(5000)) {
@@ -146,7 +154,7 @@ void task(void *) {
 }
 bool n2k_input_start(const N2kInputConfig &initial) {
     if (mutex) { n2k_input_apply(initial); return true; }
-    mutex = xSemaphoreCreateMutex(); queue = xQueueCreate(16, sizeof(Packet));
+    mutex = xSemaphoreCreateMutex(); queue = xQueueCreate(64, sizeof(Packet));
     if (!mutex || !queue) {
         if (mutex) vSemaphoreDelete(mutex);
         if (queue) vQueueDelete(queue);
@@ -167,7 +175,7 @@ bool n2k_input_receive(ActisenseMessage &out) {
     if (!queue) return false;
     Packet packet;
     // Bounded drain; stale packets from a previous endpoint never reach instruments.
-    for (unsigned i = 0; i < 16 && xQueueReceive(queue, &packet, 0) == pdTRUE; ++i) {
+    for (unsigned i = 0; i < 64 && xQueueReceive(queue, &packet, 0) == pdTRUE; ++i) {
         xSemaphoreTake(mutex, portMAX_DELAY);
         const bool current = packet.generation == generation && config.mode == N2kInputMode::W2kTcp;
         xSemaphoreGive(mutex);

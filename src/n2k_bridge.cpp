@@ -15,6 +15,7 @@
 #include "freertos/task.h"
 #include "instrument_data.hpp"
 #include "n2k_input.hpp"
+#include "n2k_receive_pgns.hpp"
 #include "n2k_instruments.hpp"
 #include "smartshunt_ble.hpp"
 
@@ -38,11 +39,7 @@ bool g_started = false;
 // Read and changed only on the N2K task; gateway input never forwards to CAN.
 bool g_wireless_input = false;
 std::atomic<bool> g_discover_sources{false};
-const unsigned long RECEIVE_PGNS[] = {
-    127250,127258,127488,127489,127505,128259,128267,128275,
-    129025,129026,129029,129283,129284,129285,130074,
-    130306,130310,130311,130312,130313,130314,130316,0
-};
+
 
 AppSettings settings_snapshot()
 {
@@ -129,7 +126,7 @@ void n2k_task(void *)
             SetN2kPGNISORequest(request,255,126996);g_nmea2000.SendMsg(request);
         }
         ActisenseMessage received;
-        for (unsigned i = 0; i < 16 && n2k_input_receive(received); ++i) {
+        for (unsigned i = 0; i < 64 && n2k_input_receive(received); ++i) {
             if (!g_wireless_input) continue;
             tN2kMsg message;
             message.SetPGN(received.pgn);
