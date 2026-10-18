@@ -4,7 +4,7 @@
 #include "app_settings.hpp"
 
 enum class WifiState : uint8_t {
-    Disabled, Connecting, Connected, CredentialsRequired, Disconnected, Error, AccessPoint
+    Disabled, Connecting, Connected, CredentialsRequired, Disconnected, Error
 };
 struct WifiStatus {
     WifiState state = WifiState::Disabled;

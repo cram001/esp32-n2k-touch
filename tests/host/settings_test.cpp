@@ -144,12 +144,7 @@ int main(){
     for(const auto &item:before_brightness_reset)
         if(item.first!="day_br" && item.first!="night_br")assert(durable.at(item.first)==item.second);
 
-    auto config=expected.wifi;assert(wifi_config_valid(config,&reason));
-    config.ap_password.fill(0);assert(!wifi_config_valid(config,&reason));
-    std::strcpy(config.ap_password.data(),"1234567");assert(!wifi_config_valid(config,&reason));
-    std::strcpy(config.ap_password.data(),"12345678");assert(wifi_config_valid(config,&reason));
-    config.ap_password.fill('x');config.ap_password[63]=0;assert(wifi_config_valid(config,&reason));
-    config.ap_password[63]='x';config.ap_password[64]=0;assert(!wifi_config_valid(config,&reason));
+    auto config=expected.wifi;assert(!wifi_config_valid(config,&reason));
     config.mode=WifiMode::Station;assert(wifi_config_valid(config,&reason));
     config.password[5]='z';assert(!wifi_config_valid(config,&reason));
     config.open_network=true;assert(wifi_config_valid(config,&reason));

@@ -45,7 +45,7 @@ void state(WifiState value, esp_err_t error = ESP_OK, const char *message = "") 
     g_status.state = value;
     g_status.last_error = error;
     std::snprintf(g_status.message.data(), g_status.message.size(), "%s", message);
-    if (value != WifiState::Connected && value != WifiState::AccessPoint) {
+    if (value != WifiState::Connected) {
         g_status.ip.fill(0); g_status.rssi = 0;
     }
     xSemaphoreGive(g_mutex);
@@ -166,7 +166,7 @@ bool configure(const WifiConfig &config) {
     xSemaphoreTake(g_mutex, portMAX_DELAY);
     g_config = config;
     g_status = WifiStatus{};
-    g_status.ssid = config.mode == WifiMode::AccessPoint ? config.ap_ssid : config.ssid;
+    g_status.ssid = config.ssid;
     xSemaphoreGive(g_mutex);
     g_retry_count = 0;
     g_next_retry = 0;
@@ -281,7 +281,7 @@ bool wifi_service_apply_config(const WifiConfig &config) {
     if (!g_initialized || ota_update_in_progress() || config.mode != WifiMode::Station) return false;
     const auto current = snapshot();
     if (current.enabled == config.enabled && current.mode == config.mode && current.open_network == config.open_network &&
-        current.ssid == config.ssid && current.password == config.password && current.ap_ssid == config.ap_ssid && current.ap_password == config.ap_password &&
+        current.ssid == config.ssid && current.password == config.password &&
         wifi_service_get_status().state != WifiState::Error && wifi_service_get_status().state != WifiState::Disconnected) return true;
     Command command{CommandType::Apply,config};
     return xQueueSend(g_commands,&command,0) == pdTRUE;

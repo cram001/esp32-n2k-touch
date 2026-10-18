@@ -49,7 +49,7 @@ void task(void *) {
         xSemaphoreGive(mutex);
         const uint32_t now = xTaskGetTickCount() * portTICK_PERIOD_MS;
         const WifiState wifi = wifi_service_get_status().state;
-        const bool network = wifi == WifiState::Connected || wifi == WifiState::AccessPoint;
+        const bool network = wifi == WifiState::Connected;
         if (gen != active_generation || !network || current.mode != N2kInputMode::W2kTcp) {
             if (socket_fd >= 0) close(socket_fd);
             socket_fd = -1; connecting = false; retry_at = now;

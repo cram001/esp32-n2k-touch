@@ -89,3 +89,31 @@ Files: instrument/source/filter implementations, depth/format/source tests (alre
 Fixed: normalize SmartShunt/page/legacy Wi-Fi bool bytes before typed copies, accept only 1 for byte-backed Wi-Fi flags, sanitize heading enum/NaN distance threshold, reject unknown depth-profile flag bits. Existing blob sizes/assertions retained. Successful NVS erase publishes a one-time, dismissible display notice that settings were reset without backup; erase failure returns an error. No new persistent secret.
 
 Files: settings source/header, main, sources, existing CI settings/source lookup tests. Corrupt bool byte test fails before/pass after; tests also cover malformed profile flags and one-shot reset notice. All 26 host tests pass. NVS encryption remains disabled (see firmware-security.md). Full firmware build now passes: 111204 bytes static RAM, 1771219 bytes flash. Local component-manager process discovery needed an environment-only psutil fallback for this container; no repository dependency patched. Item 9 correction uses an ISR-safe critical section protecting only counter increment/read because target std::atomic<uint32_t> is not lock-free; correction will be folded into item 9's commit.
+
+## 16 — Dead instrument/AP paths and production heading tests
+
+Fixed: removed legacy g_nmea cache/update helpers; heading tests now encode actual PGNs and drive n2k_instruments_receive/n2k_sources. Unsupported wire references are ignored, COG carries its real reference, and unavailable heading values exercise the decoder. Runtime validation/status/connection/auth paths are Station-only; AP persisted fields/enums and size assertions remain. Extracted changed Wi-Fi callbacks/status to private .inc files, following item 23's restriction without rewriting ui.cpp.
+
+Files: instrument source/header, heading/settings tests, Wi-Fi configuration/service/header, input/auth, UI Wi-Fi include files, station_config_test.cpp and CI. New Station-only validation assertion fails before/pass after. All 27 host tests pass; pio run passes (109260 static RAM bytes; 1768135 flash bytes). Release validator's 13 tests and actual OTA layout/image validation pass. No flashing/physical test performed.
+
+## Stop finding — item 1 remains partly fixed
+
+A complete UI-reference search during firmware warning review shows `g_ota_screen` is initialized to nullptr and never assigned a screen; `ota_screen_cb` is not referenced by any button. This is true in base b12e203 as well. Thus the callback's AP gate was defective, but correcting it does **not** make local OTA reachable in this revision. The display PIN likewise has no reachable OTA screen. The callback unit test covers the gate only, not screen construction/navigation. Restoring or choosing an OTA entry screen would go beyond the review's stated premise; implementation stops here under the explicit premise-check rule. Do not treat this branch as a completed/release-ready OTA fix.
+
+## Remaining items / review decisions
+
+| Item | Status | Files / tests | Review |
+|---|---|---|---|
+| 1 | Partly fixed | OTA/UI callback, regression + release notes | Missing screen construction/navigation blocks end-to-end use. |
+| 9 | Fixed, hardware unverified | TWAI transport + ISR fake | Counter uses one-operation ISR-safe portMUX critical sections; target std::atomic<uint32_t> is not lock-free. |
+| 12 | Fixed PIN; unsigned images documented | OTA auth/UI, auth test, firmware-security.md | Signed-image enforcement not enabled; display screen blocker applies. |
+| 13 | Partly fixed | main/UI/health policy + policy test | Environment split implemented, but CAN Open/task startup share one bridge result; CAN initialization failure can still cause rejection. Needs a distinct environment/task failure result. |
+| 17 | Skipped | None | Node identity/address persistence not changed; stopped at premise finding. |
+| 18 | Skipped | None | Waypoint eviction not implemented; stopped at premise finding. |
+| 19 | Skipped | None | Wind reference filtering not implemented; stopped at premise finding. |
+| 20 | Needs hardware; skipped procedure | Existing GPIO0 warning retained | Pins unchanged. No power-cycle verification or mitigation selected. |
+| 21 | Needs hardware; skipped instrumentation | Existing startup stack logs retained | Upload-time high-water logs/512-byte assessment not implemented. |
+| 22 | Skipped | None | Flash mode, PlatformIO CI pin, unused partition, default rotation, deep+ unchanged. |
+| 23 | Partly fixed | ui_ota.inc, ui_wifi.inc, ui_wifi_status.inc | Affected callbacks/status split out; no full UI rewrite. Screen construction is absent in base. |
+
+Final local verification before publication: all 27 CI host executables pass with LSAN_OPTIONS=detect_leaks=0; ASan/UBSan remain as configured in CI. LeakSanitizer cannot inspect processes in this container. pio run passes; 13 release-validator tests plus built artifact validation pass. Early per-item firmware attempts could not complete because of dependency installation/lock timeouts; they are recorded above, not retroactively claimed as passes. Local build environment required a psutil process-discovery fallback in the installed component manager, and telemetry was disabled after its collector was blocked. Neither workaround changes repository source or runtime firmware.

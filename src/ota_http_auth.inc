@@ -6,7 +6,7 @@ bool constant_time_equal(const char (&a)[N],const char (&b)[N]) {
 }
 bool network_request(httpd_req_t *request, bool token_required) {
     const auto wifi=wifi_service_get_status();
-    if (wifi.state != WifiState::AccessPoint && wifi.state != WifiState::Connected) {
+    if (wifi.state != WifiState::Connected) {
         httpd_resp_send_err(request, HTTPD_403_FORBIDDEN, "Firmware Update mode requires active Wi-Fi");
         return false;
     }
