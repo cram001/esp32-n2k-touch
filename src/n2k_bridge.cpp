@@ -152,6 +152,7 @@ void n2k_task(void *)
         // Unsigned tick subtraction remains valid across the FreeRTOS tick wrap.
         if (diagnostic_now-last_diagnostic>=pdMS_TO_TICKS(60000)) {
             last_diagnostic=diagnostic_now;
+            ESP_LOGI(TAG,"TWAI RX queue dropped frames: %lu",static_cast<unsigned long>(g_nmea2000.RxDropped()));
             ESP_LOGI(TAG,"Runtime N2K task minimum free stack: %u bytes",
                      static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
             ESP_LOGI(TAG,"Runtime heap (bytes): internal free=%u largest=%u minimum=%u; PSRAM free=%u largest=%u minimum=%u",

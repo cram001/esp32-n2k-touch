@@ -49,3 +49,9 @@ Files: `ota.cpp`, shared `ota_state.inc`, `ota_state_test.cpp`, CI. Contention f
 Fixed in `wifi_service.cpp`: worker stops/clears a scan after 10 s without SCAN_DONE, records ESP_ERR_TIMEOUT, clears scanning and permits reconnect/new scan. Late completion is ignored while idle.
 
 Extended Wi-Fi SDK fake with time/worker stepping/scan-stop count; existing CI `wifi_service_test.cpp` runs the actual worker without completion. Regression fails before and passes after. All 22 host tests pass. Firmware attempted, dependency installation incomplete. Radio timing unverified on hardware.
+
+## 9 — TWAI receive backpressure
+
+Fixed: RX queue depth 128; failed ISR queue sends increment a lock-free atomic uint32 counter, exposed as RxDropped(). N2K task logs it every minute. No ISR allocation/blocking; polling cadence retained.
+
+Files: transport `.cpp/.h`, bridge, TWAI fake and existing CI transport test. Original fails capacity regression; new test feeds 135 ISR receives, confirms 128 queued and 7 drops, and excludes driver receive errors. All 22 host tests pass. Firmware attempted, dependencies incomplete; live-bus load unverified.

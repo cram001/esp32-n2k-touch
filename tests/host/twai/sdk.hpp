@@ -42,14 +42,16 @@ struct twai_onchip_node_config_t {
 };
 struct twai_mask_filter_config_t { uint32_t id,mask; bool is_ext,no_classic,no_fd; };
 using QueueHandle_t=void *;
-inline QueueHandle_t xQueueCreate(size_t,size_t) { return reinterpret_cast<void*>(1); }
+inline size_t fake_rx_capacity=0,fake_rx_queued=0;
+inline bool fake_rx_available=false;
+inline QueueHandle_t xQueueCreate(size_t n,size_t) { fake_rx_capacity=n;fake_rx_queued=0;return reinterpret_cast<void*>(1); }
 inline void vQueueDelete(QueueHandle_t) {}
-inline int xQueueSendFromISR(QueueHandle_t,const void*,int*) { return pdTRUE; }
+inline int xQueueSendFromISR(QueueHandle_t,const void*,int*) { if(fake_rx_queued==fake_rx_capacity)return pdFALSE;++fake_rx_queued;return pdTRUE; }
 inline int xQueueReceive(QueueHandle_t,void*,int) { return pdFALSE; }
 int twai_node_transmit(twai_node_handle_t,const twai_frame_t*,int);
 int twai_new_node_onchip(const twai_onchip_node_config_t*,twai_node_handle_t*);
 int twai_node_register_event_callbacks(twai_node_handle_t,const twai_event_callbacks_t*,void*);
-inline int twai_node_receive_from_isr(twai_node_handle_t,twai_frame_t*) { return ESP_ERR_TIMEOUT; }
+inline int twai_node_receive_from_isr(twai_node_handle_t,twai_frame_t*) { return fake_rx_available?ESP_OK:ESP_ERR_TIMEOUT; }
 inline int twai_node_delete(twai_node_handle_t) { return ESP_OK; }
 inline int twai_node_config_mask_filter(twai_node_handle_t,int,const twai_mask_filter_config_t*) { return ESP_OK; }
 inline int twai_node_enable(twai_node_handle_t) { return ESP_OK; }

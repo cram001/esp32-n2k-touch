@@ -21,6 +21,8 @@ subject to retaining this copyright and permission notice.
 
 class tNMEA2000_esp32xx : public tNMEA2000 {
 private:
+    uint32_t rx_dropped_=0;
+    portMUX_TYPE rx_lock_=portMUX_INITIALIZER_UNLOCKED;
     bool is_open_ = false;
     static bool can_in_use_;
     twai_node_handle_t node_ = nullptr;
@@ -63,6 +65,9 @@ protected:
                      unsigned char *buf) override;
 
 public:
+    uint32_t RxDropped(){
+        portENTER_CRITICAL(&rx_lock_);const uint32_t count=rx_dropped_;portEXIT_CRITICAL(&rx_lock_);return count;
+    }
     explicit tNMEA2000_esp32xx(gpio_num_t tx_pin=GPIO_NUM_5,
                                gpio_num_t rx_pin=GPIO_NUM_4);
 };

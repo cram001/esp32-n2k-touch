@@ -55,6 +55,13 @@ int main() {
  Transport t;
  assert(!t.CANSendFrame(0,0,nullptr,false));
  assert(t.CANOpen());
+ assert(fake_rx_capacity==128);
+ fake_rx_available=true;
+ for(unsigned i=0;i<135;++i)callbacks.on_rx_done(nullptr,nullptr,context);
+ assert(t.RxDropped()==7 && fake_rx_queued==128);
+ fake_rx_available=false;callbacks.on_rx_done(nullptr,nullptr,context);
+ assert(t.RxDropped()==7); // Driver receive errors are not queue drops.
+
  for(unsigned i=0;i<21;++i) send(t,i);
  check(0);
  assert(!t.CANSendFrame(0,0,nullptr,false));check(0);
