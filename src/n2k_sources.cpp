@@ -5,6 +5,7 @@
 #include <cstring>
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "nvs.h"
 
 namespace {
@@ -30,7 +31,8 @@ N2kSourceChoice automatic_gps{};
 Preferences preferences{};
 struct DepthProfile { bool used = false; N2kSourceChoice source{}; DepthConfig config{}; };
 std::array<DepthProfile,16> depth_profiles{};
-portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
+StaticSemaphore_t mux_storage;
+SemaphoreHandle_t mux=xSemaphoreCreateMutexStatic(&mux_storage);
 bool initialized = false;
 uint32_t display_context = 0;
 using Bytes = std::array<uint8_t,460>;
@@ -48,9 +50,9 @@ bool matches(const N2kSourceChoice &a, const N2kSourceChoice &b) {
     return same_device(a,b) && a.instance == b.instance && a.kind == b.kind;
 }
 bool temporary_source_exists(const N2kSourceChoice &source) {
-    bool found=false;portENTER_CRITICAL(&mux);
+    bool found=false;xSemaphoreTake(mux,portMAX_DELAY);
     for(const auto &r:records)if(r.used && !r.source.name && matches(source,r.source)){found=true;break;}
-    portEXIT_CRITICAL(&mux);return found;
+    xSemaphoreGive(mux);return found;
 }
 uint8_t choice_id(DataMetric metric, uint8_t field) {
     return n2k_sources_is_gps(metric) ? N2K_GPS_CHOICE : field;
@@ -157,7 +159,7 @@ bool persist(const Preferences &next) {
     esp_err_t error=nvs_set_blob(handle,"sources_v1",bytes.data(),bytes.size());
     if(error==ESP_OK)error=nvs_commit(handle);
     nvs_close(handle);if(error!=ESP_OK)return false;
-    portENTER_CRITICAL(&mux);preferences=next;++display_context;portEXIT_CRITICAL(&mux);return true;
+    xSemaphoreTake(mux,portMAX_DELAY);preferences=next;++display_context;xSemaphoreGive(mux);return true;
 }
 }
 bool n2k_sources_is_gps(DataMetric m) {
@@ -196,14 +198,14 @@ bool n2k_sources_init() {
     preferences=decoded;return true;
 }
 void n2k_sources_reset() {
-    portENTER_CRITICAL(&mux);++display_context;records={};devices={};automatic.fill(NO_RECORD);automatic_gps={};
+    xSemaphoreTake(mux,portMAX_DELAY);++display_context;records={};devices={};automatic.fill(NO_RECORD);automatic_gps={};
     for(auto &s:preferences.sources)if(s.mode==SourceChoiceMode::ThisBootAddress){s.address=255;s.name=0;}
     for(auto &p:depth_profiles)if(p.source.mode==SourceChoiceMode::ThisBootAddress)p.used=false;
-    portEXIT_CRITICAL(&mux);
+    xSemaphoreGive(mux);
 }
 void n2k_sources_name(uint8_t address,uint64_t name) {
     if(address>=254 || !name || name==UINT64_MAX)return;
-    portENTER_CRITICAL(&mux);
+    xSemaphoreTake(mux,portMAX_DELAY);
     Device *d=device(address);
     if(d){
         if(d->name && d->name!=name)d->model={};
@@ -217,17 +219,17 @@ void n2k_sources_name(uint8_t address,uint64_t name) {
         }
         if(!automatic_gps.name && automatic_gps.address==address)automatic_gps.name=name;
     }
-    portEXIT_CRITICAL(&mux);
+    xSemaphoreGive(mux);
 }
 void n2k_sources_model(uint8_t address,const char *model) {
     if(address>=254 || !model)return;
-    portENTER_CRITICAL(&mux);Device *d=device(address);if(d)std::snprintf(d->model.data(),d->model.size(),"%s",model);portEXIT_CRITICAL(&mux);
+    xSemaphoreTake(mux,portMAX_DELAY);Device *d=device(address);if(d)std::snprintf(d->model.data(),d->model.size(),"%s",model);xSemaphoreGive(mux);
 }
 void n2k_sources_publish(DataMetric metric,uint8_t address,uint8_t instance,uint8_t kind,double value,HeadingReference reference,bool offset_valid,double offset,const char *text) {
     const size_t m=static_cast<size_t>(metric);
     if(address>=254 || !m || m>=METRICS || !std::isfinite(value))return;
     const int64_t now=esp_timer_get_time();
-    portENTER_CRITICAL(&mux);
+    xSemaphoreTake(mux,portMAX_DELAY);
     Device *d=device(address);N2kSourceChoice source;
     source.name=d?d->name:0;source.address=address;source.instance=instance;source.kind=kind;
     source.mode=source.name?SourceChoiceMode::Name:SourceChoiceMode::ThisBootAddress;
@@ -251,17 +253,17 @@ void n2k_sources_publish(DataMetric metric,uint8_t address,uint8_t instance,uint
         if(automatic[m]==NO_RECORD)automatic[m]=index;
         if(n2k_sources_is_gps(metric) && automatic_gps.address==255 && !automatic_gps.name)automatic_gps=source;
     }
-    portEXIT_CRITICAL(&mux);
+    xSemaphoreGive(mux);
 }
 void n2k_sources_invalidate(DataMetric metric,uint8_t address,uint8_t instance,uint8_t kind) {
     if(address>=254)return;
-    portENTER_CRITICAL(&mux);
+    xSemaphoreTake(mux,portMAX_DELAY);
     const Device *d=device(address);
     N2kSourceChoice source;source.name=d?d->name:0;source.address=address;
     source.instance=instance;source.kind=kind;
     for(auto &r:records)
         if(r.used && r.metric==metric && matches(source,r.source))r.value.valid=false;
-    portEXIT_CRITICAL(&mux);
+    xSemaphoreGive(mux);
 }
 bool n2k_depth_adjust(const DepthConfig &c,double raw,bool valid,double offset,double &result) {
     if(!depth_valid(c) || !std::isfinite(raw) || raw<0 || raw>1000)return false;
@@ -277,7 +279,7 @@ bool n2k_depth_adjust(const DepthConfig &c,double raw,bool valid,double offset,d
 bool n2k_sources_get(DataMetric metric,uint8_t field,InstrumentValue &out) {
     if(metric==DataMetric::Position) metric=DataMetric::Latitude;
     const int64_t now=esp_timer_get_time();Record copy;DepthConfig depth;bool handled=false;Record variation;
-    portENTER_CRITICAL(&mux);
+    xSemaphoreTake(mux,portMAX_DELAY);
     const uint16_t i=selected(metric,field);
     const uint8_t id=choice_id(metric,field);
     handled=(id<=N2K_GPS_CHOICE && preferences.sources[id].mode!=SourceChoiceMode::Automatic);
@@ -290,7 +292,7 @@ bool n2k_sources_get(DataMetric metric,uint8_t field,InstrumentValue &out) {
         if(!variation.used)for(const auto &r:records)if(r.used && r.metric==DataMetric::MagneticVariation && same_device(gps,r.source)){variation=r;break;}
     }
     const uint32_t context=display_context;
-    portEXIT_CRITICAL(&mux);
+    xSemaphoreGive(mux);
     if(metric==DataMetric::DepthTransducer)depth.reference=DepthReference::Transducer;
     else if(metric==DataMetric::DepthBelowKeel)depth.reference=DepthReference::Keel;
     else if(metric==DataMetric::DepthWaterline)depth.reference=DepthReference::Waterline;
@@ -312,34 +314,34 @@ size_t n2k_sources_options(DataMetric metric,N2kSourceOption *out,size_t capacit
     if(n2k_sources_is_depth(metric))metric=DataMetric::Depth;
     if(!out)return 0;
     const int64_t now=esp_timer_get_time();size_t count=0;
-    portENTER_CRITICAL(&mux);
+    xSemaphoreTake(mux,portMAX_DELAY);
     for(const auto &r:records){
         if(!r.used || r.metric!=metric || count>=capacity)continue;
         out[count].choice=r.source;out[count].stale=now-r.updated>=30000000;
         label(r,count,out[count].label.data(),out[count].label.size());++count;
     }
-    portEXIT_CRITICAL(&mux);return count;
+    xSemaphoreGive(mux);return count;
 }
 void n2k_sources_label(DataMetric metric,uint8_t field,char *out,size_t capacity) {
     if(metric==DataMetric::Position)metric=DataMetric::Latitude;
     if(n2k_sources_is_depth(metric))metric=DataMetric::Depth;
     if(!out || !capacity)return;
-    portENTER_CRITICAL(&mux);const uint16_t i=selected(metric,field);const uint8_t id=choice_id(metric,field);
+    xSemaphoreTake(mux,portMAX_DELAY);const uint16_t i=selected(metric,field);const uint8_t id=choice_id(metric,field);
     if(i!=NO_RECORD){size_t number=0;for(size_t j=0;j<i;++j)if(records[j].used && records[j].metric==metric)++number;label(records[i],number,out,capacity);}
     else std::snprintf(out,capacity,"%s",id<=N2K_GPS_CHOICE && preferences.sources[id].mode!=SourceChoiceMode::Automatic?"Selected source unavailable":"Waiting for N2K source");
-    portEXIT_CRITICAL(&mux);
+    xSemaphoreGive(mux);
 }
 N2kSourceChoice n2k_sources_choice(uint8_t id) {
-    N2kSourceChoice choice;portENTER_CRITICAL(&mux);if(id<=N2K_GPS_CHOICE)choice=preferences.sources[id];portEXIT_CRITICAL(&mux);return choice;
+    N2kSourceChoice choice;xSemaphoreTake(mux,portMAX_DELAY);if(id<=N2K_GPS_CHOICE)choice=preferences.sources[id];xSemaphoreGive(mux);return choice;
 }
 bool n2k_sources_save_choice(uint8_t id,const N2kSourceChoice &choice) {
     if(id>N2K_GPS_CHOICE || static_cast<uint8_t>(choice.mode)>2)return false;
     if(choice.mode==SourceChoiceMode::Name && (!choice.name || choice.name==UINT64_MAX))return false;
     if(choice.mode==SourceChoiceMode::ThisBootAddress && (choice.address>=254 || !temporary_source_exists(choice)))return false;
-    Preferences next;portENTER_CRITICAL(&mux);next=preferences;portEXIT_CRITICAL(&mux);next.sources[id]=choice;
+    Preferences next;xSemaphoreTake(mux,portMAX_DELAY);next=preferences;xSemaphoreGive(mux);next.sources[id]=choice;
     return persist(next);
 }
-DepthConfig n2k_sources_depth(const N2kSourceChoice *source) { portENTER_CRITICAL(&mux);const DepthConfig copy=source?depth_for(*source):preferences.depth;portEXIT_CRITICAL(&mux);return copy; }
+DepthConfig n2k_sources_depth(const N2kSourceChoice *source) { xSemaphoreTake(mux,portMAX_DELAY);const DepthConfig copy=source?depth_for(*source):preferences.depth;xSemaphoreGive(mux);return copy; }
 bool n2k_sources_save_depth(const DepthConfig &depth,const N2kSourceChoice *source) {
     if(!depth_valid(depth))return false;
     if(source && static_cast<uint8_t>(source->mode)>2)return false;
@@ -347,7 +349,7 @@ bool n2k_sources_save_depth(const DepthConfig &depth,const N2kSourceChoice *sour
         if(source->mode==SourceChoiceMode::Name && (!source->name || source->name==UINT64_MAX))return false;
         if(source->mode==SourceChoiceMode::ThisBootAddress && (source->address>=254 || !temporary_source_exists(*source)))return false;
         std::array<DepthProfile,16> next;
-        portENTER_CRITICAL(&mux);next=depth_profiles;portEXIT_CRITICAL(&mux);
+        xSemaphoreTake(mux,portMAX_DELAY);next=depth_profiles;xSemaphoreGive(mux);
         auto slot=std::find_if(next.begin(),next.end(),[&](const DepthProfile &p){return p.used && matches(p.source,*source);});
         if(slot==next.end())slot=std::find_if(next.begin(),next.end(),[](const DepthProfile&p){return !p.used;});
         if(slot==next.end())return false;
@@ -364,9 +366,9 @@ bool n2k_sources_save_depth(const DepthConfig &depth,const N2kSourceChoice *sour
         nvs_handle_t handle;if(nvs_open("app",NVS_READWRITE,&handle)!=ESP_OK)return false;
         esp_err_t error=nvs_set_blob(handle,"depth_src_v1",bytes.data(),bytes.size());if(error==ESP_OK)error=nvs_commit(handle);nvs_close(handle);
         if(error!=ESP_OK)return false;
-        portENTER_CRITICAL(&mux);depth_profiles=next;++display_context;portEXIT_CRITICAL(&mux);return true;
+        xSemaphoreTake(mux,portMAX_DELAY);depth_profiles=next;++display_context;xSemaphoreGive(mux);return true;
     }
     // Manual mounting distances belong to one physical sensor, not every source.
     if(depth.reference==DepthReference::Keel || depth.reference==DepthReference::Waterline || depth.keel_set || depth.waterline_set)return false;
-    Preferences next;portENTER_CRITICAL(&mux);next=preferences;portEXIT_CRITICAL(&mux);next.depth=depth;return persist(next);
+    Preferences next;xSemaphoreTake(mux,portMAX_DELAY);next=preferences;xSemaphoreGive(mux);next.depth=depth;return persist(next);
 }

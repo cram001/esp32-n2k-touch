@@ -55,3 +55,9 @@ Extended Wi-Fi SDK fake with time/worker stepping/scan-stop count; existing CI `
 Fixed: RX queue depth 128; failed ISR queue sends increment a lock-free atomic uint32 counter, exposed as RxDropped(). N2K task logs it every minute. No ISR allocation/blocking; polling cadence retained.
 
 Files: transport `.cpp/.h`, bridge, TWAI fake and existing CI transport test. Original fails capacity regression; new test feeds 135 ISR receives, confirms 128 queued and 7 drops, and excludes driver receive errors. All 22 host tests pass. Firmware attempted, dependencies incomplete; live-bus load unverified.
+
+## 10 — Task-only data locks
+
+Fixed: source/device tables and the legacy instrument cache use statically allocated FreeRTOS mutexes instead of portMUX interrupt masking. Static allocation is enabled in the checked-in sdkconfig. No ISR accesses either cache; formatting/copies/loops no longer disable interrupts. No new heap allocation.
+
+Files: `n2k_sources.cpp`, `instrument_data.cpp`, instrument FreeRTOS fake, `source_lock_test.cpp`, CI. Regression instruments critical-section entry; fails before/pass after for source formatting/get/reset and instrument reset. All 23 host tests pass. Firmware attempted, dependencies incomplete. Mutex contention/latency needs device observation.
