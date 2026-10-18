@@ -21,6 +21,7 @@ bool ota_local_server_window_active(){return active;} const char *ota_running_ve
 bool ota_partition_layout_valid(){return true;} const char *ota_local_server_stage_name(LocalServerStage){return "test";}
 bool wifi_service_is_connected(){return state==WifiState::Connected;} bool ota_start_https(const char *){return true;}
 bool ota_disable_local_server(){return true;} bool ota_enable_local_server(uint32_t){enabled=true;return true;}
+void ota_local_server_pin(char *out,size_t size){std::snprintf(out,size,"123456");}
 #include "ui_ota.inc"
 int main(){
     ota_web_cb(nullptr);assert(!enabled && std::strstr(g_ota_feedback,"Station"));

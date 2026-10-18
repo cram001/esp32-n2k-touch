@@ -65,3 +65,9 @@ Files: `n2k_sources.cpp`, `instrument_data.cpp`, instrument FreeRTOS fake, `sour
 ## 11 — Non-allocating source lookups
 
 Fixed: added `find_device()` and use it for label/invalidate. Only name/model/publish create slots. Files: `n2k_sources.cpp`, `source_lookup_test.cpp`, CI. Original fails after invalidating 200 unseen addresses; replacement consumes no slots, label lookup consumes none, and later NAME/manufacturer discovery succeeds. All 24 host tests pass. Firmware attempted; package installation incomplete.
+
+## 12 — Local upload PIN; signing deferred
+
+Fixed access control: every upload/reboot requires the page token plus a random six-digit per-session PIN, shown only on the display. Fixed-buffer comparisons run without data-dependent early exit. PIN is RAM-only, not returned by page HTML and not persisted. Signed-image enforcement is **not enabled**: no signing/trust provisioning exists in the current release flow. `docs/firmware-security.md` documents unsigned-image and HTTP interception risks plus signing/NVS-encryption prerequisites.
+
+Files: OTA source/API/UI include, shared HTTP auth/page implementation, HTTP fake, `ota_auth_test.cpp`, OTA UI test, CI and security documentation. Original accepts token alone and fails regression; replacement rejects missing/wrong PIN and wrong token, accepts both, and serves no PIN value. All 25 host tests pass. Firmware attempted, dependency installation incomplete. PIN display and local upload still need device verification.

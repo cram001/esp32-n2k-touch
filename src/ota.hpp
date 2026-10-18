@@ -41,6 +41,8 @@ bool ota_partition_layout_valid();
 // retry after stop completes. Active uploads are never stopped by the timer.
 bool ota_enable_local_server(uint32_t seconds = 120);
 bool ota_disable_local_server();
+// Display task only; this secret must never be included in the HTTP page.
+void ota_local_server_pin(char *out,size_t size);
 bool ota_local_server_window_active();
 uint32_t ota_local_server_seconds_remaining();
 

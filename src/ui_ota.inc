@@ -3,12 +3,12 @@ void update_ota_status() {
     if(!g_ota_status || lv_screen_active()!=g_ota_screen) return;
     if(g_ota_feedback[0] && lv_tick_elaps(g_ota_feedback_time)<6000) return;
     g_ota_feedback[0]=0;
-    const auto st=ota_get_status();const auto wifi=wifi_service_get_status();const auto server=ota_local_server_status();char text[360];
+    const auto st=ota_get_status();const auto wifi=wifi_service_get_status();const auto server=ota_local_server_status();char text[360];char pin[7]{};ota_local_server_pin(pin,sizeof(pin));
     const uint32_t remaining=ota_local_server_seconds_remaining();
     if(g_ota_web_button) lv_label_set_text(button_label(g_ota_web_button),
         ota_local_server_window_active()?"DISABLE WEB UPDATE":"ENABLE WEB UPDATE (120s)");
     if(server.stage==LocalServerStage::Listening) {
-        std::snprintf(text,sizeof(text),"Version: %s\n%s (%d%%)  error: 0x%x\nWeb: ACTIVE - %us remaining\nLocal page: http://%s\nOTA layout: %s",ota_running_version(),st.message[0]?st.message:"Ready for local upload",st.progress_percent,st.last_error,static_cast<unsigned>(remaining),wifi.ip[0]?wifi.ip.data():"unavailable",ota_partition_layout_valid()?"ready":"incompatible; use USB");
+        std::snprintf(text,sizeof(text),"Version: %s\n%s (%d%%)  error: 0x%x\nWeb: ACTIVE - %us remaining\nLocal page: http://%s\nPIN: %s\nOTA layout: %s",ota_running_version(),st.message[0]?st.message:"Ready for local upload",st.progress_percent,st.last_error,static_cast<unsigned>(remaining),wifi.ip[0]?wifi.ip.data():"unavailable",pin,ota_partition_layout_valid()?"ready":"incompatible; use USB");
     } else {
         std::snprintf(text,sizeof(text),"Version: %s\n%s (%d%%)  error: 0x%x\nWeb: %s%s\nOTA layout: %s",ota_running_version(),st.message[0]?st.message:"Enter HTTPS URL or enable local web update",st.progress_percent,st.last_error,
             ota_local_server_window_active()?ota_local_server_stage_name(server.stage):"disabled",
