@@ -42,17 +42,18 @@ void log_internal_heap(const char *phase)
              static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM)));
 }
 
-void finish_startup_health(bool prerequisites) {
+void finish_startup_health(bool image_health,bool environment) {
+    if(!environment){ESP_LOGE(TAG,"Startup environment unavailable; retaining image");ui_post_startup_notice(UI_NOTICE_ENVIRONMENT);}
     const int64_t started=esp_timer_get_time();
     for(;;) {
-        const auto decision=startup_health_decision(prerequisites,ui_is_healthy(),esp_timer_get_time()-started);
+        const auto decision=startup_health_decision(image_health,environment,ui_is_healthy(),esp_timer_get_time()-started);
         if(decision==StartupHealthDecision::Confirm) {
             ESP_LOGI(TAG,"Startup health passed: selected mode and UI healthy");
             ota_confirm_running_image();
             return;
         }
         if(decision==StartupHealthDecision::Reject) {
-            ESP_LOGE(TAG,"Startup health failed: selected-mode prerequisite or UI readiness deadline");
+            ESP_LOGE(TAG,"Startup health failed: image prerequisites or UI readiness deadline");
             ota_reject_running_image();
             return;
         }
@@ -167,6 +168,7 @@ extern "C" void app_main(void)
     ESP_LOGI(TAG, "Main stack minimum free after settings/UI: %u bytes", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
 
     bool source_ok=false;
+    bool required_tasks_ok=false;
     const bool ota_layout_ok=ota_partition_layout_valid();
 
     if(settings.n2k_input.mode==N2kInputMode::Wired) {
@@ -178,7 +180,7 @@ extern "C" void app_main(void)
         const bool n2k_ok=n2k_bridge_start(settings);
         if(!n2k_ok) ESP_LOGE(TAG,"CAN NMEA 2000 service failed to initialize");
         log_internal_heap("CAN source after NMEA2000");
-        source_ok=ble_ok && n2k_ok;
+        required_tasks_ok=n2k_ok;source_ok=ble_ok;
     } else {
         ESP_LOGI(TAG,"NMEA 2000 source: Wi-Fi/W2K-1; CAN and Bluetooth disabled");
         WifiConfig wifi=settings.wifi;
@@ -191,11 +193,13 @@ extern "C" void app_main(void)
         const bool n2k_ok=n2k_bridge_start(settings);
         if(!n2k_ok) ESP_LOGE(TAG,"Wi-Fi NMEA 2000 input failed to initialize");
         log_internal_heap("Wi-Fi source after W2K/NMEA2000");
-        source_ok=wifi_ok && n2k_ok;
+        required_tasks_ok=n2k_ok;source_ok=wifi_ok;
     }
 
     ESP_LOGI(TAG, "Main stack minimum free after services: %u bytes", static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
     ESP_LOGI(TAG, "Detailed internal heap regions after startup services:");
     heap_caps_print_heap_info(MALLOC_CAP_INTERNAL);
-    finish_startup_health(settings_ok && sources_ok && source_ok && ota_layout_ok);
+    const bool heap_ok=heap_caps_get_free_size(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT)>=8192 &&
+        heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL|MALLOC_CAP_8BIT)>=2048;
+    finish_startup_health(required_tasks_ok && ota_layout_ok && heap_ok,settings_ok && sources_ok && source_ok);
 }

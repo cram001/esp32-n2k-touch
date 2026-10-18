@@ -46,6 +46,8 @@ jobs:
           /tmp/depth_display_test
           g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -I tests/host/http -I tests/host -I src tests/host/local_http_server_test.cpp -o /tmp/local_http_server_test
           /tmp/local_http_server_test
+          g++ -std=c++17 -Wall -Wextra -I src tests/host/startup_health_test.cpp -o /tmp/startup_health_test
+          /tmp/startup_health_test
           g++ -std=c++17 -Wall -Wextra -I tests/host -I src tests/host/ota_ui_test.cpp -o /tmp/ota_ui_test
           /tmp/ota_ui_test
           g++ -std=c++17 -Wall -Wextra -I tests/host -I src tests/host/ota_window_test.cpp -o /tmp/ota_window_test

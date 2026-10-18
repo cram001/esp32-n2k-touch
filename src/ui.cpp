@@ -47,6 +47,7 @@ size_t g_edit_page = 0;
 size_t g_edit_field = 0;
 size_t g_edit_shunt = 0;
 
+std::atomic<uint32_t> g_startup_notices{0};
 lv_obj_t *g_data_screen = nullptr;
 lv_obj_t *g_boot_screen = nullptr;
 lv_obj_t *g_boot_status = nullptr;
@@ -474,7 +475,18 @@ void update_wifi_status()
     }
     lv_label_set_text(g_wifi_status,b);
 }
-void refresh_cb(lv_timer_t *){++g_ui_refreshes;g_ui_last_refresh_ms=static_cast<uint32_t>(esp_timer_get_time()/1000);render_active_page();update_wifi_status();update_wifi_scan();update_ota_status();update_input_status();if(lv_screen_active()==g_shunt_picker_screen)update_shunt_picker();}
+void show_startup_notice() {
+    const uint32_t flags=g_startup_notices.exchange(0);
+    if(!flags)return;
+    auto *panel=lv_obj_create(lv_layer_top());lv_obj_set_size(panel,440,220);lv_obj_center(panel);
+    auto *text=lv_label_create(panel);lv_obj_set_width(text,400);lv_obj_set_pos(text,0,0);
+    lv_label_set_text(text,(flags&UI_NOTICE_NVS_RESET)?
+        "Settings storage was reset after an NVS error. No backup was made. Re-enter Wi-Fi and BLE settings and review pages/sources.":
+        "Startup environment error. Settings, Bluetooth or Wi-Fi could not initialize. Firmware retained; check serial logs and Settings.");
+    auto *close=make_button(panel,"DISMISS",[](lv_event_t *e){lv_obj_delete(static_cast<lv_obj_t *>(lv_event_get_user_data(e)));},200,48,panel);
+    lv_obj_align(close,LV_ALIGN_BOTTOM_MID,0,0);
+}
+void refresh_cb(lv_timer_t *){show_startup_notice();++g_ui_refreshes;g_ui_last_refresh_ms=static_cast<uint32_t>(esp_timer_get_time()/1000);render_active_page();update_wifi_status();update_wifi_scan();update_ota_status();update_input_status();if(lv_screen_active()==g_shunt_picker_screen)update_shunt_picker();}
 void previous_page_cb(lv_event_t *){g_active_page=next_enabled_page(g_active_page,-1);render_active_page();}
 void next_page_cb(lv_event_t *){g_active_page=next_enabled_page(g_active_page,+1);render_active_page();}
 void data_screen_cb(lv_event_t *){render_active_page();lv_screen_load(g_data_screen);}
@@ -1438,3 +1450,5 @@ bool ui_is_healthy() {
     const uint32_t now=static_cast<uint32_t>(esp_timer_get_time()/1000);
     return g_ui_refreshes.load()>=5 && now-g_ui_last_refresh_ms.load()<1000;
 }
+
+void ui_post_startup_notice(uint32_t flags){g_startup_notices.fetch_or(flags);}

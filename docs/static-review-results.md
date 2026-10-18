@@ -71,3 +71,9 @@ Fixed: added `find_device()` and use it for label/invalidate. Only name/model/pu
 Fixed access control: every upload/reboot requires the page token plus a random six-digit per-session PIN, shown only on the display. Fixed-buffer comparisons run without data-dependent early exit. PIN is RAM-only, not returned by page HTML and not persisted. Signed-image enforcement is **not enabled**: no signing/trust provisioning exists in the current release flow. `docs/firmware-security.md` documents unsigned-image and HTTP interception risks plus signing/NVS-encryption prerequisites.
 
 Files: OTA source/API/UI include, shared HTTP auth/page implementation, HTTP fake, `ota_auth_test.cpp`, OTA UI test, CI and security documentation. Original accepts token alone and fails regression; replacement rejects missing/wrong PIN and wrong token, accepts both, and serves no PIN value. All 25 host tests pass. Firmware attempted, dependency installation incomplete. PIN display and local upload still need device verification.
+
+## 13 — Startup health classification
+
+Fixed: image checks (UI heartbeat, selected N2K task startup, OTA layout and internal 8-bit heap) are independent from NVS/settings, BLE and Wi-Fi environment results. Environment failures log and publish a dismissible notice to the LVGL timer; they do not reject a healthy image. No N2K traffic-presence check existed or was added. Required task/layout/heap failures still reject.
+
+Files: `main.cpp`, `local_server_retry.hpp`, UI source/header, `startup_health_test.cpp`, CI. New startup_health_decision coverage confirms environment failure does not reject, while image/UI failure does. All 26 host tests pass. Firmware attempted, dependencies incomplete. Review heap thresholds (8 KiB total / 2 KiB largest internal byte-capable allocation) on hardware; CAN Open failure is currently classified with selected task startup because the bridge returns a single failure result.

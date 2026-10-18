@@ -30,3 +30,10 @@ inline StartupHealthDecision startup_health_decision(bool prerequisites,
     if(ui_healthy)return StartupHealthDecision::Confirm;
     return elapsed_us>=25000000?StartupHealthDecision::Reject:StartupHealthDecision::Wait;
 }
+
+// Environment failures are reported by the caller and never reject an image.
+inline StartupHealthDecision startup_health_decision(bool image_health,bool environment,
+                                                     bool ui_healthy,int64_t elapsed_us) {
+    (void)environment;
+    return startup_health_decision(image_health,ui_healthy,elapsed_us);
+}
