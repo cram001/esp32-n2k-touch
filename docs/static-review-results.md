@@ -31,3 +31,9 @@ Files: `n2k_input.cpp`, `n2k_bridge.cpp`, shared PGN header, existing CI gateway
 Fixed: `settings_snapshot()` retains a task-owned last-good cache, initialized before task creation. `g_wireless_input` is atomic; `ParseMessages()` requires successful CAN open. The extracted snapshot implementation is shared verbatim with the host test, avoiding an unrelated bridge refactor.
 
 Files: `n2k_bridge.cpp`, `n2k_settings_snapshot.inc`, `bridge_snapshot_test.cpp`, CI. Snapshot regression fails before/pass after; checks brightness and wireless mode survive timeout, then a successful snapshot accepts changes. All 20 host tests pass. CAN-open guard inspected; not independently simulated by this test. Firmware attempted, installation lock timeout; no firmware pass claimed.
+
+## 6 — Web window stop/re-enable race
+
+Fixed: replaced worker-handle signalling with atomic Stopped/Starting/Listening/Stopping state (`local_server_window.hpp`). OTA mutex serializes transitions, deadlines and task creation. Expiry claims Stopping before httpd_stop; re-enable rejects during Stopping, and a later restart cannot have its deadline cleared by the previous worker. No worker handle is published across tasks.
+
+Files: `ota.cpp`, `ota.hpp`, window policy/API include, `ota_window_test.cpp`, CI. New test exercises the public enable/disable code and stop interleaving; old API fails enable-during-stop assertion, replacement passes. All 21 host tests pass. Firmware attempted; install lock timeout. Real task scheduling still needs bench coverage.

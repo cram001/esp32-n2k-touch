@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <atomic>
 #include "local_http_server.hpp"
+#include "local_server_window.hpp"
 #include "local_server_retry.hpp"
 #include <cstdio>
 #include <cstring>
@@ -217,8 +218,7 @@ void ota_task(void *)
 // HTTP runs in its own server task. It never touches LVGL objects.
 httpd_handle_t g_server = nullptr;
 LocalServerStatus g_server_status{}; // protected by g_mutex
-TaskHandle_t g_server_worker=nullptr;
-std::atomic<int64_t> g_server_deadline_us{0};
+LocalServerWindow g_window;
 constexpr int64_t LOCAL_SERVER_WINDOW_US = 120000000LL;
 struct ServerHeap {
     size_t internal_free=0,internal_largest=0,internal_minimum=0;
@@ -408,29 +408,23 @@ void local_server_worker(void *) {
     ota_log_local_server_status();
     if(result.stage!=LocalServerStage::Listening) {
         log_server_heap("after failed on-demand startup",after);
-        g_server_deadline_us=0;
-        g_server_worker=nullptr;
+        xSemaphoreTake(g_mutex,portMAX_DELAY);g_window.stopped();xSemaphoreGive(g_mutex);
         vTaskDelete(nullptr);
         return;
     }
 
+    xSemaphoreTake(g_mutex,portMAX_DELAY);
+    g_window.state=LocalServerWindow::State::Listening;
+    xSemaphoreGive(g_mutex);
     ESP_LOGI(TAG,"Firmware web server enabled; selected operating mode controls radio ownership");
     for(;;) {
         const int64_t now=esp_timer_get_time();
-        bool busy=false;
-        ensure_mutex();
-        if(g_mutex && xSemaphoreTake(g_mutex,pdMS_TO_TICKS(20))==pdTRUE) {
-            busy=g_active || g_status.state==OtaState::ReadyToReboot;
-            xSemaphoreGive(g_mutex);
-        }
-        // Never expire while receiving/validating an image or while waiting for
-        // the explicit reboot after a successful local upload.
-        if(busy) {
-            g_server_deadline_us=now+LOCAL_SERVER_WINDOW_US;
-        } else {
-            const int64_t deadline=g_server_deadline_us.load();
-            if(deadline<=now) break;
-        }
+        xSemaphoreTake(g_mutex,portMAX_DELAY);
+        const bool busy=g_active || g_status.state==OtaState::ReadyToReboot;
+        if(busy)g_window.deadline=now+LOCAL_SERVER_WINDOW_US;
+        const bool stopping=g_window.stop_if_due(now,busy);
+        xSemaphoreGive(g_mutex);
+        if(stopping)break;
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 
@@ -441,8 +435,7 @@ void local_server_worker(void *) {
     const auto stopped=server_heap();
     publish_server_status({LocalServerStage::NotStarted,ESP_OK,0,0,false},stopped);
     log_server_heap("after timed web server stop",stopped);
-    g_server_deadline_us=0;
-    g_server_worker=nullptr;
+    xSemaphoreTake(g_mutex,portMAX_DELAY);g_window.stopped();xSemaphoreGive(g_mutex);
     ESP_LOGI(TAG,"Firmware web server disabled");
     vTaskDelete(nullptr);
 }
@@ -511,48 +504,8 @@ bool ota_partition_layout_valid()
         next->address!=running->address;
 }
 
-bool ota_enable_local_server(uint32_t seconds)
-{
-    ensure_mutex();
-    const auto wifi=wifi_service_get_status();
-    if(!g_mutex || seconds==0 || (wifi.state!=WifiState::AccessPoint && wifi.state!=WifiState::Connected)) return false;
-    const int64_t duration=static_cast<int64_t>(seconds)*1000000LL;
-    g_server_deadline_us=esp_timer_get_time()+duration;
-    if(g_server_worker) return true; // Extend the active window.
-    publish_server_status({LocalServerStage::Starting,ESP_OK,0,0,false},server_heap());
-    if(xTaskCreate(local_server_worker,"http_window",4096,nullptr,1,&g_server_worker)!=pdPASS) {
-        g_server_deadline_us=0;
-        g_server_worker=nullptr;
-        publish_server_status({LocalServerStage::StartFailed,ESP_ERR_NO_MEM,0,0,false},server_heap());
-        ota_log_local_server_status();
-        return false;
-    }
-    return true;
-}
+#include "ota_window_api.inc"
 
-bool ota_disable_local_server()
-{
-    ensure_mutex();
-    if(!g_server_worker) return true;
-    if(!g_mutex || xSemaphoreTake(g_mutex,pdMS_TO_TICKS(50))!=pdTRUE) return false;
-    const bool busy=g_active || g_status.state==OtaState::ReadyToReboot;
-    xSemaphoreGive(g_mutex);
-    if(busy) return false;
-    g_server_deadline_us=esp_timer_get_time();
-    return true;
-}
-
-bool ota_local_server_window_active()
-{
-    return g_server_worker!=nullptr;
-}
-
-uint32_t ota_local_server_seconds_remaining()
-{
-    if(!g_server_worker) return 0;
-    const int64_t remaining=g_server_deadline_us.load()-esp_timer_get_time();
-    return remaining>0?static_cast<uint32_t>((remaining+999999)/1000000):0;
-}
 LocalServerStatus ota_local_server_status(){
     if(!g_mutex)return {LocalServerStage::StartFailed,ESP_ERR_NO_MEM};
     xSemaphoreTake(g_mutex,portMAX_DELAY);const auto status=g_server_status;xSemaphoreGive(g_mutex);return status;
@@ -590,13 +543,13 @@ void ota_reject_running_image()
 bool ota_update_in_progress() {
     ensure_mutex();
     if (!g_mutex || xSemaphoreTake(g_mutex,pdMS_TO_TICKS(100))!=pdTRUE) return true;
-    const bool busy=g_active || g_network_change || g_status.state==OtaState::ReadyToReboot || g_server_worker!=nullptr;
+    const bool busy=g_active || g_network_change || g_status.state==OtaState::ReadyToReboot || g_window.active();
     xSemaphoreGive(g_mutex);return busy;
 }
 bool ota_begin_network_change() {
     ensure_mutex();
     if (!g_mutex || xSemaphoreTake(g_mutex,pdMS_TO_TICKS(100))!=pdTRUE) return false;
-    const bool available=!g_active && !g_network_change && g_status.state!=OtaState::ReadyToReboot && g_server_worker==nullptr;
+    const bool available=!g_active && !g_network_change && g_status.state!=OtaState::ReadyToReboot && !g_window.active();
     if (available) g_network_change=true;
     xSemaphoreGive(g_mutex);return available;
 }

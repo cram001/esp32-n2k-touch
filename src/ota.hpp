@@ -37,9 +37,8 @@ void ota_prepare();
 void ota_confirm_running_image();
 void ota_reject_running_image();
 bool ota_partition_layout_valid();
-// Local AP firmware upload is deliberately on-demand. Enabling it pauses
-// SmartShunt BLE, starts the HTTP server for the requested window, and restores
-// BLE when the window closes. Active uploads are never stopped by the timer.
+// Local Station firmware upload is on-demand. Stopping rejects a new window;
+// retry after stop completes. Active uploads are never stopped by the timer.
 bool ota_enable_local_server(uint32_t seconds = 120);
 bool ota_disable_local_server();
 bool ota_local_server_window_active();
