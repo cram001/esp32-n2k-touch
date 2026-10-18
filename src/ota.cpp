@@ -23,7 +23,6 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "wifi_service.hpp"
-#include "smartshunt_ble.hpp"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -388,18 +387,6 @@ esp_err_t reboot_handler(httpd_req_t *request) {
 }
 
 void local_server_worker(void *) {
-    const bool restore_ble=smartshunt_ble_is_running();
-    if(restore_ble && !smartshunt_ble_pause()) {
-        publish_server_status({LocalServerStage::StartFailed,ESP_FAIL,0,1,false},server_heap());
-        ESP_LOGE(TAG,"Unable to pause SmartShunt BLE for web update");
-        if(!smartshunt_ble_resume()) ESP_LOGE(TAG,"SmartShunt BLE recovery also failed");
-        g_server_worker=nullptr;
-        vTaskDelete(nullptr);
-        return;
-    }
-    // Give controller/Bluedroid deinit a short interval to return heap before
-    // creating the HTTP task stack. Large request buffers live in PSRAM.
-    vTaskDelay(pdMS_TO_TICKS(100));
     uint8_t random[16];esp_fill_random(random,sizeof(random));
     for(size_t i=0;i<sizeof(random);++i)std::snprintf(g_upload_token+i*2,3,"%02x",random[i]);
     httpd_uri_t page{};page.uri="/";page.method=HTTP_GET;page.handler=page_handler;
@@ -421,7 +408,6 @@ void local_server_worker(void *) {
     ota_log_local_server_status();
     if(result.stage!=LocalServerStage::Listening) {
         log_server_heap("after failed on-demand startup",after);
-        if(restore_ble) smartshunt_ble_resume();
         g_server_deadline_us=0;
         g_server_worker=nullptr;
         vTaskDelete(nullptr);
@@ -455,10 +441,9 @@ void local_server_worker(void *) {
     const auto stopped=server_heap();
     publish_server_status({LocalServerStage::NotStarted,ESP_OK,0,0,false},stopped);
     log_server_heap("after timed web server stop",stopped);
-    if(restore_ble && !smartshunt_ble_resume()) ESP_LOGE(TAG,"SmartShunt BLE restore failed after web update window");
     g_server_deadline_us=0;
     g_server_worker=nullptr;
-    ESP_LOGI(TAG,"Firmware web server disabled; normal BLE operation restored");
+    ESP_LOGI(TAG,"Firmware web server disabled");
     vTaskDelete(nullptr);
 }
 } // namespace
