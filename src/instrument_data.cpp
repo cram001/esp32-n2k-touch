@@ -189,7 +189,7 @@ InstrumentValue instrument_data_get(const DataFieldSelection &selection, uint8_t
     out.value = cached.value;
     out.sample_us = cached.updated_us;
     out.age_ms = static_cast<uint32_t>((esp_timer_get_time() - cached.updated_us) / 1000);
-    out.stale = out.age_ms >= NMEA_STALE_MS;
+    out.stale = out.age_ms >= (n2k_sources_is_depth(selection.metric)?3000:NMEA_STALE_MS);
     out.heading_reference = cached.heading_reference;
     out.variation_valid = variation.valid && esp_timer_get_time() - variation.updated_us < VARIATION_STALE_US;
     out.variation_radians = variation.value;
@@ -330,6 +330,9 @@ void instrument_format_value(const DataFieldSelection &selection,
 {
     if (!value_out || !unit_out || value_out_size == 0 || unit_out_size == 0) return;
     value_out[0] = '\0'; unit_out[0] = '\0';
+    if(v.valid && v.stale && n2k_sources_is_depth(selection.metric) && v.age_ms<30000) {
+        std::snprintf(value_out,value_out_size,"STALE");return;
+    }
     if (!v.valid || v.stale) { std::snprintf(value_out, value_out_size, "--"); return; }
 
     const DataMetric metric = selection.metric;

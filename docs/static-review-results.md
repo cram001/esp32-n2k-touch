@@ -77,3 +77,9 @@ Files: OTA source/API/UI include, shared HTTP auth/page implementation, HTTP fak
 Fixed: image checks (UI heartbeat, selected N2K task startup, OTA layout and internal 8-bit heap) are independent from NVS/settings, BLE and Wi-Fi environment results. Environment failures log and publish a dismissible notice to the LVGL timer; they do not reject a healthy image. No N2K traffic-presence check existed or was added. Required task/layout/heap failures still reject.
 
 Files: `main.cpp`, `local_server_retry.hpp`, UI source/header, `startup_health_test.cpp`, CI. New startup_health_decision coverage confirms environment failure does not reject, while image/UI failure does. All 26 host tests pass. Firmware attempted, dependencies incomplete. Review heap thresholds (8 KiB total / 2 KiB largest internal byte-capable allocation) on hardware; CAN Open failure is currently classified with selected task startup because the bridge returns a single failure result.
+
+## 14 — Depth freshness and visible cue
+
+Fixed: depth-specific 3 s stale threshold (including automatic failover/options and DepthDisplay fallback); slow metrics retain 30 s. Valid stale depth displays STALE from 3 s through <30 s, then blanks. Filtering resets after a 3 s sample gap; stale values cannot be smoothed into apparently live data.
+
+Files: instrument/source/filter implementations, depth/format/source tests (already CI-registered). New 3 s filter assertion fails before/pass after; format test checks STALE then --, source test checks exact threshold. All 26 host tests pass. Firmware attempt failed during dependency installation: a host-test library symlink conflicted with PlatformIO install; moved the temporary dependency directory aside and restarted a clean install. No build pass claimed.

@@ -28,7 +28,7 @@ int main(){
     n2k_sources_publish(DataMetric::Depth,21,255,255,22);
     n2k_sources_publish(DataMetric::Depth,11,255,255,99);
     assert(n2k_sources_get(DataMetric::Depth,0,value)&&value.value==22);
-    fake_time_us+=29999000;assert(n2k_sources_get(DataMetric::Depth,0,value)&&!value.stale);
+    fake_time_us+=2999000;assert(n2k_sources_get(DataMetric::Depth,0,value)&&!value.stale);
     fake_time_us+=1000;assert(n2k_sources_get(DataMetric::Depth,0,value)&&value.stale);
     // Greater than 1000 metres invalidates immediately, before unit conversions or offsets.
     n2k_sources_publish(DataMetric::Depth,21,255,255,1000.01);

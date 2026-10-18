@@ -58,6 +58,7 @@ bool temporary_source_exists(const N2kSourceChoice &source) {
     for(const auto &r:records)if(r.used && !r.source.name && matches(source,r.source)){found=true;break;}
     xSemaphoreGive(mux);return found;
 }
+int64_t stale_us(DataMetric metric){return n2k_sources_is_depth(metric)?3000000:30000000;}
 uint8_t choice_id(DataMetric metric, uint8_t field) {
     return n2k_sources_is_gps(metric) ? N2K_GPS_CHOICE : field;
 }
@@ -78,7 +79,7 @@ uint16_t selected(DataMetric metric, uint8_t field) {
         if(choice.mode!=SourceChoiceMode::Automatic)return current;
     }
     const int64_t now=esp_timer_get_time();
-    if(current==NO_RECORD || !records[current].used || !records[current].value.valid || now-records[current].updated>=30000000) {
+    if(current==NO_RECORD || !records[current].used || !records[current].value.valid || now-records[current].updated>=stale_us(metric)) {
         uint16_t best=current;
         for(size_t i=0;i<records.size();++i) {
             const auto &r=records[i];
@@ -307,7 +308,7 @@ bool n2k_sources_get(DataMetric metric,uint8_t field,InstrumentValue &out) {
     out.source_kind=copy.source.kind;out.source_instance=copy.source.instance;
     if(!copy.used)return handled;
     out.age_ms=static_cast<uint32_t>(std::max<int64_t>(0,now-copy.updated)/1000);
-    out.stale=out.age_ms>=30000;
+    out.stale=out.age_ms>=stale_us(metric)/1000;
     out.variation_valid=variation.used && variation.value.valid && now-variation.updated<30000000;
     out.variation_radians=variation.value.value;
     if(n2k_sources_is_depth(metric) && out.valid)out.valid=n2k_depth_adjust(depth,out.value,out.depth_offset_valid,out.depth_offset_m,out.value);
@@ -321,7 +322,7 @@ size_t n2k_sources_options(DataMetric metric,N2kSourceOption *out,size_t capacit
     xSemaphoreTake(mux,portMAX_DELAY);
     for(const auto &r:records){
         if(!r.used || r.metric!=metric || count>=capacity)continue;
-        out[count].choice=r.source;out[count].stale=now-r.updated>=30000000;
+        out[count].choice=r.source;out[count].stale=now-r.updated>=stale_us(metric);
         label(r,count,out[count].label.data(),out[count].label.size());++count;
     }
     xSemaphoreGive(mux);return count;
