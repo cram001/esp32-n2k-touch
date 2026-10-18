@@ -61,3 +61,7 @@ Files: transport `.cpp/.h`, bridge, TWAI fake and existing CI transport test. Or
 Fixed: source/device tables and the legacy instrument cache use statically allocated FreeRTOS mutexes instead of portMUX interrupt masking. Static allocation is enabled in the checked-in sdkconfig. No ISR accesses either cache; formatting/copies/loops no longer disable interrupts. No new heap allocation.
 
 Files: `n2k_sources.cpp`, `instrument_data.cpp`, instrument FreeRTOS fake, `source_lock_test.cpp`, CI. Regression instruments critical-section entry; fails before/pass after for source formatting/get/reset and instrument reset. All 23 host tests pass. Firmware attempted, dependencies incomplete. Mutex contention/latency needs device observation.
+
+## 11 — Non-allocating source lookups
+
+Fixed: added `find_device()` and use it for label/invalidate. Only name/model/publish create slots. Files: `n2k_sources.cpp`, `source_lookup_test.cpp`, CI. Original fails after invalidating 200 unseen addresses; replacement consumes no slots, label lookup consumes none, and later NAME/manufacturer discovery succeeds. All 24 host tests pass. Firmware attempted; package installation incomplete.

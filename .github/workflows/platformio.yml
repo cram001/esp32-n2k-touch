@@ -62,6 +62,8 @@ jobs:
           /tmp/source_failover_test
           g++ -std=c++17 -Wall -Wextra -I tests/host/instrument -I tests/host -I src src/instrument_data.cpp src/n2k_sources.cpp tests/host/nvs_fake.cpp tests/host/source_lock_test.cpp -o /tmp/source_lock_test
           /tmp/source_lock_test
+          g++ -std=c++17 -Wall -Wextra -I tests/host/instrument -I tests/host -I src tests/host/source_lookup_test.cpp tests/host/nvs_fake.cpp -o /tmp/source_lookup_test
+          /tmp/source_lookup_test
           g++ -std=c++17 -Wall -Wextra -I tests/host/instrument -I tests/host -I src src/instrument_data.cpp src/n2k_sources.cpp tests/host/nvs_fake.cpp tests/host/format_test.cpp -o /tmp/format_test
           /tmp/format_test
           g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -I src src/n2k_waypoints.cpp tests/host/waypoints_test.cpp -o /tmp/waypoints_test

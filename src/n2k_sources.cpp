@@ -37,6 +37,10 @@ bool initialized = false;
 uint32_t display_context = 0;
 using Bytes = std::array<uint8_t,460>;
 
+Device *find_device(uint8_t address) {
+    for(auto &d:devices)if(d.used && d.address==address)return &d;
+    return nullptr;
+}
 Device *device(uint8_t address) {
     Device *free = nullptr;
     for (auto &d : devices) { if (d.used && d.address == address) return &d; if (!d.used && !free) free = &d; }
@@ -88,7 +92,7 @@ uint16_t selected(DataMetric metric, uint8_t field) {
     return current;
 }
 void label(const Record &r, size_t index, char *out, size_t capacity) {
-    const Device *d = device(r.source.address);
+    const Device *d = find_device(r.source.address);
     const char *model = d && d->name == r.source.name && d->model[0] ? d->model.data() : "N2K device";
     char instance[32]{};
     if (r.metric >= DataMetric::EngineRpm && r.metric <= DataMetric::EngineTorque) std::snprintf(instance,sizeof(instance),"Engine %u",r.source.instance);
@@ -258,7 +262,7 @@ void n2k_sources_publish(DataMetric metric,uint8_t address,uint8_t instance,uint
 void n2k_sources_invalidate(DataMetric metric,uint8_t address,uint8_t instance,uint8_t kind) {
     if(address>=254)return;
     xSemaphoreTake(mux,portMAX_DELAY);
-    const Device *d=device(address);
+    const Device *d=find_device(address);
     N2kSourceChoice source;source.name=d?d->name:0;source.address=address;
     source.instance=instance;source.kind=kind;
     for(auto &r:records)
