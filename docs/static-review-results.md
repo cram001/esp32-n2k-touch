@@ -15,3 +15,7 @@ Test: `ota_ui_test.cpp`, added to CI. Fails against original callbacks; passes w
 Fixed: stale (30 s) or invalid automatic metric/GPS selections move to a fresher valid record. Manual choices remain locked. Publish reclaims records idle for 10 minutes and clears automatic indices before reuse; no persisted bytes changed.
 
 Files: `n2k_sources.cpp`, `source_failover_test.cpp`, CI workflow. New test fails before the fix and covers silent first source, invalidation, GPS pairing, manual lock and full-table expiry. All 19 host tests pass (same LeakSanitizer limitation). `pio run` attempted after this item; bounded attempt timed out during package installation, so firmware remains unverified.
+
+## 3 — Silent W2K connections
+
+Fixed in `n2k_input.cpp`: 10-second receive silence closes the socket, resets framing and schedules the existing 5-second retry. TCP keepalive uses 10 s idle, 3 s interval, 3 probes; setup failures close/retry. Extended gateway socket fake and existing CI-registered `n2k_input_test.cpp`; new silent-peer assertion fails before and passes after, including the retry interval. All 19 host tests pass. `pio run` attempted, package-install lock did not resolve within the bounded local attempt; no firmware pass claimed.

@@ -29,3 +29,7 @@ int gateway_getsockopt(int,int,int,int *,socklen_t *);
 int gateway_recv(int,char *,size_t,int);
 int gateway_close(int);
 int gateway_fcntl(int,int,int);
+
+constexpr int SO_KEEPALIVE=9,TCP_KEEPIDLE=4,TCP_KEEPINTVL=5,TCP_KEEPCNT=6;
+#define setsockopt gateway_setsockopt
+int gateway_setsockopt(int,int,int,const void *,socklen_t);

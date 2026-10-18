@@ -63,6 +63,15 @@ void task(void *) {
                 inet_pton(AF_INET, current.ip.data(), &address.sin_addr);
                 socket_fd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
                 if (socket_fd >= 0 && fcntl(socket_fd, F_SETFL, O_NONBLOCK) == 0) {
+                    const int enabled=1,idle=10,interval=3,probes=3;
+                    if(setsockopt(socket_fd,SOL_SOCKET,SO_KEEPALIVE,&enabled,sizeof(enabled))!=0 ||
+                       setsockopt(socket_fd,IPPROTO_TCP,TCP_KEEPIDLE,&idle,sizeof(idle))!=0 ||
+                       setsockopt(socket_fd,IPPROTO_TCP,TCP_KEEPINTVL,&interval,sizeof(interval))!=0 ||
+                       setsockopt(socket_fd,IPPROTO_TCP,TCP_KEEPCNT,&probes,sizeof(probes))!=0) {
+                        const int error=errno;close(socket_fd);socket_fd=-1;
+                        retry_at=now+5000;set_status("Keepalive setup failed; retrying",error);
+                        vTaskDelay(pdMS_TO_TICKS(20));continue;
+                    }
                     const int result = connect(socket_fd, reinterpret_cast<sockaddr *>(&address), sizeof(address));
                     if (result == 0 || errno == EINPROGRESS) {
                         connecting = result != 0; connect_at = now; last_data = now;
@@ -113,7 +122,10 @@ void task(void *) {
                     const int error = count == 0 ? 0 : errno;
                     close(socket_fd); socket_fd = -1; retry_at = now + 5000;
                     set_status("Gateway disconnected; retrying", error);
-                } else if (now - last_data > 5000) set_status("Connected; no recent gateway data");
+                } else if (now-last_data>=10000) {
+                    close(socket_fd);socket_fd=-1;retry_at=now+5000;
+                    decoder.reset();set_status("Gateway silent; reconnecting",ETIMEDOUT);
+                }
             }
         }
         if(!stack_logged && xTaskGetTickCount()-started>=pdMS_TO_TICKS(5000)) {
