@@ -37,3 +37,9 @@ Files: `n2k_bridge.cpp`, `n2k_settings_snapshot.inc`, `bridge_snapshot_test.cpp`
 Fixed: replaced worker-handle signalling with atomic Stopped/Starting/Listening/Stopping state (`local_server_window.hpp`). OTA mutex serializes transitions, deadlines and task creation. Expiry claims Stopping before httpd_stop; re-enable rejects during Stopping, and a later restart cannot have its deadline cleared by the previous worker. No worker handle is published across tasks.
 
 Files: `ota.cpp`, `ota.hpp`, window policy/API include, `ota_window_test.cpp`, CI. New test exercises the public enable/disable code and stop interleaving; old API fails enable-during-stop assertion, replacement passes. All 21 host tests pass. Firmware attempted; install lock timeout. Real task scheduling still needs bench coverage.
+
+## 7 — Lossless OTA state writes
+
+Fixed: `set_active` and `set_status` use portMAX_DELAY, so transient contention cannot drop clears or progress/error updates. Failed claims never set active; successful ReadyToReboot deliberately retains the claim until reboot.
+
+Files: `ota.cpp`, shared `ota_state.inc`, `ota_state_test.cpp`, CI. Contention fake rejects timed takes and accepts blocking takes: old implementation fails clearing active, replacement passes active/status/clamping/null-message checks. All 22 host tests pass. Firmware attempted, package installation still incomplete; no firmware pass claimed.

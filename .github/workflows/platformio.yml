@@ -50,6 +50,8 @@ jobs:
           /tmp/ota_ui_test
           g++ -std=c++17 -Wall -Wextra -I tests/host -I src tests/host/ota_window_test.cpp -o /tmp/ota_window_test
           /tmp/ota_window_test
+          g++ -std=c++17 -Wall -Wextra -I tests/host -I src tests/host/ota_state_test.cpp -o /tmp/ota_state_test
+          /tmp/ota_state_test
           g++ -std=c++17 -Wall -Wextra -I tests/host/wifi -I tests/host -I src src/wifi_config.cpp tests/host/wifi_service_test.cpp -o /tmp/wifi_service_test
           /tmp/wifi_service_test
           g++ -std=c++17 -Wall -Wextra -I tests/host/instrument -I tests/host -I src src/instrument_data.cpp src/n2k_sources.cpp tests/host/nvs_fake.cpp tests/host/heading_test.cpp -o /tmp/heading_test
