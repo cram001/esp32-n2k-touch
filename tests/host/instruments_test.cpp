@@ -16,6 +16,9 @@ void send(tN2kMsg &message,uint8_t source=10){message.Source=source;n2k_instrume
 int main(){
     n2k_instruments_reset();assert(n2k_instruments_init());assert(n2k_instruments_init());
     fake_nvs::clear();assert(n2k_sources_init());tN2kMsg message;
+    SetN2kPGN128259(message,0,2.5,8.0);send(message);close_to(DataMetric::BoatSpeed,2.5); // STW uses water speed.
+    SetN2kPGN129026(message,0,N2khr_true,1.0,4.5);send(message);close_to(DataMetric::SpeedOverGround,4.5);
+    close_to(DataMetric::BoatSpeed,2.5); // Ground speed cannot overwrite STW.
     // Exercise the full wireless path with real library-encoded PGN bytes.
     SetN2kPGN128267(message,0,10,-2);std::string wire="A123456.789 0AFF3 1F50B ";
     char byte[3];for(int i=0;i<message.DataLen;++i){std::snprintf(byte,sizeof(byte),"%02X",message.Data[i]);wire+=byte;}wire+="\r\n";

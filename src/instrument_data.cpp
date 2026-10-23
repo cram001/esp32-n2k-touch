@@ -119,7 +119,7 @@ const char *instrument_metric_name(DataMetric metric)
 {
     switch (metric) {
     case DataMetric::Depth: return "Depth";
-    case DataMetric::BoatSpeed: return "Boat speed";
+    case DataMetric::BoatSpeed: return "STW (through water)";
     case DataMetric::SpeedOverGround: return "SOG";
     case DataMetric::CourseOverGround: return "COG";
     case DataMetric::Heading: return "Heading";

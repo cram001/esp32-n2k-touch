@@ -1,11 +1,12 @@
 #pragma once
 #include "app_settings.hpp"
 
-enum class MetricGroup : uint8_t { General, Navigation, DepthSpeed, Wind, Engine, Electrical, Tanks, Environment, Count };
+enum class MetricGroup : uint8_t { General, Navigation, Depth, Speed, Wind, Engine, Electrical, Tanks, Environment, Count };
 inline const char *metric_group_name(MetricGroup group) {
     switch(group) {
     case MetricGroup::Navigation:return "Navigation & steering";
-    case MetricGroup::DepthSpeed:return "Depth, speed & log";
+    case MetricGroup::Depth:return "Depth";
+    case MetricGroup::Speed:return "Speed & log";
     case MetricGroup::Wind:return "Wind";
     case MetricGroup::Engine:return "Engine & transmission";
     case MetricGroup::Electrical:return "Electrical & solar";
@@ -18,7 +19,9 @@ inline MetricGroup metric_group(DataMetric m) {
     switch(m) {
     case DataMetric::None:return MetricGroup::General;
     case DataMetric::Depth:case DataMetric::DepthTransducer:case DataMetric::DepthBelowKeel:
-    case DataMetric::DepthWaterline:case DataMetric::DepthSensorOffset:case DataMetric::BoatSpeed:case DataMetric::TripDistance:return MetricGroup::DepthSpeed;
+    case DataMetric::DepthWaterline:case DataMetric::DepthSensorOffset:return MetricGroup::Depth;
+    case DataMetric::BoatSpeed:case DataMetric::SpeedOverGround:case DataMetric::WaypointVmg:
+    case DataMetric::TripDistance:return MetricGroup::Speed;
     case DataMetric::ApparentWindSpeed:case DataMetric::ApparentWindAngle:case DataMetric::TrueWindSpeed:case DataMetric::TrueWindAngle:return MetricGroup::Wind;
     case DataMetric::TankLevel:case DataMetric::TankCapacity:return MetricGroup::Tanks;
     case DataMetric::WaterTemperature:case DataMetric::AirTemperature:case DataMetric::CabinTemperature:
