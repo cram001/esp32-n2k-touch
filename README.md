@@ -110,6 +110,23 @@ Wall mounted case 3D printed:  https://cults3d.com/en/3d-model/home/flush-mount-
 
 Tip: when pulling the 4 wires (can H, can L, DC pos, DC neg) through the pass-through, keep them long. Shorten them and strip them only after. A bit of soap in the pass-thru might help. It's a tight fit!
 
+Notes:
+
+1) The files in the sub folder in this project are slightly modified from those you will find in cults3d.com
+     a) Added opening for USB port
+     b) Added opening for 3 side buttons
+     c) Added extra width clearance for the recessed screen
+
+2) You will need some metric 2.5mm screws to secure the back of the esp32 to the enclosure.
+
+3) Pushing the AWG 22-24 wires (4x) through the back opening is possible. Take your time. Having some extra length available makes it easier and cut them to length and strip the ends for the connector after all 4 wires are pulled through. It's also possible to drill a hole through the back of the case as a wire pass-thru.
+
+============================
+         WARNING
+============================
+When securing the ESP32 to the enclosure DO NOT OVERTIGHTEN the screws, as it is possible to separate the LCD glass cover from the LCD.  If additional clearance is required, use a dremel, exacto or similar tool to increase clearances as required
+============================
+
 ## Functions
 
 - Receive NMEA 2000 over the onboard CAN/TWAI interface.
