@@ -1,13 +1,24 @@
 #include "instrument_data.hpp"
 #include "smartshunt_ble.hpp"
+#include "n2k_instruments.hpp"
+#include "n2k_sources.hpp"
+#include "N2kMessages.h"
 #include <cassert>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <limits>
 int64_t fake_time_us=1000000;
+uint32_t N2kMillis(){return static_cast<uint32_t>(fake_time_us/1000);}
+uint64_t N2kMillis64(){return static_cast<uint64_t>(fake_time_us/1000);}
 SmartShuntData smartshunt_ble_get_data(size_t) { return {}; }
 constexpr double DEG = 3.14159265358979323846 / 180.0;
+void heading(double radians,HeadingReference ref){
+ tN2kMsg m;SetN2kPGN127250(m,0,std::isfinite(radians)?radians:N2kDoubleNA,N2kDoubleNA,N2kDoubleNA,
+   ref==HeadingReference::True?N2khr_true:ref==HeadingReference::Magnetic?N2khr_magnetic:static_cast<tN2kHeadingReference>(3));
+ m.Source=10;n2k_instruments_receive(m);
+}
+void variation(double radians){tN2kMsg m;SetN2kPGN127258(m,0,N2kmagvar_Manual,0,radians);m.Source=10;n2k_instruments_receive(m);}
 void expect(HeadingReference target, const char *number, const char *unit) {
     DataFieldSelection field{}; field.metric=DataMetric::Heading;
     UnitsSettings settings{}; settings.heading_reference=target;
@@ -17,44 +28,44 @@ void expect(HeadingReference target, const char *number, const char *unit) {
     assert(std::strcmp(units,unit)==0);
 }
 int main() {
-    instrument_data_update_heading(100*DEG,HeadingReference::Magnetic);
+    heading(100*DEG,HeadingReference::Magnetic);
     expect(HeadingReference::Magnetic,"100","°M");
     expect(HeadingReference::True,"--","°T");
-    instrument_data_update_variation(15*DEG); // East variation.
+    variation(15*DEG); // East variation.
     expect(HeadingReference::True,"115","°T");
-    instrument_data_update_heading(115*DEG,HeadingReference::True);
+    heading(115*DEG,HeadingReference::True);
     expect(HeadingReference::Magnetic,"100","°M");
-    instrument_data_update_variation(-20*DEG); // West variation.
+    variation(-20*DEG); // West variation.
     expect(HeadingReference::Magnetic,"135","°M");
-    instrument_data_update_heading(350*DEG,HeadingReference::Magnetic);
-    instrument_data_update_variation(15*DEG);
+    heading(350*DEG,HeadingReference::Magnetic);
+    variation(15*DEG);
     expect(HeadingReference::True,"5","°T");
-    instrument_data_update_heading(5*DEG,HeadingReference::True);
+    heading(5*DEG,HeadingReference::True);
     expect(HeadingReference::Magnetic,"350","°M");
-    instrument_data_update_heading(359.8*DEG,HeadingReference::True);
+    heading(359.8*DEG,HeadingReference::True);
     expect(HeadingReference::True,"0","°T");
-    instrument_data_update_heading(-1*DEG,HeadingReference::True);
+    heading(359*DEG,HeadingReference::True);
     expect(HeadingReference::True,"359","°T");
-    instrument_data_update_heading(std::numeric_limits<double>::quiet_NaN(),HeadingReference::True);
+    heading(std::numeric_limits<double>::quiet_NaN(),HeadingReference::True);
     expect(HeadingReference::True,"359","°T");
     fake_time_us+=61000000;
-    instrument_data_update_heading(20*DEG,HeadingReference::True);
+    heading(20*DEG,HeadingReference::True);
     expect(HeadingReference::Magnetic,"--","°M"); // Variation expired.
     expect(HeadingReference::True,"20","°T");
-    instrument_data_update_variation(4); // Invalid variation cannot revive cache.
+    variation(3.2); // Invalid variation cannot revive cache.
     expect(HeadingReference::Magnetic,"--","°M");
     fake_time_us+=30000000;
     expect(HeadingReference::True,"--",""); // Heading expired.
-    instrument_data_update_nmea(DataMetric::Heading,42*DEG);
-    expect(HeadingReference::True,"--","°T"); // Unknown reference.
+    instrument_data_reset_nmea();heading(42*DEG,HeadingReference::Unknown);
+    expect(HeadingReference::True,"--",""); // Unknown wire reference is ignored.
     DataFieldSelection cog{}; cog.metric=DataMetric::CourseOverGround;
-    instrument_data_update_nmea(cog.metric,42*DEG);
+    tN2kMsg course;SetN2kPGN129026(course,0,N2khr_true,42*DEG,0);course.Source=10;n2k_instruments_receive(course);
     UnitsSettings units{};units.heading_reference=HeadingReference::Magnetic;
     char value[32], label[16];
     instrument_format_value(cog,units,instrument_data_get(cog),value,sizeof(value),label,sizeof(label));
-    assert(std::strcmp(value,"42")==0 && std::strcmp(label,"°")==0);
-    instrument_data_update_heading(20*DEG,HeadingReference::True);
-    instrument_data_update_variation(2*DEG);
+    assert(std::strcmp(value,"42")==0 && std::strcmp(label,"°T")==0);
+    heading(20*DEG,HeadingReference::True);
+    variation(2*DEG);
     instrument_data_reset_nmea();
     assert(!instrument_data_get(cog).valid);
     expect(HeadingReference::True,"--","");

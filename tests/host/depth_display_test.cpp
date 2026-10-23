@@ -33,5 +33,7 @@ int main(){
     feet(33.1,33.1);feet(33.2,33.1);feet(33.1,33.1);feet(33.2,33.1);feet(33.3,33.3);feet(33.2,33.3);feet(33.2,33.2);
     sample(10.2,10.2); // changing units resets even on the same sample
     v.sample_us+=30000000;sample(10.3,10.3); // loss while page is hidden
+    v.age_ms=2999;v.stale=false;assert(!filter.apply(field,DepthUnit::Metres,v).stale);
+    v.age_ms=3000;assert(filter.apply(field,DepthUnit::Metres,v).stale);
     std::puts("PASS: depth alternation, fresh samples, trends, reversals, jumps, source/settings resets, loss, signed clearance and feet");
 }

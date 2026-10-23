@@ -13,7 +13,8 @@ using Bytes=std::vector<unsigned char>;
 std::map<std::string,Bytes> durable,pending;
 bool namespace_exists=false,fail_commit=false;
 unsigned commits=0;
-int nvs_flash_init(){return ESP_OK;}
+int flash_error=ESP_OK;
+int nvs_flash_init(){int result=flash_error;flash_error=ESP_OK;return result;}
 int nvs_flash_erase(){durable.clear();namespace_exists=false;return ESP_OK;}
 int nvs_open(const char *name,int mode,nvs_handle_t *handle){
     assert(std::strcmp(name,"app")==0);
@@ -152,21 +153,23 @@ int main(){
     for(const auto &item:before_brightness_reset)
         if(item.first!="day_br" && item.first!="night_br")assert(durable.at(item.first)==item.second);
 
-    auto config=expected.wifi;assert(wifi_config_valid(config,&reason));
-    config.ap_password.fill(0);assert(!wifi_config_valid(config,&reason));
-    std::strcpy(config.ap_password.data(),"1234567");assert(!wifi_config_valid(config,&reason));
-    std::strcpy(config.ap_password.data(),"12345678");assert(wifi_config_valid(config,&reason));
-    config.ap_password.fill('x');config.ap_password[63]=0;assert(wifi_config_valid(config,&reason));
-    config.ap_password[63]='x';config.ap_password[64]=0;assert(!wifi_config_valid(config,&reason));
+    auto config=expected.wifi;assert(!wifi_config_valid(config,&reason));
     config.mode=WifiMode::Station;assert(wifi_config_valid(config,&reason));
     config.password[5]='z';assert(!wifi_config_valid(config,&reason));
     config.open_network=true;assert(wifi_config_valid(config,&reason));
     config.ssid.fill(0);assert(!wifi_config_valid(config,&reason));
     config.enabled=false;assert(wifi_config_valid(config,&reason));
 
+    // Corrupt bool representations must be normalized before typed copies.
+    assert(settings_save(expected));
+    durable["shunts_v2"][4+offsetof(SmartShuntConfig,configured)]=254;
+    reboot=settings_load();unsigned char configured;
+    std::memcpy(&configured,&reboot.smartshunts[0].configured,1);assert(configured==0);
     // A malformed/future current blob must never be read as valid credentials.
     reset();namespace_exists=true;durable["wifi_v3"]=Bytes(204,0xff);
     const auto unknown=durable["wifi_v3"];reboot=settings_load();
     assert(!reboot.wifi.enabled && reboot.wifi.password[0]==0 && durable["wifi_v3"]==unknown);
+    flash_error=ESP_ERR_NVS_NO_FREE_PAGES;assert(settings_init());
+    assert(settings_take_reset_notice());assert(!settings_take_reset_notice());
     std::puts("PASS: brightness hold timing, recovery/reboot/failed-save preservation, defaults, migration, Wi-Fi credentials, AP/station, SmartShunts/pages, password bounds and invalid schema");
 }

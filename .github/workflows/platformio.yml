@@ -34,6 +34,8 @@ jobs:
         run: |
           g++ -std=c++17 -Wall -Wextra -I tests/host -I src src/app_settings.cpp src/wifi_config.cpp tests/host/settings_test.cpp -o /tmp/settings_test
           /tmp/settings_test
+          g++ -std=c++17 -Wall -Wextra -I src src/wifi_config.cpp tests/host/station_config_test.cpp -o /tmp/station_config_test
+          /tmp/station_config_test
           g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -I src tests/host/victron_discovery_test.cpp -o /tmp/victron_discovery_test
           /tmp/victron_discovery_test
           g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -I tests/host/ble -I tests/host -I src tests/host/smartshunt_discovery_test.cpp -o /tmp/smartshunt_discovery_test
@@ -46,12 +48,26 @@ jobs:
           /tmp/depth_display_test
           g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -I tests/host/http -I tests/host -I src tests/host/local_http_server_test.cpp -o /tmp/local_http_server_test
           /tmp/local_http_server_test
+          g++ -std=c++17 -Wall -Wextra -I src tests/host/startup_health_test.cpp -o /tmp/startup_health_test
+          /tmp/startup_health_test
+          g++ -std=c++17 -Wall -Wextra -I tests/host -I src tests/host/ota_ui_test.cpp -o /tmp/ota_ui_test
+          /tmp/ota_ui_test
+          g++ -std=c++17 -Wall -Wextra -I tests/host -I src tests/host/ota_window_test.cpp -o /tmp/ota_window_test
+          /tmp/ota_window_test
+          g++ -std=c++17 -Wall -Wextra -I tests/host -I src tests/host/ota_state_test.cpp -o /tmp/ota_state_test
+          /tmp/ota_state_test
+          g++ -std=c++17 -Wall -Wextra -I tests/host/http -I tests/host -I src tests/host/ota_auth_test.cpp -o /tmp/ota_auth_test
+          /tmp/ota_auth_test
           g++ -std=c++17 -Wall -Wextra -I tests/host/wifi -I tests/host -I src src/wifi_config.cpp tests/host/wifi_service_test.cpp -o /tmp/wifi_service_test
           /tmp/wifi_service_test
-          g++ -std=c++17 -Wall -Wextra -I tests/host/instrument -I tests/host -I src src/instrument_data.cpp src/n2k_sources.cpp tests/host/nvs_fake.cpp tests/host/heading_test.cpp -o /tmp/heading_test
-          /tmp/heading_test
           g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -I tests/host/instrument -I tests/host -I src tests/host/sources_test.cpp tests/host/nvs_fake.cpp -o /tmp/sources_test
           /tmp/sources_test
+          g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -I tests/host/instrument -I tests/host -I src tests/host/source_failover_test.cpp tests/host/nvs_fake.cpp -o /tmp/source_failover_test
+          /tmp/source_failover_test
+          g++ -std=c++17 -Wall -Wextra -I tests/host/instrument -I tests/host -I src src/instrument_data.cpp src/n2k_sources.cpp tests/host/nvs_fake.cpp tests/host/source_lock_test.cpp -o /tmp/source_lock_test
+          /tmp/source_lock_test
+          g++ -std=c++17 -Wall -Wextra -I tests/host/instrument -I tests/host -I src tests/host/source_lookup_test.cpp tests/host/nvs_fake.cpp -o /tmp/source_lookup_test
+          /tmp/source_lookup_test
           g++ -std=c++17 -Wall -Wextra -I tests/host/instrument -I tests/host -I src src/instrument_data.cpp src/n2k_sources.cpp tests/host/nvs_fake.cpp tests/host/format_test.cpp -o /tmp/format_test
           /tmp/format_test
           g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -I src src/n2k_waypoints.cpp tests/host/waypoints_test.cpp -o /tmp/waypoints_test
@@ -60,6 +76,10 @@ jobs:
           /tmp/actisense_test
           g++ -std=c++17 -Wall -Wextra -I tests/host/gateway -I src src/n2k_input.cpp src/actisense_ascii.cpp tests/host/n2k_input_test.cpp -o /tmp/n2k_input_test
           /tmp/n2k_input_test
+          g++ -std=c++17 -Wall -Wextra -Werror -I src tests/host/receive_pgns_test.cpp -o /tmp/receive_pgns_test
+          /tmp/receive_pgns_test
+          g++ -std=c++17 -Wall -Wextra -I tests/host -I src tests/host/bridge_snapshot_test.cpp -o /tmp/bridge_snapshot_test
+          /tmp/bridge_snapshot_test
 
       - name: Test asynchronous CAN transmit ownership
         shell: bash
@@ -72,6 +92,8 @@ jobs:
         run: |
           g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -I src tests/host/graph_history_test.cpp -o /tmp/graph_history_test
           /tmp/graph_history_test
+          g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -I src tests/host/metric_groups_test.cpp -o /tmp/metric_groups_test
+          /tmp/metric_groups_test
           g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/host -I src src/tile_labels.cpp tests/host/nvs_fake.cpp tests/host/tile_labels_test.cpp -o /tmp/tile_labels_test
           /tmp/tile_labels_test
 
@@ -101,6 +123,8 @@ jobs:
         shell: bash
         run: |
           lib=.pio/libdeps/waveshare-touch-4/NMEA2000-library/src
+          g++ -std=c++17 -Wall -Wextra -I tests/host/instrument -I tests/host -I src -I "$lib" src/instrument_data.cpp src/n2k_sources.cpp src/n2k_instruments.cpp src/n2k_waypoints.cpp "$lib/N2kMsg.cpp" "$lib/N2kMessages.cpp" "$lib/N2kStream.cpp" tests/host/nvs_fake.cpp tests/host/heading_test.cpp -o /tmp/heading_test
+          /tmp/heading_test
           g++ -std=c++17 -Wall -Wextra -fsanitize=address,undefined -I tests/host/instrument -I tests/host -I src -I "$lib" src/n2k_sources.cpp src/n2k_instruments.cpp src/n2k_waypoints.cpp src/actisense_ascii.cpp "$lib/N2kMsg.cpp" "$lib/N2kMessages.cpp" "$lib/N2kStream.cpp" tests/host/nvs_fake.cpp tests/host/instruments_test.cpp -o /tmp/instruments_test
           /tmp/instruments_test
           g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/host/instrument -I tests/host -I src -I "$lib" src/n2k_sources.cpp src/n2k_instruments.cpp src/n2k_waypoints.cpp "$lib/N2kMsg.cpp" "$lib/N2kMessages.cpp" "$lib/N2kStream.cpp" tests/host/nvs_fake.cpp tests/host/additional_fields_test.cpp -o /tmp/additional_fields_test

@@ -7,12 +7,11 @@
 
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "smartshunt_ble.hpp"
 #include "n2k_sources.hpp"
 
 namespace {
-constexpr uint32_t NMEA_STALE_MS = 30000;
-constexpr int64_t VARIATION_STALE_US = 30000000;
 constexpr double MPS_TO_KNOTS = 1.94384449244;
 constexpr double MPS_TO_KPH = 3.6;
 constexpr double M_TO_FT = 3.280839895;
@@ -20,21 +19,6 @@ constexpr double M_TO_YD = 1.093613298;
 constexpr double M_TO_NM = 1.0 / 1852.0;
 constexpr double M_TO_KM = 0.001;
 constexpr double RAD_TO_DEG = 57.29577951308232;
-constexpr size_t METRIC_COUNT = static_cast<size_t>(DataMetric::Count);
-
-struct CachedValue {
-    bool valid = false;
-    double value = 0.0;
-    int64_t updated_us = 0;
-    HeadingReference heading_reference = HeadingReference::Unknown;
-};
-
-std::array<CachedValue, METRIC_COUNT> g_nmea{};
-CachedValue g_variation{};
-uint32_t g_nmea_context=0;
-portMUX_TYPE g_nmea_mux = portMUX_INITIALIZER_UNLOCKED;
-
-size_t metric_index(DataMetric metric) { return static_cast<size_t>(metric); }
 
 bool is_angle(DataMetric metric)
 {
@@ -106,50 +90,7 @@ InstrumentValue smartshunt_value(const DataFieldSelection &selection)
 }
 }
 
-void instrument_data_reset_nmea() {
-    n2k_sources_reset();
-    portENTER_CRITICAL(&g_nmea_mux);
-    g_nmea = {}; g_variation = {}; ++g_nmea_context;
-    portEXIT_CRITICAL(&g_nmea_mux);
-}
-
-void instrument_data_update_nmea(DataMetric metric, double value)
-{
-    const size_t idx = metric_index(metric);
-    if (idx >= g_nmea.size() || metric == DataMetric::None) return;
-    const int64_t now = esp_timer_get_time();
-    portENTER_CRITICAL(&g_nmea_mux);
-    g_nmea[idx].valid = true;
-    g_nmea[idx].value = value;
-    g_nmea[idx].updated_us = now;
-    // Generic heading updates have no trustworthy reference.
-    g_nmea[idx].heading_reference = HeadingReference::Unknown;
-    portEXIT_CRITICAL(&g_nmea_mux);
-}
-
-void instrument_data_update_heading(double radians, HeadingReference reference)
-{
-    if (!std::isfinite(radians) || (reference != HeadingReference::True && reference != HeadingReference::Magnetic)) return;
-    const int64_t now = esp_timer_get_time();
-    portENTER_CRITICAL(&g_nmea_mux);
-    auto &heading = g_nmea[metric_index(DataMetric::Heading)];
-    heading.valid = true;
-    heading.value = radians;
-    heading.updated_us = now;
-    heading.heading_reference = reference;
-    portEXIT_CRITICAL(&g_nmea_mux);
-}
-
-void instrument_data_update_variation(double radians)
-{
-    if (!std::isfinite(radians) || std::abs(radians) > 3.141592653589793) return;
-    const int64_t now = esp_timer_get_time();
-    portENTER_CRITICAL(&g_nmea_mux);
-    g_variation.valid = true;
-    g_variation.value = radians;
-    g_variation.updated_us = now;
-    portEXIT_CRITICAL(&g_nmea_mux);
-}
+void instrument_data_reset_nmea(){n2k_sources_reset();}
 
 InstrumentValue instrument_data_get(const DataFieldSelection &selection, uint8_t field_id)
 {
@@ -170,27 +111,7 @@ InstrumentValue instrument_data_get(const DataFieldSelection &selection, uint8_t
         return out;
     }
     InstrumentValue out{};
-    if (n2k_sources_get(selection.metric,field_id,out)) return out;
-    const size_t idx = metric_index(selection.metric);
-    if (idx >= g_nmea.size()) return out;
-
-    CachedValue cached{};
-    CachedValue variation{};
-    portENTER_CRITICAL(&g_nmea_mux);
-    cached = g_nmea[idx];
-    out.display_context=g_nmea_context;
-    variation = g_variation;
-    portEXIT_CRITICAL(&g_nmea_mux);
-
-    if (!cached.valid) return out;
-    out.valid = true;
-    out.value = cached.value;
-    out.sample_us = cached.updated_us;
-    out.age_ms = static_cast<uint32_t>((esp_timer_get_time() - cached.updated_us) / 1000);
-    out.stale = out.age_ms >= NMEA_STALE_MS;
-    out.heading_reference = cached.heading_reference;
-    out.variation_valid = variation.valid && esp_timer_get_time() - variation.updated_us < VARIATION_STALE_US;
-    out.variation_radians = variation.value;
+    n2k_sources_get(selection.metric,field_id,out);
     return out;
 }
 
@@ -198,7 +119,7 @@ const char *instrument_metric_name(DataMetric metric)
 {
     switch (metric) {
     case DataMetric::Depth: return "Depth";
-    case DataMetric::BoatSpeed: return "Boat speed";
+    case DataMetric::BoatSpeed: return "STW (through water)";
     case DataMetric::SpeedOverGround: return "SOG";
     case DataMetric::CourseOverGround: return "COG";
     case DataMetric::Heading: return "Heading";
@@ -354,6 +275,9 @@ void instrument_format_value(const DataFieldSelection &selection,
 {
     if (!value_out || !unit_out || value_out_size == 0 || unit_out_size == 0) return;
     value_out[0] = '\0'; unit_out[0] = '\0';
+    if(v.valid && v.stale && n2k_sources_is_depth(selection.metric) && v.age_ms<30000) {
+        std::snprintf(value_out,value_out_size,"STALE");return;
+    }
     if (!v.valid || v.stale) { std::snprintf(value_out, value_out_size, "--"); return; }
 
     const DataMetric metric = selection.metric;

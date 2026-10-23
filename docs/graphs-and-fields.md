@@ -22,10 +22,15 @@ normal wrap at 360 degrees; graphs do not unwrap bearings.
 
 Tap Data in a field editor to open groups, then a field. BACK returns from the
 field list to groups; BACK again returns to the editor. None is at the group root.
-Groups are Navigation & steering; Depth, speed & log; Wind; Engine & transmission;
+Groups are Navigation & steering; Depth; Speed & log; Wind; Engine & transmission;
 Electrical & solar; Tanks; Environment. The previous/next arrows also follow group
 order. Victron BLE filtering still shows only fields suitable for the selected
 battery monitor/MPPT record type.
+
+Depth includes the calibrated, transducer, keel, waterline and sensor-offset fields.
+Speed & log includes STW (through water, PGN 128259), SOG (over ground, PGN 129026),
+waypoint VMG and trip distance. Wind speed stays with the wind fields; engine RPM
+and trim stay with engine/transmission fields.
 
 Additional received values:
 
@@ -49,8 +54,8 @@ not calculated L/NM. DC capacity arrives in coulombs and displays as Ah; remaini
 time arrives in seconds and uses the existing time-to-go display. A signed 24-bit
 127751 decoder avoids the pinned library's negative-current sign-extension issue.
 Field availability still depends on transmitted data; these are displays, not
-new calculations. Source locking, engine/tank isolation and 30-second stale-data
-rules remain in force on CAN and the existing W2K-1 decoder path.
+new calculations. Source locking and engine/tank isolation remain in force. Depth becomes stale
+after 3 seconds; other fields retain the 30-second stale threshold on CAN and the existing W2K-1 decoder path.
 
 ## Custom tile labels
 

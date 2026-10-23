@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <atomic>
 #include "local_http_server.hpp"
+#include "local_server_window.hpp"
 #include "local_server_retry.hpp"
 #include <cstdio>
 #include <cstring>
@@ -23,7 +24,6 @@
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "wifi_service.hpp"
-#include "smartshunt_ble.hpp"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -61,14 +61,7 @@ void ensure_mutex()
     if (g_mutex == nullptr) g_mutex = xSemaphoreCreateMutex();
 }
 
-void set_active(bool active)
-{
-    ensure_mutex();
-    if (g_mutex != nullptr && xSemaphoreTake(g_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        g_active = active;
-        xSemaphoreGive(g_mutex);
-    }
-}
+#include "ota_state.inc"
 
 bool claim_update(const char *url)
 {
@@ -96,17 +89,6 @@ void url_snapshot(char *out, size_t out_size)
     }
 }
 
-void set_status(OtaState state, int progress, esp_err_t err, const char *message)
-{
-    ensure_mutex();
-    if (g_mutex != nullptr && xSemaphoreTake(g_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        g_status.state = state;
-        g_status.progress_percent = std::clamp(progress, 0, 100);
-        g_status.last_error = static_cast<int>(err);
-        std::snprintf(g_status.message, sizeof(g_status.message), "%s", message ? message : "");
-        xSemaphoreGive(g_mutex);
-    }
-}
 
 void ota_task(void *)
 {
@@ -218,8 +200,7 @@ void ota_task(void *)
 // HTTP runs in its own server task. It never touches LVGL objects.
 httpd_handle_t g_server = nullptr;
 LocalServerStatus g_server_status{}; // protected by g_mutex
-TaskHandle_t g_server_worker=nullptr;
-std::atomic<int64_t> g_server_deadline_us{0};
+LocalServerWindow g_window;
 constexpr int64_t LOCAL_SERVER_WINDOW_US = 120000000LL;
 struct ServerHeap {
     size_t internal_free=0,internal_largest=0,internal_minimum=0;
@@ -228,6 +209,7 @@ struct ServerHeap {
 };
 ServerHeap g_server_heap{}; // last startup snapshot, protected by g_mutex
 char g_upload_token[33]{};
+char g_upload_pin[7]{};
 
 ServerHeap server_heap() {
     return {heap_caps_get_free_size(MALLOC_CAP_INTERNAL),heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL),
@@ -247,51 +229,7 @@ void publish_server_status(const LocalServerStatus &status,const ServerHeap &hea
     xSemaphoreTake(g_mutex,portMAX_DELAY);g_server_status=status;g_server_heap=heap;xSemaphoreGive(g_mutex);
 }
 
-bool network_request(httpd_req_t *request, bool token_required) {
-    const auto wifi=wifi_service_get_status();
-    if (wifi.state != WifiState::AccessPoint && wifi.state != WifiState::Connected) {
-        httpd_resp_send_err(request, HTTPD_403_FORBIDDEN, "Firmware Update mode requires active Wi-Fi");
-        return false;
-    }
-    if (token_required) {
-        char token[33]{};
-        if (httpd_req_get_hdr_value_str(request,"X-OTA-Token",token,sizeof(token)) != ESP_OK ||
-            std::strcmp(token,g_upload_token) != 0) {
-            httpd_resp_send_err(request,HTTPD_403_FORBIDDEN,"Reload the update page");
-            return false;
-        }
-    }
-    return true;
-}
-
-esp_err_t page_handler(httpd_req_t *request) {
-    ESP_LOGI(TAG,"Local HTTP GET /");
-    if (!network_request(request,false)) return ESP_OK;
-    // The token prevents cross-origin update/reboot requests. No CORS is enabled.
-    const char *page = R"HTML(<!doctype html><html><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>N2K Display firmware update</title><style>body{font:18px system-ui;max-width:600px;margin:30px auto;padding:20px}button,input{font:inherit;margin:12px 0}pre{white-space:pre-wrap}</style>
-<h1>Firmware update</h1><p>%s</p><p>Select the application <b>firmware.bin</b>. Keep the display powered until validation finishes. A full-flash or bootloader image cannot be used here.</p>
-<input id="file" type="file" accept=".bin"><br><button id="upload">Upload firmware</button><br><button id="reboot">Reboot after validation</button><pre id="status">Ready</pre>
-<script>const token='%s';const status=document.getElementById('status');let busy=false;
-document.getElementById('upload').onclick=async()=>{if(busy)return;const f=document.getElementById('file').files[0];if(!f){status.textContent='Choose firmware.bin first';return;}busy=true;status.textContent='Uploading and validating. Keep power connected.';try{const r=await fetch('/upload',{method:'POST',headers:{'X-OTA-Token':token,'Content-Type':'application/octet-stream'},body:f});status.textContent=await r.text();}catch(e){status.textContent='Connection interrupted. Check display status before retrying.';}finally{busy=false;}};
-document.getElementById('reboot').onclick=async()=>{if(busy)return;try{const r=await fetch('/reboot',{method:'POST',headers:{'X-OTA-Token':token}});status.textContent=await r.text();}catch(e){status.textContent='Reconnect to the display after it restarts.';}};
-</script></html>)HTML";
-    constexpr size_t HTML_SIZE=2600;
-    char *html=static_cast<char *>(heap_caps_malloc(HTML_SIZE,MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT));
-    if(!html) return httpd_resp_send_err(request,HTTPD_500_INTERNAL_SERVER_ERROR,"Page memory unavailable");
-    const bool layout_ok=ota_partition_layout_valid();
-    const int len = std::snprintf(html,HTML_SIZE,page,layout_ok?"Ready for firmware upload.":"Upload unavailable: incompatible flash layout. Install compatible firmware using USB.",g_upload_token);
-    if (len < 0 || static_cast<size_t>(len) >= HTML_SIZE) {
-        heap_caps_free(html);
-        return httpd_resp_send_err(request,HTTPD_500_INTERNAL_SERVER_ERROR,"Page unavailable");
-    }
-    httpd_resp_set_type(request,"text/html");
-    httpd_resp_set_hdr(request,"Cache-Control","no-store");
-    httpd_resp_set_hdr(request,"Content-Security-Policy","default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; frame-ancestors 'none'");
-    const esp_err_t sent=httpd_resp_send(request,html,len);
-    heap_caps_free(html);
-    return sent;
-}
+#include "ota_http_auth.inc"
 
 esp_err_t upload_handler(httpd_req_t *request) {
     if (!network_request(request,true)) return ESP_OK;
@@ -388,19 +326,11 @@ esp_err_t reboot_handler(httpd_req_t *request) {
 }
 
 void local_server_worker(void *) {
-    const bool restore_ble=smartshunt_ble_is_running();
-    if(restore_ble && !smartshunt_ble_pause()) {
-        publish_server_status({LocalServerStage::StartFailed,ESP_FAIL,0,1,false},server_heap());
-        ESP_LOGE(TAG,"Unable to pause SmartShunt BLE for web update");
-        if(!smartshunt_ble_resume()) ESP_LOGE(TAG,"SmartShunt BLE recovery also failed");
-        g_server_worker=nullptr;
-        vTaskDelete(nullptr);
-        return;
-    }
-    // Give controller/Bluedroid deinit a short interval to return heap before
-    // creating the HTTP task stack. Large request buffers live in PSRAM.
-    vTaskDelay(pdMS_TO_TICKS(100));
     uint8_t random[16];esp_fill_random(random,sizeof(random));
+    uint32_t pin_random;esp_fill_random(&pin_random,sizeof(pin_random));
+    xSemaphoreTake(g_mutex,portMAX_DELAY);
+    std::snprintf(g_upload_pin,sizeof(g_upload_pin),"%06lu",static_cast<unsigned long>(pin_random%1000000));
+    xSemaphoreGive(g_mutex);
     for(size_t i=0;i<sizeof(random);++i)std::snprintf(g_upload_token+i*2,3,"%02x",random[i]);
     httpd_uri_t page{};page.uri="/";page.method=HTTP_GET;page.handler=page_handler;
     httpd_uri_t upload{};upload.uri="/upload";upload.method=HTTP_POST;upload.handler=upload_handler;
@@ -421,30 +351,23 @@ void local_server_worker(void *) {
     ota_log_local_server_status();
     if(result.stage!=LocalServerStage::Listening) {
         log_server_heap("after failed on-demand startup",after);
-        if(restore_ble) smartshunt_ble_resume();
-        g_server_deadline_us=0;
-        g_server_worker=nullptr;
+        xSemaphoreTake(g_mutex,portMAX_DELAY);g_window.stopped();xSemaphoreGive(g_mutex);
         vTaskDelete(nullptr);
         return;
     }
 
+    xSemaphoreTake(g_mutex,portMAX_DELAY);
+    g_window.state=LocalServerWindow::State::Listening;
+    xSemaphoreGive(g_mutex);
     ESP_LOGI(TAG,"Firmware web server enabled; selected operating mode controls radio ownership");
     for(;;) {
         const int64_t now=esp_timer_get_time();
-        bool busy=false;
-        ensure_mutex();
-        if(g_mutex && xSemaphoreTake(g_mutex,pdMS_TO_TICKS(20))==pdTRUE) {
-            busy=g_active || g_status.state==OtaState::ReadyToReboot;
-            xSemaphoreGive(g_mutex);
-        }
-        // Never expire while receiving/validating an image or while waiting for
-        // the explicit reboot after a successful local upload.
-        if(busy) {
-            g_server_deadline_us=now+LOCAL_SERVER_WINDOW_US;
-        } else {
-            const int64_t deadline=g_server_deadline_us.load();
-            if(deadline<=now) break;
-        }
+        xSemaphoreTake(g_mutex,portMAX_DELAY);
+        const bool busy=g_active || g_status.state==OtaState::ReadyToReboot;
+        if(busy)g_window.deadline=now+LOCAL_SERVER_WINDOW_US;
+        const bool stopping=g_window.stop_if_due(now,busy);
+        xSemaphoreGive(g_mutex);
+        if(stopping)break;
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 
@@ -455,10 +378,8 @@ void local_server_worker(void *) {
     const auto stopped=server_heap();
     publish_server_status({LocalServerStage::NotStarted,ESP_OK,0,0,false},stopped);
     log_server_heap("after timed web server stop",stopped);
-    if(restore_ble && !smartshunt_ble_resume()) ESP_LOGE(TAG,"SmartShunt BLE restore failed after web update window");
-    g_server_deadline_us=0;
-    g_server_worker=nullptr;
-    ESP_LOGI(TAG,"Firmware web server disabled; normal BLE operation restored");
+    xSemaphoreTake(g_mutex,portMAX_DELAY);g_window.stopped();xSemaphoreGive(g_mutex);
+    ESP_LOGI(TAG,"Firmware web server disabled");
     vTaskDelete(nullptr);
 }
 } // namespace
@@ -526,48 +447,8 @@ bool ota_partition_layout_valid()
         next->address!=running->address;
 }
 
-bool ota_enable_local_server(uint32_t seconds)
-{
-    ensure_mutex();
-    const auto wifi=wifi_service_get_status();
-    if(!g_mutex || seconds==0 || (wifi.state!=WifiState::AccessPoint && wifi.state!=WifiState::Connected)) return false;
-    const int64_t duration=static_cast<int64_t>(seconds)*1000000LL;
-    g_server_deadline_us=esp_timer_get_time()+duration;
-    if(g_server_worker) return true; // Extend the active window.
-    publish_server_status({LocalServerStage::Starting,ESP_OK,0,0,false},server_heap());
-    if(xTaskCreate(local_server_worker,"http_window",4096,nullptr,1,&g_server_worker)!=pdPASS) {
-        g_server_deadline_us=0;
-        g_server_worker=nullptr;
-        publish_server_status({LocalServerStage::StartFailed,ESP_ERR_NO_MEM,0,0,false},server_heap());
-        ota_log_local_server_status();
-        return false;
-    }
-    return true;
-}
+#include "ota_window_api.inc"
 
-bool ota_disable_local_server()
-{
-    ensure_mutex();
-    if(!g_server_worker) return true;
-    if(!g_mutex || xSemaphoreTake(g_mutex,pdMS_TO_TICKS(50))!=pdTRUE) return false;
-    const bool busy=g_active || g_status.state==OtaState::ReadyToReboot;
-    xSemaphoreGive(g_mutex);
-    if(busy) return false;
-    g_server_deadline_us=esp_timer_get_time();
-    return true;
-}
-
-bool ota_local_server_window_active()
-{
-    return g_server_worker!=nullptr;
-}
-
-uint32_t ota_local_server_seconds_remaining()
-{
-    if(!g_server_worker) return 0;
-    const int64_t remaining=g_server_deadline_us.load()-esp_timer_get_time();
-    return remaining>0?static_cast<uint32_t>((remaining+999999)/1000000):0;
-}
 LocalServerStatus ota_local_server_status(){
     if(!g_mutex)return {LocalServerStage::StartFailed,ESP_ERR_NO_MEM};
     xSemaphoreTake(g_mutex,portMAX_DELAY);const auto status=g_server_status;xSemaphoreGive(g_mutex);return status;
@@ -605,16 +486,25 @@ void ota_reject_running_image()
 bool ota_update_in_progress() {
     ensure_mutex();
     if (!g_mutex || xSemaphoreTake(g_mutex,pdMS_TO_TICKS(100))!=pdTRUE) return true;
-    const bool busy=g_active || g_network_change || g_status.state==OtaState::ReadyToReboot || g_server_worker!=nullptr;
+    const bool busy=g_active || g_network_change || g_status.state==OtaState::ReadyToReboot || g_window.active();
     xSemaphoreGive(g_mutex);return busy;
 }
 bool ota_begin_network_change() {
     ensure_mutex();
     if (!g_mutex || xSemaphoreTake(g_mutex,pdMS_TO_TICKS(100))!=pdTRUE) return false;
-    const bool available=!g_active && !g_network_change && g_status.state!=OtaState::ReadyToReboot && g_server_worker==nullptr;
+    const bool available=!g_active && !g_network_change && g_status.state!=OtaState::ReadyToReboot && !g_window.active();
     if (available) g_network_change=true;
     xSemaphoreGive(g_mutex);return available;
 }
 void ota_end_network_change() {
     xSemaphoreTake(g_mutex,portMAX_DELAY);g_network_change=false;xSemaphoreGive(g_mutex);
+}
+
+void ota_local_server_pin(char *out,size_t size) {
+    if(!out || !size)return;
+    out[0]=0;
+    if(!g_mutex)return;
+    xSemaphoreTake(g_mutex,portMAX_DELAY);
+    if(g_window.state==LocalServerWindow::State::Listening)std::snprintf(out,size,"%s",g_upload_pin);
+    xSemaphoreGive(g_mutex);
 }

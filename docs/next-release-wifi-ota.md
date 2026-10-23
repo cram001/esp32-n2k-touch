@@ -91,9 +91,9 @@ reject missing or stale startup stack configurations.
 2. Upgrade from schema 2 without erasing NVS. Confirm the old SSID remains, the protected-network password prompt appears, and pages/units/brightness/SmartShunt keys and bridge settings survive. Enter the password once, save, power-cycle, and verify automatic reconnection.
 3. Test a normal 2.4 GHz WPA2 network, an open network, a hidden SSID, wrong password and an unavailable SSID. Check the displayed numeric reason and error text. Power-cycle the router and confirm reconnect with backoff.
 4. Tap Scan once, select a result and save. Verify manual hidden-SSID entry still works. Confirm no repeated scans occur while idle, and compare SmartShunt data freshness before/during/after a scan and throughout OTA.
-5. Choose AP mode, enter a unique SSID and password, save and connect a laptop/phone. Verify the IP and update page. Switch back to Station and confirm its credentials remain; repeat in the opposite direction after reboot.
+5. Select Wi-Fi NMEA input, save Station credentials and connect to the same LAN from a laptop/phone. Enable the 120-second local upload window on the display and open its displayed station IP. Wired mode does not start Wi-Fi; Wi-Fi mode does not start BLE.
 6. Upload a valid application image locally, wait for Ready, reboot and verify the new image confirms only after startup health checks. Repeat with a wrong-project image, non-application image, corrupted/truncated data and a dropped connection; the current image must remain selected on failure.
-7. From Station mode, try a valid HTTPS application URL, a broken URL, an untrusted TLS certificate and interrupted download. Check error/progress feedback, the explicit reboot step and clock synchronization after a cold boot. AP-only mode must not offer an Internet-dependent pull update as ready.
+7. From Station mode, try a valid HTTPS application URL, a broken URL, an untrusted TLS certificate and interrupted download. Check error/progress feedback, the explicit reboot step and clock synchronization after a cold boot. Both update methods require a connected Station.
 8. On a recoverable bench setup with a known valid previous slot, install a deliberately unhealthy test image or reset the candidate before its five-second confirmation window. Confirm rollback to the previous slot, its version and retained NVS settings. Record results before considering this release ready for permanent installation.
 9. Run the existing SmartShunt/NMEA bench checks in `docs/development.md`, including stale-data behavior and optional battery-PGN bridging. Those service implementations were not edited.
 
@@ -126,3 +126,7 @@ socket startup succeeded. This diagnostic does not itself repair the listener.
 - Boot-time gesture hints and status when gestures are implemented.
 
 No wireless Actisense transport, gesture handler, gesture boot hints, automatic continuous Wi-Fi scanning, firmware flashing, push or PR merge is part of this change.
+
+## Station-only local upload correction
+
+Local upload is available when Station is Connected. There is no AP listener or BLE pause/resume: boot assigns BLE only to wired mode and Wi-Fi only to wireless mode. The page uses the station IP shown on the display.

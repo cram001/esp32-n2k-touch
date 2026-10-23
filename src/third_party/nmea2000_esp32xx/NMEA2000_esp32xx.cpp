@@ -16,7 +16,7 @@ Uses the current ESP-IDF esp_twai node API for ESP32-S3.
 
 namespace {
 constexpr const char *TAG = "n2k_twai";
-constexpr size_t RX_QUEUE_DEPTH = 32;
+constexpr size_t RX_QUEUE_DEPTH = 128;
 
 struct RxFrame {
     uint32_t id = 0;
@@ -67,7 +67,11 @@ bool tNMEA2000_esp32xx::rx_done_cb(twai_node_handle_t handle,
         rx.id = frame.header.id;
         rx.len = static_cast<uint8_t>(std::min<size_t>(frame.buffer_len, sizeof(rx.data)));
         if (rx.len > 0) std::memcpy(rx.data, data, rx.len);
-        xQueueSendFromISR(self->rx_queue_, &rx, &woken);
+        if(xQueueSendFromISR(self->rx_queue_, &rx, &woken)!=pdTRUE) {
+            // Xtensa libstdc++ does not guarantee lock-free std::atomic<uint32_t>.
+            // This ISR-safe critical section protects only one increment.
+            portENTER_CRITICAL_ISR(&self->rx_lock_);++self->rx_dropped_;portEXIT_CRITICAL_ISR(&self->rx_lock_);
+        }
     }
     return woken == pdTRUE;
 }

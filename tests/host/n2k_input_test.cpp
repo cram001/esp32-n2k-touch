@@ -61,6 +61,10 @@ int gateway_recv(int,char *out,size_t size,int){
     }
     if(eof)return 0;errno=EAGAIN;return -1;
 }
+int gateway_setsockopt(int,int,int option,const void *value,socklen_t size){
+    assert(size==sizeof(int));int v=*static_cast<const int *>(value);
+    assert((option==SO_KEEPALIVE&&v==1)||(option==TCP_KEEPIDLE&&v==10)||(option==TCP_KEEPINTVL&&v==3)||(option==TCP_KEEPCNT&&v==3));return 0;
+}
 int gateway_close(int){++closes;return 0;}
 uint16_t htons(uint16_t port){return port;}
 int inet_pton(int,const char *ip,in_addr *){target_ip=ip;return 1;}
@@ -94,8 +98,26 @@ int main(){
     connect_error=false;wait_connect=true;eof=false;cfg.port=60001;n2k_input_apply(cfg);
     run(260);assert(n2k_input_status().socket_error==ETIMEDOUT);
     wait_connect=false;cfg.port=60003;n2k_input_apply(cfg);
-    for(unsigned i=0;i<20;++i)reads.push_back(line);
-    run(22);assert(packets.size()==16 && n2k_input_status().dropped==4);
+    for(unsigned i=0;i<68;++i)reads.push_back(line);
+    run(22);assert(packets.size()==64 && n2k_input_status().dropped==4);
+    // 1200 supported lines plus unrelated PGNs drain in a bounded burst.
+    packets.clear();reads.clear();cfg.port=60006;n2k_input_apply(cfg);
+    for(unsigned i=0;i<1200;++i)reads.push_back(line);
+    reads.push_back("A173321 01FF2 1FFFF 0102030405060708\r\n");
+    hook=[&](){while(n2k_input_receive(msg)){};};
+    run(12);hook={};
+    assert(reads.empty() && n2k_input_status().received==1200);
+    assert(n2k_input_status().dropped>0); // Burst backpressure remains observable.
+    // A connected, silent peer must be closed at 10 s, then retried at 5 s.
+    packets.clear();reads.clear();cfg.port=60004;n2k_input_apply(cfg);
+    unsigned silence_step=0;const unsigned silent_closes=closes,silent_opens=opens;
+    hook=[&](){if(++silence_step==1)ticks+=10000;};
+    run(2);hook={};
+    assert(closes>=silent_closes+1 && n2k_input_status().socket_error==ETIMEDOUT);
+    // Keep worker state across the retry interval rather than restarting it.
+    cfg.port=60005;n2k_input_apply(cfg);silence_step=0;
+    hook=[&](){++silence_step;if(silence_step==1)ticks+=10000;if(silence_step==2)ticks+=5000;};
+    run(3);hook={};assert(opens>=silent_opens+3);
     cfg.mode=N2kInputMode::Wired;n2k_input_apply(cfg);assert(!n2k_input_receive(msg));
     run(2);assert(closes>0 && std::strstr(n2k_input_status().message.data(),"Wired"));
     std::puts("PASS: TCP framing, endpoint changes, stale queue rejection, network wait, refusal/backoff, timeout and queue bounds");

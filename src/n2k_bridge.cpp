@@ -15,6 +15,7 @@
 #include "freertos/task.h"
 #include "instrument_data.hpp"
 #include "n2k_input.hpp"
+#include "n2k_receive_pgns.hpp"
 #include "n2k_instruments.hpp"
 #include "smartshunt_ble.hpp"
 
@@ -33,26 +34,16 @@ constexpr uint32_t DC_STATUS_PERIOD_MS = 1500;
 
 SemaphoreHandle_t g_settings_mutex = nullptr;
 AppSettings g_settings;
+AppSettings g_cached_settings; // N2K-task-owned after start.
 tNMEA2000_esp32xx g_nmea2000(CAN_TX, CAN_RX);
 bool g_started = false;
 // Read and changed only on the N2K task; gateway input never forwards to CAN.
-bool g_wireless_input = false;
+std::atomic<bool> g_wireless_input{false};
+bool g_can_open=false; // Set before task creation; never changed by settings.
 std::atomic<bool> g_discover_sources{false};
-const unsigned long RECEIVE_PGNS[] = {
-    126992,127245,127250,127251,127257,127258,127488,127489,127493,127497,127505,127506,127508,127751,128000,128259,128267,128275,
-    129025,129026,129029,129283,129284,129285,130074,
-    130306,130310,130311,130312,130313,130314,130316,130576,0
-};
 
-AppSettings settings_snapshot()
-{
-    AppSettings copy;
-    if (g_settings_mutex != nullptr && xSemaphoreTake(g_settings_mutex, pdMS_TO_TICKS(10)) == pdTRUE) {
-        copy = g_settings;
-        xSemaphoreGive(g_settings_mutex);
-    }
-    return copy;
-}
+
+#include "n2k_settings_snapshot.inc"
 
 uint32_t unique_device_number()
 {
@@ -122,14 +113,14 @@ void n2k_task(void *)
             instrument_data_reset_nmea(); n2k_instruments_reset(); previous = settings.n2k_input;
         }
         g_wireless_input = settings.n2k_input.mode == N2kInputMode::W2kTcp;
-        if (!g_wireless_input) g_nmea2000.ParseMessages();
+        if (!g_wireless_input && g_can_open) g_nmea2000.ParseMessages();
         if(g_discover_sources.exchange(false) && !g_wireless_input){
             tN2kMsg request;
             SetN2kPGNISORequest(request,255,60928);g_nmea2000.SendMsg(request);
             SetN2kPGNISORequest(request,255,126996);g_nmea2000.SendMsg(request);
         }
         ActisenseMessage received;
-        for (unsigned i = 0; i < 16 && n2k_input_receive(received); ++i) {
+        for (unsigned i = 0; i < 64 && n2k_input_receive(received); ++i) {
             if (!g_wireless_input) continue;
             tN2kMsg message;
             message.SetPGN(received.pgn);
@@ -161,6 +152,7 @@ void n2k_task(void *)
         // Unsigned tick subtraction remains valid across the FreeRTOS tick wrap.
         if (diagnostic_now-last_diagnostic>=pdMS_TO_TICKS(60000)) {
             last_diagnostic=diagnostic_now;
+            ESP_LOGI(TAG,"TWAI RX queue dropped frames: %lu",static_cast<unsigned long>(g_nmea2000.RxDropped()));
             ESP_LOGI(TAG,"Runtime N2K task minimum free stack: %u bytes",
                      static_cast<unsigned>(uxTaskGetStackHighWaterMark(nullptr)));
             ESP_LOGI(TAG,"Runtime heap (bytes): internal free=%u largest=%u minimum=%u; PSRAM free=%u largest=%u minimum=%u",
@@ -188,6 +180,7 @@ bool n2k_bridge_start(const AppSettings &settings)
     g_settings_mutex = xSemaphoreCreateMutex();
     if (g_settings_mutex == nullptr) return false;
     g_settings = settings;
+    g_cached_settings = settings;
 
     g_wireless_input = settings.n2k_input.mode == N2kInputMode::W2kTcp;
     if (g_wireless_input) {
@@ -201,6 +194,7 @@ bool n2k_bridge_start(const AppSettings &settings)
         g_nmea2000.ExtendReceiveMessages(RECEIVE_PGNS);
         g_nmea2000.SetN2kCANMsgBufSize(20);
         if (!g_nmea2000.Open()) { ESP_LOGE(TAG, "Failed to open NMEA 2000/TWAI interface"); return false; }
+        g_can_open=true;
         ESP_LOGI(TAG, "NMEA 2000 node active on TX GPIO6/RX GPIO0; Wi-Fi N2K input not initialized");
     }
     if (xTaskCreatePinnedToCore(n2k_task, "n2k", 6144, nullptr, 5, nullptr, 1) != pdPASS) return false;

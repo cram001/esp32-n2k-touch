@@ -20,6 +20,8 @@ void expect(DataMetric metric,double value,const UnitsSettings &units,const char
     assert(std::strcmp(text,number)==0 && std::strcmp(suffix,unit)==0);
 }
 int main(){
+    assert(std::strcmp(instrument_metric_name(DataMetric::BoatSpeed),"STW (through water)")==0);
+    assert(std::strcmp(instrument_metric_name(DataMetric::SpeedOverGround),"SOG")==0);
     UnitsSettings distance{};
     expect(DataMetric::RateOfTurn,0.01,distance,"+34.4","deg/min");
     expect(DataMetric::RudderAngle,-0.2,distance,"-11.5","deg");
@@ -81,9 +83,15 @@ int main(){
     units.temperature=TemperatureUnit::Fahrenheit;
     expect(DataMetric::CabinTemperature,293.15,units,"68.0","F");
     DataFieldSelection field{};field.metric=DataMetric::Depth;
-    instrument_data_update_nmea(field.metric,10);fake_time_us+=29999000;
+    n2k_sources_publish(field.metric,10,255,255,10);fake_time_us+=2999000;
     assert(!instrument_data_get(field).stale);fake_time_us+=1000;
     assert(instrument_data_get(field).stale);
+    char stale_text[20],stale_units[8];
+    instrument_format_value(field,units,instrument_data_get(field),stale_text,sizeof(stale_text),stale_units,sizeof(stale_units));
+    assert(std::strcmp(stale_text,"STALE")==0);
+    fake_time_us+=27000000;
+    instrument_format_value(field,units,instrument_data_get(field),stale_text,sizeof(stale_text),stale_units,sizeof(stale_units));
+    assert(std::strcmp(stale_text,"--")==0);
     field.source=DataSourceType::SmartShunt;field.metric=DataMetric::BatteryVoltage;
     battery.valid=true;battery.voltage_valid=true;battery.voltage_v=12.5;battery.stale=true;
     battery.age_ms=29999;assert(instrument_data_get(field).valid && !instrument_data_get(field).stale);

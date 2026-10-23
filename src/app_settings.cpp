@@ -1,6 +1,8 @@
 #include "app_settings.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -11,6 +13,8 @@
 
 namespace {
 constexpr const char *TAG = "settings";
+std::atomic<bool> g_reset_notice{false};
+void sanitize_bool(bool &value){unsigned char raw;std::memcpy(&raw,&value,1);value=raw==1;}
 constexpr const char *NAMESPACE = "app";
 constexpr const char *KEY_THEME = "theme";
 constexpr const char *KEY_ROTATION = "rotation";
@@ -111,10 +115,11 @@ void sanitize_display_settings(AppSettings &settings)
     if (static_cast<uint8_t>(settings.units.distance) > static_cast<uint8_t>(DistanceUnit::Kilometres)) settings.units.distance = DistanceUnit::NauticalMiles;
     if (static_cast<uint8_t>(settings.units.short_distance) > static_cast<uint8_t>(ShortDistanceUnit::Yards)) settings.units.short_distance = ShortDistanceUnit::Metres;
     if (static_cast<uint8_t>(settings.units.lat_lon_format) > static_cast<uint8_t>(LatLonFormat::DegreesMinutesSeconds)) settings.units.lat_lon_format = LatLonFormat::DegreesMinutes;
-    if (settings.units.short_distance_threshold_nm < 0.01f || settings.units.short_distance_threshold_nm > 1.0f) {
+    if (!std::isfinite(settings.units.short_distance_threshold_nm) || settings.units.short_distance_threshold_nm < 0.01f || settings.units.short_distance_threshold_nm > 1.0f) {
         settings.units.short_distance_threshold_nm = 0.2f;
     }
 
+    if(static_cast<uint8_t>(settings.units.heading_reference)>static_cast<uint8_t>(HeadingReference::Magnetic))settings.units.heading_reference=HeadingReference::True;
     for (size_t i = 0; i < settings.pages.size(); ++i) {
         auto &page = settings.pages[i];
         page.name.back() = '\0';
@@ -136,7 +141,9 @@ bool settings_init()
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_LOGW(TAG, "NVS requires erase/reinitialization: %s", esp_err_to_name(err));
-        ESP_ERROR_CHECK(nvs_flash_erase());
+        ESP_LOGW(TAG,"Resetting settings storage; no backup available. Display notice queued.");
+        if(nvs_flash_erase()!=ESP_OK)return false;
+        g_reset_notice=true;
         err = nvs_flash_init();
     }
     if (err != ESP_OK) {
@@ -173,6 +180,7 @@ AppSettings settings_load()
     size_t size = sizeof(persisted_shunts);
     if (nvs_get_blob(handle, KEY_SHUNTS, &persisted_shunts, &size) == ESP_OK &&
         size == sizeof(persisted_shunts) && persisted_shunts.schema == SHUNTS_SCHEMA) {
+        for(auto &d:persisted_shunts.devices){sanitize_bool(d.configured);sanitize_bool(d.enabled);sanitize_bool(d.n2k_enabled);}
         settings.smartshunts = persisted_shunts.devices;
         for (auto &device : settings.smartshunts) {
             device.name.back() = '\0';
@@ -186,6 +194,7 @@ AppSettings settings_load()
     size = sizeof(persisted_display);
     if (nvs_get_blob(handle, KEY_DISPLAY, &persisted_display, &size) == ESP_OK &&
         size == sizeof(persisted_display) && persisted_display.schema == DISPLAY_SCHEMA) {
+        for(auto &page:persisted_display.pages)sanitize_bool(page.enabled);
         settings.units = persisted_display.units;
         settings.pages = persisted_display.pages;
     }
@@ -195,8 +204,8 @@ AppSettings settings_load()
     const bool wifi_v3 = wifi_read == ESP_OK && size == sizeof(persisted_wifi) && persisted_wifi.schema == WIFI_SCHEMA;
     bool migrate_wifi = false;
     if (wifi_v3) {
-        settings.wifi.enabled = persisted_wifi.enabled;
-        settings.wifi.open_network = persisted_wifi.open_network;
+        settings.wifi.enabled = persisted_wifi.enabled==1;
+        settings.wifi.open_network = persisted_wifi.open_network==1;
         settings.wifi.ssid = persisted_wifi.ssid;
         settings.wifi.ssid.back() = '\0';
         settings.wifi.password = persisted_wifi.password;
@@ -213,6 +222,7 @@ AppSettings settings_load()
         size = sizeof(legacy);
         if (nvs_get_blob(handle, KEY_WIFI_LEGACY, &legacy, &size) == ESP_OK &&
             size == sizeof(legacy) && legacy.schema == 2) {
+            sanitize_bool(legacy.enabled);sanitize_bool(legacy.open_network);
             migrate_wifi = wifi_read == ESP_ERR_NVS_NOT_FOUND;
             settings.wifi.enabled = legacy.enabled;
             settings.wifi.open_network = legacy.open_network;
@@ -336,3 +346,5 @@ bool settings_restore_brightness()
     return err==ESP_OK;
 }
 
+
+bool settings_take_reset_notice(){return g_reset_notice.exchange(false);}

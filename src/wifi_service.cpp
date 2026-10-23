@@ -28,6 +28,7 @@ std::atomic<bool> g_initialized{false};
 std::atomic<bool> g_scan_finished{false};
 std::atomic<int> g_scan_error{0};
 int64_t g_next_retry = 0;
+int64_t g_scan_started_us=0; // Worker-owned.
 unsigned g_retry_count = 0; // Owned exclusively by worker.
 bool g_started = false; // Owned exclusively by worker after initialization.
 enum class CommandType { Apply, Scan };
@@ -44,7 +45,7 @@ void state(WifiState value, esp_err_t error = ESP_OK, const char *message = "") 
     g_status.state = value;
     g_status.last_error = error;
     std::snprintf(g_status.message.data(), g_status.message.size(), "%s", message);
-    if (value != WifiState::Connected && value != WifiState::AccessPoint) {
+    if (value != WifiState::Connected) {
         g_status.ip.fill(0); g_status.rssi = 0;
     }
     xSemaphoreGive(g_mutex);
@@ -165,7 +166,7 @@ bool configure(const WifiConfig &config) {
     xSemaphoreTake(g_mutex, portMAX_DELAY);
     g_config = config;
     g_status = WifiStatus{};
-    g_status.ssid = config.mode == WifiMode::AccessPoint ? config.ap_ssid : config.ssid;
+    g_status.ssid = config.ssid;
     xSemaphoreGive(g_mutex);
     g_retry_count = 0;
     g_next_retry = 0;
@@ -204,7 +205,7 @@ void scan() {
     cfg.show_hidden = false;
     cfg.scan_type = WIFI_SCAN_TYPE_ACTIVE;
     cfg.scan_time.active.min = 30; cfg.scan_time.active.max = 80;
-    if (err == ESP_OK) { g_scanning = true; err = esp_wifi_scan_start(&cfg, false); }
+    if (err == ESP_OK) { g_scanning = true; g_scan_started_us=esp_timer_get_time(); err = esp_wifi_scan_start(&cfg, false); }
     if (err != ESP_OK) {
         xSemaphoreTake(g_mutex, portMAX_DELAY);
         g_scan.state = WifiScanState::Failed; g_scan.last_error = err; ++g_scan.generation;
@@ -226,6 +227,15 @@ void worker(void *) {
         const auto st = wifi_service_get_status();
         if (st.state == WifiState::Connected) { g_retry_count = 0; g_next_retry = 0; }
         const int64_t now = esp_timer_get_time();
+        if(g_scanning && now-g_scan_started_us>=10000000) {
+            g_scanning=false; // Ignore a late SCAN_DONE, including during scan_stop.
+            esp_wifi_scan_stop();esp_wifi_clear_ap_list();g_scan_finished=false;
+            xSemaphoreTake(g_mutex,portMAX_DELAY);
+            g_scan.state=WifiScanState::Failed;g_scan.last_error=ESP_ERR_TIMEOUT;
+            g_scan.count=0;++g_scan.generation;
+            xSemaphoreGive(g_mutex);
+            if(snapshot().enabled && st.state!=WifiState::Connected)g_reconnect=true;
+        }
         if (g_reconnect && !g_scanning && !g_switching) {
             if (!g_next_retry) g_next_retry = now + std::min<int64_t>(1000000LL << std::min(g_retry_count++,5U),30000000LL);
             if (now >= g_next_retry) { g_reconnect = false; g_next_retry = 0; connect(); }
@@ -271,7 +281,7 @@ bool wifi_service_apply_config(const WifiConfig &config) {
     if (!g_initialized || ota_update_in_progress() || config.mode != WifiMode::Station) return false;
     const auto current = snapshot();
     if (current.enabled == config.enabled && current.mode == config.mode && current.open_network == config.open_network &&
-        current.ssid == config.ssid && current.password == config.password && current.ap_ssid == config.ap_ssid && current.ap_password == config.ap_password &&
+        current.ssid == config.ssid && current.password == config.password &&
         wifi_service_get_status().state != WifiState::Error && wifi_service_get_status().state != WifiState::Disconnected) return true;
     Command command{CommandType::Apply,config};
     return xQueueSend(g_commands,&command,0) == pdTRUE;

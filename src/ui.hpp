@@ -10,3 +10,7 @@
 void ui_start(const AppSettings &initial_settings);
 
 bool ui_is_healthy();
+
+constexpr uint32_t UI_NOTICE_ENVIRONMENT=1,UI_NOTICE_NVS_RESET=2;
+// Thread-safe publication; the LVGL timer owns all resulting objects.
+void ui_post_startup_notice(uint32_t flags);

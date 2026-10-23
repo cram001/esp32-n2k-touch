@@ -54,6 +54,7 @@ size_t g_edit_page = 0;
 size_t g_edit_field = 0;
 size_t g_edit_shunt = 0;
 
+std::atomic<uint32_t> g_startup_notices{0};
 lv_obj_t *g_data_screen = nullptr;
 lv_obj_t *g_boot_screen = nullptr;
 lv_obj_t *g_boot_status = nullptr;
@@ -520,31 +521,19 @@ void render_active_page()
     }
 }
 
-void update_wifi_status()
-{
-    if(!g_wifi_status) return;
-    if(g_wifi_feedback[0] && lv_tick_elaps(g_wifi_feedback_time)<6000) return;
-    g_wifi_feedback[0]=0;
-    const WifiStatus st=wifi_service_get_status();
-    char b[240]{};
-    switch(st.state){
-    case WifiState::Disabled: std::snprintf(b,sizeof(b),"Disabled"); break;
-    case WifiState::Connecting: std::snprintf(b,sizeof(b),"Connecting to %s...\n%s (reason %d)",st.ssid.data(),st.message.data(),st.disconnect_reason); break;
-    case WifiState::Connected: std::snprintf(b,sizeof(b),"%s\n%s   %d dBm",st.ssid.data(),st.ip.data(),st.rssi); break;
-    case WifiState::CredentialsRequired: std::snprintf(b,sizeof(b),"%s\n%s",st.ssid.data(),st.message.data()); break;
-    case WifiState::Disconnected: std::snprintf(b,sizeof(b),"%s\nReason %d; retrying",st.message.data(),st.disconnect_reason); break;
-    case WifiState::AccessPoint: {
-        const auto server=ota_local_server_status();
-        if(server.stage==LocalServerStage::Listening)std::snprintf(b,sizeof(b),"AP: %s\nUpdate page: http://%s\n%us remaining",st.ssid.data(),st.ip.data(),static_cast<unsigned>(ota_local_server_seconds_remaining()));
-        else if(!ota_local_server_window_active())std::snprintf(b,sizeof(b),"AP: %s\nWeb update: disabled",st.ssid.data());
-        else std::snprintf(b,sizeof(b),"AP: %s\nWeb: %s (0x%x)\nSocket errno: %d",st.ssid.data(),ota_local_server_stage_name(server.stage),server.error,server.socket_error);
-        break;
-    }
-    case WifiState::Error: std::snprintf(b,sizeof(b),"Wi-Fi error 0x%x\n%s",st.last_error,st.message.data()); break;
-    }
-    lv_label_set_text(g_wifi_status,b);
+#include "ui_wifi_status.inc"
+void show_startup_notice() {
+    const uint32_t flags=g_startup_notices.exchange(0);
+    if(!flags)return;
+    auto *panel=lv_obj_create(lv_layer_top());lv_obj_set_size(panel,440,220);lv_obj_center(panel);
+    auto *text=lv_label_create(panel);lv_obj_set_width(text,400);lv_obj_set_pos(text,0,0);
+    lv_label_set_text(text,(flags&UI_NOTICE_NVS_RESET)?
+        "Settings storage was reset after an NVS error. No backup was made. Re-enter Wi-Fi and BLE settings and review pages/sources.":
+        "Startup environment error. Settings, Bluetooth or Wi-Fi could not initialize. Firmware retained; check serial logs and Settings.");
+    auto *close=make_button(panel,"DISMISS",[](lv_event_t *e){lv_obj_delete(static_cast<lv_obj_t *>(lv_event_get_user_data(e)));},200,48,panel);
+    lv_obj_align(close,LV_ALIGN_BOTTOM_MID,0,0);
 }
-void refresh_cb(lv_timer_t *){++g_ui_refreshes;g_ui_last_refresh_ms=static_cast<uint32_t>(esp_timer_get_time()/1000);render_active_page();update_wifi_status();update_wifi_scan();update_ota_status();update_input_status();if(lv_screen_active()==g_shunt_picker_screen)update_shunt_picker();}
+void refresh_cb(lv_timer_t *){show_startup_notice();++g_ui_refreshes;g_ui_last_refresh_ms=static_cast<uint32_t>(esp_timer_get_time()/1000);render_active_page();update_wifi_status();update_wifi_scan();update_ota_status();update_input_status();if(lv_screen_active()==g_shunt_picker_screen)update_shunt_picker();}
 void previous_page_cb(lv_event_t *){g_active_page=next_enabled_page(g_active_page,-1);render_active_page();}
 void next_page_cb(lv_event_t *){g_active_page=next_enabled_page(g_active_page,+1);render_active_page();}
 void data_screen_cb(lv_event_t *){render_active_page();lv_screen_load(g_data_screen);}
@@ -659,143 +648,8 @@ void unit_latlon_cb(lv_event_t *){auto &f=g_settings.units.lat_lon_format;f=f==L
 void units_screen_cb(lv_event_t *){update_units();lv_screen_load(g_units_screen);}void unit_depth_cb(lv_event_t *){g_settings.units.depth=g_settings.units.depth==DepthUnit::Metres?DepthUnit::Feet:DepthUnit::Metres;persist();update_units();}void unit_temp_cb(lv_event_t *){g_settings.units.temperature=g_settings.units.temperature==TemperatureUnit::Celsius?TemperatureUnit::Fahrenheit:TemperatureUnit::Celsius;persist();update_units();}
 SpeedUnit next_speed(SpeedUnit u){return u==SpeedUnit::Knots?SpeedUnit::KilometresPerHour:(u==SpeedUnit::KilometresPerHour?SpeedUnit::MetresPerSecond:SpeedUnit::Knots);}void unit_wind_cb(lv_event_t *){g_settings.units.wind_speed=next_speed(g_settings.units.wind_speed);persist();update_units();}void unit_vessel_cb(lv_event_t *){g_settings.units.vessel_speed=next_speed(g_settings.units.vessel_speed);persist();update_units();}void unit_distance_cb(lv_event_t *){g_settings.units.distance=g_settings.units.distance==DistanceUnit::NauticalMiles?DistanceUnit::Kilometres:DistanceUnit::NauticalMiles;persist();update_units();}void unit_short_cb(lv_event_t *){auto&u=g_settings.units.short_distance;u=u==ShortDistanceUnit::Metres?ShortDistanceUnit::Feet:(u==ShortDistanceUnit::Feet?ShortDistanceUnit::Yards:ShortDistanceUnit::Metres);persist();update_units();}void unit_threshold_down_cb(lv_event_t *){auto&t=g_settings.units.short_distance_threshold_nm;if(t>0.05f)t-=0.05f;persist();update_units();}void unit_threshold_up_cb(lv_event_t *){auto&t=g_settings.units.short_distance_threshold_nm;if(t<1.0f)t+=0.05f;persist();update_units();}
 
-void wifi_textarea_focus_cb(lv_event_t *e){
-    g_editor_keyboard.show(g_wifi_screen,lv_event_get_target_obj(e),LV_KEYBOARD_MODE_TEXT_LOWER,460,205);
-}
-void hide_wifi_keyboard(){g_editor_keyboard.hide(g_wifi_screen);}
-void wifi_mask_cb(lv_event_t *) {
-    lv_textarea_set_password_mode(g_wifi_password,true);
-    lv_obj_remove_state(g_wifi_show,LV_STATE_CHECKED);
-    hide_wifi_keyboard();
-}
-void wifi_show_cb(lv_event_t *e) {
-    lv_textarea_set_password_mode(g_wifi_password,!lv_obj_has_state(lv_event_get_target_obj(e),LV_STATE_CHECKED));
-}
-bool read_wifi_draft() {
-    if(std::strlen(lv_textarea_get_text(g_wifi_ssid))>32 || std::strlen(lv_textarea_get_text(g_wifi_password))>64) {
-        wifi_feedback("SSID: max 32 bytes; password: max 64 bytes");return false;
-    }
-    g_wifi_draft.enabled=lv_obj_has_state(g_wifi_enabled,LV_STATE_CHECKED);
-    g_wifi_draft.mode=WifiMode::Station;
-    std::snprintf(g_wifi_draft.ssid.data(),g_wifi_draft.ssid.size(),"%s",lv_textarea_get_text(g_wifi_ssid));
-    std::snprintf(g_wifi_draft.password.data(),g_wifi_draft.password.size(),"%s",lv_textarea_get_text(g_wifi_password));
-    g_wifi_draft.open_network=lv_obj_has_state(g_wifi_open,LV_STATE_CHECKED);
-    return true;
-}
-void show_wifi_draft() {
-    g_wifi_draft.mode=WifiMode::Station;
-    lv_dropdown_set_selected(g_wifi_mode,0);
-    if(g_wifi_draft.enabled) lv_obj_add_state(g_wifi_enabled,LV_STATE_CHECKED); else lv_obj_remove_state(g_wifi_enabled,LV_STATE_CHECKED);
-    lv_textarea_set_text(g_wifi_ssid,g_wifi_draft.ssid.data());
-    lv_textarea_set_text(g_wifi_password,g_wifi_draft.password.data());
-    if(g_wifi_draft.open_network) lv_obj_add_state(g_wifi_open,LV_STATE_CHECKED); else lv_obj_remove_state(g_wifi_open,LV_STATE_CHECKED);
-    lv_obj_remove_flag(g_wifi_open,LV_OBJ_FLAG_HIDDEN);
-    wifi_mask_cb(nullptr);
-}
-void wifi_mode_cb(lv_event_t *) {
-    g_wifi_draft.mode=WifiMode::Station;
-    lv_dropdown_set_selected(g_wifi_mode,0);
-}
-void wifi_screen_cb(lv_event_t *) {
-    g_wifi_feedback[0]=0;
-    g_wifi_draft=g_settings.wifi;
-    g_wifi_draft.mode=WifiMode::Station;
-    show_wifi_draft();update_wifi_status();lv_screen_load(g_wifi_screen);
-}
-void wifi_save_cb(lv_event_t *) {
-    const auto ota=ota_get_status();
-    if(ota.state!=OtaState::Idle && ota.state!=OtaState::Failed) { wifi_feedback("Finish firmware update before changing Wi-Fi");return; }
-    if(!read_wifi_draft()) return;
-    const char *reason=nullptr;
-    if(!wifi_config_valid(g_wifi_draft,&reason)) { wifi_feedback(reason);return; }
-    AppSettings candidate=g_settings;candidate.wifi=g_wifi_draft;
-    if(!settings_save(candidate)) { wifi_feedback("Save failed; settings were not applied");return; }
-    g_settings=candidate;
-    if(g_settings.n2k_input.mode==N2kInputMode::Wired) {
-        wifi_feedback("Saved for Wi-Fi NMEA 2000 source");
-        return;
-    }
-    WifiConfig runtime=candidate.wifi;
-    runtime.enabled=true;
-    runtime.mode=WifiMode::Station;
-    if(!wifi_service_apply_config(runtime)) {wifi_feedback("Saved; Wi-Fi is switching or busy");return;}
-    wifi_mask_cb(nullptr);
-    wifi_feedback("Saved; applying Wi-Fi settings");
-}
-void wifi_select_cb(lv_event_t *e) {
-    const size_t index=reinterpret_cast<uintptr_t>(lv_event_get_user_data(e));
-    if(index>=g_wifi_scan_snapshot.count) return;
-    const auto &network=g_wifi_scan_snapshot.networks[index];
-    if(std::strcmp(lv_textarea_get_text(g_wifi_ssid),network.ssid.data())!=0) lv_textarea_set_text(g_wifi_password,"");
-    lv_textarea_set_text(g_wifi_ssid,network.ssid.data());
-    if(network.open) { lv_obj_add_state(g_wifi_open,LV_STATE_CHECKED);lv_textarea_set_text(g_wifi_password,""); }
-    else lv_obj_remove_state(g_wifi_open,LV_STATE_CHECKED);
-    lv_screen_load(g_wifi_screen);
-}
-void wifi_picker_back_cb(lv_event_t *) { lv_screen_load(g_wifi_screen); }
-void wifi_scan_again_cb(lv_event_t *) {
-    if(!wifi_service_request_scan()) lv_label_set_text(g_wifi_scan_status,"Scan busy; try again shortly");
-}
-void wifi_scan_cb(lv_event_t *) {
-    hide_wifi_keyboard();
-    lv_screen_load(g_wifi_picker);wifi_scan_again_cb(nullptr);
-}
-void update_wifi_scan() {
-    if(!g_wifi_picker || lv_screen_active()!=g_wifi_picker) return;
-    const auto results=wifi_service_get_scan();
-    if(results.generation==g_wifi_scan_generation) return;
-    g_wifi_scan_generation=results.generation;g_wifi_scan_snapshot=results;
-    lv_obj_clean(g_wifi_scan_list);
-    char text[96];
-    if(results.state==WifiScanState::Scanning) lv_label_set_text(g_wifi_scan_status,"Scanning once... (2.4 GHz)");
-    else if(results.state==WifiScanState::Failed) {std::snprintf(text,sizeof(text),"Scan failed: 0x%x; retry when station settles",results.last_error);lv_label_set_text(g_wifi_scan_status,text);}
-    else {std::snprintf(text,sizeof(text),"%u networks; hidden SSIDs: enter manually",static_cast<unsigned>(results.count));lv_label_set_text(g_wifi_scan_status,text);}
-    for(size_t i=0;i<results.count;++i) {
-        const auto &network=results.networks[i];
-        std::snprintf(text,sizeof(text),"%s\n%d dBm - %s",network.ssid.data(),network.rssi,network.open?"Open":"Secured");
-        make_button(g_wifi_scan_list,text,wifi_select_cb,400,60,reinterpret_cast<void *>(i));
-    }
-}
-void update_ota_status() {
-    if(!g_ota_status || lv_screen_active()!=g_ota_screen) return;
-    if(g_ota_feedback[0] && lv_tick_elaps(g_ota_feedback_time)<6000) return;
-    g_ota_feedback[0]=0;
-    const auto st=ota_get_status();const auto wifi=wifi_service_get_status();const auto server=ota_local_server_status();char text[360];
-    const uint32_t remaining=ota_local_server_seconds_remaining();
-    if(g_ota_web_button) lv_label_set_text(button_label(g_ota_web_button),
-        ota_local_server_window_active()?"DISABLE WEB UPDATE":"ENABLE WEB UPDATE (120s)");
-    if(server.stage==LocalServerStage::Listening) {
-        std::snprintf(text,sizeof(text),"Version: %s\n%s (%d%%)  error: 0x%x\nWeb: ACTIVE - %us remaining\nBluetooth: paused\nAP page: http://%s\nOTA layout: %s",ota_running_version(),st.message[0]?st.message:"Ready for local upload",st.progress_percent,st.last_error,static_cast<unsigned>(remaining),wifi.ip[0]?wifi.ip.data():"192.168.4.1",ota_partition_layout_valid()?"ready":"incompatible; use USB");
-    } else {
-        std::snprintf(text,sizeof(text),"Version: %s\n%s (%d%%)  error: 0x%x\nWeb: %s%s\nBluetooth: normal\nOTA layout: %s",ota_running_version(),st.message[0]?st.message:"Enter HTTPS URL or enable AP web update",st.progress_percent,st.last_error,
-            ota_local_server_window_active()?ota_local_server_stage_name(server.stage):"disabled",
-            server.error?" (startup error)":"",ota_partition_layout_valid()?"ready":"incompatible; use USB");
-    }
-    lv_label_set_text(g_ota_status,text);
-}
-void ota_screen_cb(lv_event_t *) { hide_wifi_keyboard();lv_screen_load(g_ota_screen);update_ota_status(); }
-void ota_start_cb(lv_event_t *) {
-    g_ota_feedback[0]=0;
-    if(!wifi_service_is_connected()) {ota_feedback("HTTPS update needs a station connection");return;}
-    if(!ota_start_https(lv_textarea_get_text(g_ota_url))) ota_feedback("Invalid HTTPS URL, scan busy, or update already active");
-}
-void ota_web_cb(lv_event_t *) {
-    g_ota_feedback[0]=0;
-    if(ota_local_server_window_active()) {
-        if(!ota_disable_local_server()) ota_feedback("Web update cannot stop during upload or while reboot is ready");
-        else ota_feedback("Stopping web update; Bluetooth will resume");
-        return;
-    }
-    if(wifi_service_get_status().state!=WifiState::AccessPoint) {
-        ota_feedback("Enable and save Access Point mode first");
-        return;
-    }
-    if(!ota_enable_local_server(120)) ota_feedback("Could not start web update window");
-    else ota_feedback("Starting web update; Bluetooth paused for up to 120 seconds");
-}
-void ota_reboot_cb(lv_event_t *) {if(ota_get_status().state==OtaState::ReadyToReboot)esp_restart();}
-void ota_focus_cb(lv_event_t *) {lv_keyboard_set_textarea(g_ota_keyboard,g_ota_url);lv_obj_remove_flag(g_ota_keyboard,LV_OBJ_FLAG_HIDDEN);}
-void ota_keyboard_cb(lv_event_t *e) {if(lv_event_get_code(e)==LV_EVENT_READY||lv_event_get_code(e)==LV_EVENT_CANCEL)lv_obj_add_flag(g_ota_keyboard,LV_OBJ_FLAG_HIDDEN);}
+#include "ui_wifi.inc"
+#include "ui_ota.inc"
 void update_shunts_list(){for(size_t i=0;i<MAX_SMARTSHUNTS;++i){char b[48];const auto&c=g_settings.smartshunts[i];std::snprintf(b,sizeof(b),"%u. %s",static_cast<unsigned>(i+1),c.configured?(c.name[0]?c.name.data():"SmartShunt"):"ADD VICTRON BLE");lv_label_set_text(g_shunt_slot_labels[i],b);}}
 void shunts_screen_cb(lv_event_t *){update_shunts_list();lv_screen_load(g_shunts_screen);}void shunt_slot_cb(lv_event_t *e){g_edit_shunt=static_cast<size_t>(reinterpret_cast<uintptr_t>(lv_event_get_user_data(e)));auto &c=g_settings.smartshunts[g_edit_shunt];lv_textarea_set_text(g_shunt_name,c.name.data());lv_textarea_set_text(g_shunt_key,c.bindkey.data());if(c.n2k_enabled)lv_obj_add_state(g_shunt_n2k,LV_STATE_CHECKED);else lv_obj_remove_state(g_shunt_n2k,LV_STATE_CHECKED);char b[12];std::snprintf(b,sizeof(b),"%u",c.battery_instance);lv_label_set_text(g_shunt_instance,b);lv_screen_load(g_shunt_edit_screen);}
 void update_shunt_picker()
@@ -1583,3 +1437,5 @@ bool ui_is_healthy() {
     const uint32_t now=static_cast<uint32_t>(esp_timer_get_time()/1000);
     return g_ui_refreshes.load()>=5 && now-g_ui_last_refresh_ms.load()<1000;
 }
+
+void ui_post_startup_notice(uint32_t flags){g_startup_notices.fetch_or(flags);}
