@@ -1,20 +1,8 @@
 // LVGL task only; included in ui.cpp private namespace.
-void wifi_keyboard_cb(lv_event_t *e){
-    const auto code=lv_event_get_code(e);
-    if(code==LV_EVENT_READY||code==LV_EVENT_CANCEL){
-        lv_obj_add_flag(g_wifi_keyboard,LV_OBJ_FLAG_HIDDEN);
-        lv_keyboard_set_textarea(g_wifi_keyboard,nullptr);
-    }
-}
 void wifi_textarea_focus_cb(lv_event_t *e){
-    lv_keyboard_set_textarea(g_wifi_keyboard,lv_event_get_target_obj(e));
-    lv_obj_remove_flag(g_wifi_keyboard,LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(g_wifi_keyboard);
+    g_editor_keyboard.show(g_wifi_screen,lv_event_get_target_obj(e),LV_KEYBOARD_MODE_TEXT_LOWER,460,205);
 }
-void hide_wifi_keyboard() {
-    lv_obj_add_flag(g_wifi_keyboard,LV_OBJ_FLAG_HIDDEN);
-    lv_keyboard_set_textarea(g_wifi_keyboard,nullptr);
-}
+void hide_wifi_keyboard(){g_editor_keyboard.hide(g_wifi_screen);}
 void wifi_mask_cb(lv_event_t *) {
     lv_textarea_set_password_mode(g_wifi_password,true);
     lv_obj_remove_state(g_wifi_show,LV_STATE_CHECKED);

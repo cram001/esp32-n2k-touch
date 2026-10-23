@@ -86,6 +86,28 @@ enum class DataMetric : uint8_t {
     SolarVoltage,
     SolarCurrent,
     SolarPower,
+    RudderAngle,
+    RateOfTurn,
+    Yaw,
+    Pitch,
+    Roll,
+    Leeway,
+    EngineTrim,
+    TransmissionGear,
+    TransmissionOilPressure,
+    TransmissionOilTemperature,
+    EngineTripFuelUsed,
+    EngineAverageFuelRate,
+    EngineEconomyFuelRate,
+    EngineInstantFuelRate,
+    DcVoltage,
+    DcCurrent,
+    DcStateOfHealth,
+    DcRippleVoltage,
+    DcCapacity,
+    PortTrimTab,
+    StarboardTrimTab,
+    UtcTime,
     Count,
 };
 
@@ -159,6 +181,9 @@ struct N2kInputConfig {
     uint16_t port = 60001;
 };
 
+// Separate optional key: existing display_v1/pages/field IDs keep their ABI.
+struct GraphPageConfig { uint8_t panels = 0; uint8_t window = 1; };
+
 struct AppSettings {
     DisplayTheme theme = DisplayTheme::Day;
     // Separate NVS key; existing persisted blobs keep their layouts.
@@ -170,6 +195,7 @@ struct AppSettings {
     N2kInputConfig n2k_input{};
     std::array<DataPageConfig, MAX_DATA_PAGES> pages{};
     std::array<SmartShuntConfig, MAX_SMARTSHUNTS> smartshunts{};
+    std::array<GraphPageConfig, MAX_DATA_PAGES> graphs{};
 };
 
 bool settings_init();

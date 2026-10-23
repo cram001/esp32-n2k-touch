@@ -176,6 +176,7 @@ void n2k_task(void *)
 bool n2k_bridge_start(const AppSettings &settings)
 {
     if (g_started) { n2k_bridge_apply_settings(settings); return true; }
+    if (!n2k_instruments_init()) return false;
     g_settings_mutex = xSemaphoreCreateMutex();
     if (g_settings_mutex == nullptr) return false;
     g_settings = settings;

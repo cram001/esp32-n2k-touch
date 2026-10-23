@@ -16,7 +16,7 @@ You do **not** need VS Code, PlatformIO, Git or a compiler just to install the f
 1. Open the [latest GitHub Release](https://github.com/cram001/esp32-n2k-touch/releases/latest).
 2. Under **Assets**, download **`esp32-n2k-touch-full.bin`**.
 3. Connect the Waveshare **ESP32-S3-Touch-LCD-4** to your computer with a USB data cable.
-4. Open [ESPConnect](https://thelastoutpostworkshop.github.io/ESPConnect/) in a Chromium-based browser such as Chrome or Edge.
+4. Open [ESPConnect](https://thelastoutpostworkshop.github.io/ESPConnect/) in a Chromium-based browser such as **Chrome or Edge**.
 5. Click **Connect** and select the ESP32-S3 serial device.
 6. Open **Flash Firmware**, select `esp32-n2k-touch-full.bin`, and set the flash address/offset to **`0x0`**.
 7. Leave **Erase entire flash before writing unchecked** unless you deliberately want a complete wipe, including the other OTA slot and storage. Full-chip erase is not required: the full image rewrites the bootloader and includes erased bytes across NVS/settings.
@@ -109,6 +109,23 @@ Developers who want to modify or compile the project can use VS Code + PlatformI
 Wall mounted case 3D printed:  https://cults3d.com/en/3d-model/home/flush-mount-wall-case-for-waveshare-esp32-s3-touch-lcd-4-instrument-display
 
 Tip: when pulling the 4 wires (can H, can L, DC pos, DC neg) through the pass-through, keep them long. Shorten them and strip them only after. A bit of soap in the pass-thru might help. It's a tight fit!
+
+Notes:
+
+1) The files in the sub folder in this project are slightly modified from those you will find in cults3d.com
+     a) Added opening for USB port
+     b) Added opening for 3 side buttons
+     c) Added extra width clearance for the recessed screen
+
+2) You will need some metric 2.5mm screws to secure the back of the esp32 to the enclosure.
+
+3) Pushing the AWG 22-24 wires (4x) through the back opening is possible. Take your time. Having some extra length available makes it easier and cut them to length and strip the ends for the connector after all 4 wires are pulled through. It's also possible to drill a hole through the back of the case as a wire pass-thru.
+
+============================
+         WARNING
+============================
+When securing the ESP32 to the enclosure DO NOT OVERTIGHTEN the screws, as it is possible to separate the LCD glass cover from the LCD.  If additional clearance is required, use a dremel, exacto or similar tool to increase clearances as required
+============================
 
 ## Functions
 
@@ -299,6 +316,14 @@ report their own watermarks once per minute. These reports come from the existin
 tasks; no diagnostic task, stack reduction or memory-profile change is involved.
 LVGL draw/system tasks are not included in these periodic stack reports.
 
+Startup also reports `Picker tables` and `Navigation tables` with their sizes,
+addresses and confirmed PSRAM residency. These hold UI source/discovery list
+copies and task-owned navigation metadata; their capacities are unchanged.
+The shared NMEA source cache, locks and CAN/TWAI buffers remain in internal RAM.
+Allocations do not fall back to internal RAM. A failed picker allocation reports
+memory unavailable and permits retry; a failed navigation allocation prevents
+the NMEA service from starting and fails the existing startup-health check.
+
 For a memory check, operate the display for 15–30 minutes with normal traffic,
 Bluetooth discovery and page navigation, then save the later reports along with
 the startup `LVGL draw buffer` line showing whether its allocation is in PSRAM.
@@ -326,3 +351,12 @@ check that the transducer is powered and sending PGN 128267, then tap **Refresh*
 Queued CAN discovery frames now retain their descriptor and payload until transmit
 completion, fixing the reboot when opening this picker with a live CAN bus.
 See [depth setup details](docs/sources-instruments-depth.md).
+
+## Graph pages and field selection
+
+Pages can show one or two trend graphs with 1-, 5- or 30-minute history, alongside
+the existing numeric layouts. History uses PSRAM and continues while viewing other
+pages; unavailable data leaves gaps. The NMEA field picker is grouped by function,
+with additional steering, attitude, transmission, fuel, electrical and trim-tab
+fields. Each tile can have an optional custom label, saved separately from the
+existing settings format. See [setup, PGNs and hardware checks](docs/graphs-and-fields.md).

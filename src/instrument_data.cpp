@@ -39,7 +39,7 @@ bool is_vessel_speed(DataMetric metric)
 bool is_temperature(DataMetric metric)
 {
     return metric == DataMetric::WaterTemperature || metric == DataMetric::AirTemperature ||
-           metric == DataMetric::BatteryTemperature || metric == DataMetric::EngineCoolantTemperature || metric == DataMetric::EngineOilTemperature || metric == DataMetric::EngineExhaustTemperature || metric == DataMetric::CabinTemperature || metric == DataMetric::EngineRoomTemperature || metric == DataMetric::EnvironmentalTemperature;
+           metric == DataMetric::BatteryTemperature || metric == DataMetric::EngineCoolantTemperature || metric == DataMetric::EngineOilTemperature || metric == DataMetric::EngineExhaustTemperature || metric == DataMetric::CabinTemperature || metric == DataMetric::EngineRoomTemperature || metric == DataMetric::EnvironmentalTemperature || metric == DataMetric::TransmissionOilTemperature;
 }
 
 bool is_distance(DataMetric metric)
@@ -173,6 +173,28 @@ const char *instrument_metric_name(DataMetric metric)
     case DataMetric::AtmosphericPressure: return "Air pressure";
     case DataMetric::Humidity: return "Humidity";
     case DataMetric::MagneticVariation: return "Mag variation";
+    case DataMetric::RudderAngle: return "Rudder angle";
+    case DataMetric::RateOfTurn: return "Rate of turn";
+    case DataMetric::Yaw: return "Yaw";
+    case DataMetric::Pitch: return "Pitch";
+    case DataMetric::Roll: return "Roll";
+    case DataMetric::Leeway: return "Leeway";
+    case DataMetric::EngineTrim: return "Engine trim";
+    case DataMetric::TransmissionGear: return "Transmission gear";
+    case DataMetric::TransmissionOilPressure: return "Transmission oil pressure";
+    case DataMetric::TransmissionOilTemperature: return "Transmission oil temp";
+    case DataMetric::EngineTripFuelUsed: return "Engine trip fuel";
+    case DataMetric::EngineAverageFuelRate: return "Average fuel rate";
+    case DataMetric::EngineEconomyFuelRate: return "Economy fuel rate";
+    case DataMetric::EngineInstantFuelRate: return "Instant fuel rate";
+    case DataMetric::DcVoltage: return "DC voltage";
+    case DataMetric::DcCurrent: return "DC current";
+    case DataMetric::DcStateOfHealth: return "DC state of health";
+    case DataMetric::DcRippleVoltage: return "DC ripple voltage";
+    case DataMetric::DcCapacity: return "DC capacity";
+    case DataMetric::PortTrimTab: return "Port trim tab";
+    case DataMetric::StarboardTrimTab: return "Starboard trim tab";
+    case DataMetric::UtcTime: return "UTC time";
     default: return "None";
     }
 }
@@ -204,7 +226,11 @@ bool instrument_metric_supported(DataSourceType source, DataMetric metric)
         return (metric >= DataMetric::BatteryVoltage && metric <= DataMetric::BatteryTemperature) ||
             (metric >= DataMetric::SolarVoltage && metric <= DataMetric::SolarPower);
     }
-    return (metric > DataMetric::None && metric < DataMetric::BatteryVoltage) || (metric > DataMetric::BatteryTemperature && metric < DataMetric::SolarVoltage);
+    return (metric > DataMetric::None && metric < DataMetric::BatteryVoltage) ||
+        (metric > DataMetric::BatteryTemperature && metric < DataMetric::SolarVoltage) ||
+        (metric >= DataMetric::RudderAngle && metric < DataMetric::Count) ||
+        metric==DataMetric::BatteryVoltage || metric==DataMetric::BatteryCurrent ||
+        metric==DataMetric::BatterySoc || metric==DataMetric::BatteryTimeToGo || metric==DataMetric::BatteryTemperature;
 }
 
 void format_coordinate(double degrees, bool latitude, LatLonFormat format, char *out, size_t size, bool compact=false)
@@ -256,7 +282,29 @@ void instrument_format_value(const DataFieldSelection &selection,
 
     const DataMetric metric = selection.metric;
     if (n2k_sources_is_depth(metric) && (v.value > 1000 || !std::isfinite(v.value))) { std::snprintf(value_out,value_out_size,"--");return; }
-    if (n2k_sources_is_depth(metric) || metric == DataMetric::Altitude || metric == DataMetric::CrossTrackError) {
+    if(metric==DataMetric::TransmissionGear) {
+        std::snprintf(value_out,value_out_size,"%s",v.value==0?"FWD":v.value==1?"NEUTRAL":v.value==2?"REV":"--");
+    } else if(metric==DataMetric::UtcTime) {
+        if(!std::isfinite(v.value) || v.value<0){std::snprintf(value_out,value_out_size,"--");return;}
+        const unsigned seconds=static_cast<unsigned>(std::fmod(v.value,86400.0));
+        std::snprintf(value_out,value_out_size,"%02u:%02u:%02u",seconds/3600,(seconds/60)%60,seconds%60);std::snprintf(unit_out,unit_out_size,"UTC");
+    } else if(metric==DataMetric::RateOfTurn) {
+        std::snprintf(value_out,value_out_size,"%+.1f",v.value*RAD_TO_DEG*60);std::snprintf(unit_out,unit_out_size,"deg/min");
+    } else if(metric==DataMetric::RudderAngle || metric==DataMetric::Yaw || metric==DataMetric::Pitch || metric==DataMetric::Roll || metric==DataMetric::Leeway) {
+        std::snprintf(value_out,value_out_size,"%+.1f",v.value*RAD_TO_DEG);std::snprintf(unit_out,unit_out_size,"deg");
+    } else if(metric==DataMetric::EngineTrim || metric==DataMetric::PortTrimTab || metric==DataMetric::StarboardTrimTab || metric==DataMetric::DcStateOfHealth) {
+        std::snprintf(value_out,value_out_size,"%.1f",v.value);std::snprintf(unit_out,unit_out_size,"%%");
+    } else if(metric==DataMetric::EngineTripFuelUsed) {
+        std::snprintf(value_out,value_out_size,"%.1f",v.value);std::snprintf(unit_out,unit_out_size,"L");
+    } else if(metric==DataMetric::EngineAverageFuelRate || metric==DataMetric::EngineEconomyFuelRate || metric==DataMetric::EngineInstantFuelRate) {
+        std::snprintf(value_out,value_out_size,"%.1f",v.value);std::snprintf(unit_out,unit_out_size,"L/h");
+    } else if(metric==DataMetric::DcVoltage || metric==DataMetric::DcRippleVoltage) {
+        std::snprintf(value_out,value_out_size,"%.2f",v.value);std::snprintf(unit_out,unit_out_size,"V");
+    } else if(metric==DataMetric::DcCurrent) {
+        std::snprintf(value_out,value_out_size,"%+.1f",v.value);std::snprintf(unit_out,unit_out_size,"A");
+    } else if(metric==DataMetric::DcCapacity) {
+        std::snprintf(value_out,value_out_size,"%.1f",v.value/3600.0);std::snprintf(unit_out,unit_out_size,"Ah");
+    } else if (n2k_sources_is_depth(metric) || metric == DataMetric::Altitude || metric == DataMetric::CrossTrackError) {
         if (units.depth == DepthUnit::Feet) { std::snprintf(value_out, value_out_size, "%.1f", v.value * M_TO_FT); std::snprintf(unit_out, unit_out_size, "ft"); }
         else { std::snprintf(value_out, value_out_size, "%.1f", v.value); std::snprintf(unit_out, unit_out_size, "m"); }
     } else if (is_wind_speed(metric)) {
@@ -303,7 +351,7 @@ void instrument_format_value(const DataFieldSelection &selection,
         std::snprintf(value_out,value_out_size,"%.1f",v.value);std::snprintf(unit_out,unit_out_size,"%s",metric==DataMetric::TankCapacity?"L":"L/h");
     } else if (metric == DataMetric::EngineHours) {
         std::snprintf(value_out,value_out_size,"%.1f",v.value/3600);std::snprintf(unit_out,unit_out_size,"h");
-    } else if (metric == DataMetric::EngineOilPressure || metric == DataMetric::EngineBoostPressure || metric == DataMetric::EngineCoolantPressure || metric == DataMetric::EngineFuelPressure || metric == DataMetric::AtmosphericPressure) {
+    } else if (metric == DataMetric::EngineOilPressure || metric == DataMetric::EngineBoostPressure || metric == DataMetric::EngineCoolantPressure || metric == DataMetric::EngineFuelPressure || metric == DataMetric::TransmissionOilPressure || metric == DataMetric::AtmosphericPressure) {
         std::snprintf(value_out,value_out_size,"%.2f",v.value/(metric==DataMetric::AtmosphericPressure?100:100000));
         std::snprintf(unit_out,unit_out_size,"%s",metric==DataMetric::AtmosphericPressure?"hPa":"bar");
     } else if (metric == DataMetric::EngineAlternatorVoltage) {
