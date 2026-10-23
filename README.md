@@ -16,7 +16,7 @@ You do **not** need VS Code, PlatformIO, Git or a compiler just to install the f
 1. Open the [latest GitHub Release](https://github.com/cram001/esp32-n2k-touch/releases/latest).
 2. Under **Assets**, download **`esp32-n2k-touch-full.bin`**.
 3. Connect the Waveshare **ESP32-S3-Touch-LCD-4** to your computer with a USB data cable.
-4. Open [ESPConnect](https://thelastoutpostworkshop.github.io/ESPConnect/) in a Chromium-based browser such as Chrome or Edge.
+4. Open [ESPConnect](https://thelastoutpostworkshop.github.io/ESPConnect/) in a Chromium-based browser such as **Chrome or Edge**.
 5. Click **Connect** and select the ESP32-S3 serial device.
 6. Open **Flash Firmware**, select `esp32-n2k-touch-full.bin`, and set the flash address/offset to **`0x0`**.
 7. Leave **Erase entire flash before writing unchecked** unless you deliberately want a complete wipe, including the other OTA slot and storage. Full-chip erase is not required: the full image rewrites the bootloader and includes erased bytes across NVS/settings.
