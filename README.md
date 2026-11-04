@@ -104,6 +104,13 @@ https://www.cruisersforum.com/forums/f13/open-source-sub-100-nmea2000-victron-di
 
 Developers who want to modify or compile the project can use VS Code + PlatformIO as described in [Development](docs/development.md).
 
+### Physical connections (wiring)
+
+From left to right:
+VIN (batt positive, 7 to 36VDC),GND, DO NOT USE, DO NOT USE, CAN LOW, CAN HIGH, DO NOT USE THE REST....
+<img width="437" height="191" alt="image" src="https://github.com/user-attachments/assets/814eb2dd-0420-4c39-9db2-d2684d534f8b" />
+
+
 ## 3D printed enclosure
 
 Wall mounted case 3D printed:  https://cults3d.com/en/3d-model/home/flush-mount-wall-case-for-waveshare-esp32-s3-touch-lcd-4-instrument-display
