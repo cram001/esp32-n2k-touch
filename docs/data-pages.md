@@ -149,3 +149,24 @@ The two lines are measured and scaled together to fit all page layouts without
 additional wrapping. Decimal-degree and degrees/minutes/seconds selections
 still apply, with leading hemispheres. Standalone Latitude/Longitude fields
 retain their existing precision and trailing hemispheres.
+
+## Local trip log
+
+Open **Settings → Trip Log** to turn logging on or off, choose **STW** (speed
+through water, PGN 128259) or **GPS SOG** (speed over ground, PGN 129026), and
+**Reset to zero**. STW measures distance through the water; SOG measures
+distance over the ground, including the effect of current. Use a numeric
+page and select **NMEA 2000 → Speed & log → Trip Log** to show the same
+total in a tile. The existing **Trip** field continues to display the trip
+distance sent by an external instrument (PGN 128275).
+
+The log starts off by default. It continues to run while you view other
+pages or settings, using the selected NMEA input (wired CAN or Wi-Fi).
+STW uses automatic instrument selection. SOG follows the shared GPS source
+selection. Turning logging off pauses accumulation without clearing it.
+Changing the source preserves the total and starts a new measurement interval.
+Missing or invalid speed data and gaps of three seconds or more do not add
+distance. No other speed type is substituted when the selected type is missing.
+
+The total uses the configured long distance unit (NM or km). On/off and
+source settings are saved, but the accumulated distance resets on reboot.

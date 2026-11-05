@@ -12,7 +12,7 @@ int main() {
     for(auto m:{DataMetric::DepthTransducer,DataMetric::DepthBelowKeel,
                 DataMetric::DepthWaterline,DataMetric::DepthSensorOffset})
         assert(metric_group(m)==depth);
-    for(auto m:{DataMetric::SpeedOverGround,DataMetric::WaypointVmg,DataMetric::TripDistance})
+    for(auto m:{DataMetric::SpeedOverGround,DataMetric::WaypointVmg,DataMetric::TripDistance,DataMetric::LocalTripDistance})
         assert(metric_group(m)==speed);
     for(auto m:{DataMetric::ApparentWindSpeed,DataMetric::ApparentWindAngle,
                 DataMetric::TrueWindSpeed,DataMetric::TrueWindAngle})
