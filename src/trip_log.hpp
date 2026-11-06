@@ -11,14 +11,18 @@ struct TripLogConfig {
     TripSpeed source = TripSpeed::Stw;
 };
 
-bool trip_log_load(TripLogConfig &config);
-bool trip_log_save(TripLogConfig config);
-
 // Owned by the LVGL task. Integrate between distinct NMEA receive timestamps,
 // never across a pause, source change, reset, or missing data.
 class TripLog {
 public:
     static constexpr int64_t MaxGapUs = 3000000;
+    static constexpr int64_t CheckpointUs = 60000000;
+
+    bool restore(int64_t now);
+    bool save_settings(TripLogConfig config, int64_t now);
+    bool save_reset(int64_t now);
+    bool checkpoint(int64_t now, bool force = false);
+    bool checkpoint_failed() const { return checkpoint_failed_; }
 
     TripLogConfig config() const { return config_; }
     double metres() const { return metres_; }
@@ -64,6 +68,10 @@ public:
     }
 
 private:
+    bool save(TripLogConfig config, double metres, int64_t now);
+    double saved_metres_ = 0;
+    int64_t next_checkpoint_us_ = 0;
+    bool checkpoint_failed_ = false;
     TripLogConfig config_{};
     double metres_ = 0;
     double previous_speed_ = 0;

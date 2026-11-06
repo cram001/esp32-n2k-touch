@@ -168,5 +168,11 @@ Changing the source preserves the total and starts a new measurement interval.
 Missing or invalid speed data and gaps of three seconds or more do not add
 distance. No other speed type is substituted when the selected type is missing.
 
-The total uses the configured long distance unit (NM or km). On/off and
-source settings are saved, but the accumulated distance resets on reboot.
+The total uses the configured long distance unit (NM or km). The display
+restores the saved total, on/off setting and speed source after a reboot.
+While distance is changing, it saves at most once a minute. Changing the
+log settings, resetting to zero, or switching between wired and Wi-Fi NMEA
+input saves immediately. An unexpected power cut can lose up to about a minute
+of new distance when storage is working normally. Time spent powered off
+never adds distance. An older trip log setting is kept on upgrade; firmware
+that did not save distance starts with a zero total.

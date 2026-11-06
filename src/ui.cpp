@@ -834,6 +834,9 @@ void input_save_cb(lv_event_t *) {
         }
     }
     const bool source_changed=candidate.n2k_input.mode!=g_settings.n2k_input.mode;
+    if(source_changed && !g_trip_log.checkpoint(esp_timer_get_time(), true)) {
+        g_input_feedback=true;lv_label_set_text(g_input_status,"Could not save trip distance; please retry");return;
+    }
     if(!settings_save(candidate)) {
         g_input_feedback=true;lv_label_set_text(g_input_status,"Could not save NMEA source; please retry");return;
     }
@@ -1377,9 +1380,7 @@ void create_shunt_edit_screen()
 void ui_start(const AppSettings &initial_settings)
 {
     g_settings = initial_settings;
-    TripLogConfig trip_config{};
-    if (!trip_log_load(trip_config)) ESP_LOGW(TAG, "Could not load trip log settings; logging disabled");
-    g_trip_log.configure(trip_config, esp_timer_get_time());
+    if (!g_trip_log.restore(esp_timer_get_time())) ESP_LOGW(TAG, "Could not restore trip log; logging disabled");
     ensure_picker_tables();
     if(void *memory=heap_caps_malloc(sizeof(TileLabels),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)){
         g_tile_labels=new(memory) TileLabels{};g_tile_labels_writable=g_tile_labels->load();
