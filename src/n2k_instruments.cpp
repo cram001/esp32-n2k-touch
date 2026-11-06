@@ -186,7 +186,11 @@ void n2k_instruments_receive(const tN2kMsg &msg) {
         }break;
     }
     case 128259:{unsigned char sid;double water,ground;tN2kSpeedWaterReferenceType ref;
-        if(ParseN2kPGN128259(msg,sid,water,ground,ref))publish(msg,DataMetric::BoatSpeed,water);
+        if(ParseN2kPGN128259(msg,sid,water,ground,ref)){
+            const uint16_t raw_stw=static_cast<uint16_t>(msg.Data[1]) | (static_cast<uint16_t>(msg.Data[2])<<8);
+            if(raw_stw<0xFFFDU && water!=N2kDoubleNA && std::isfinite(water))publish(msg,DataMetric::BoatSpeed,water);
+            else n2k_sources_invalidate(DataMetric::BoatSpeed,msg.Source);
+        }
         break;}
     case 128267:{unsigned char sid;double depth,offset,range;
         if(ParseN2kPGN128267(msg,sid,depth,offset,range)&&depth!=N2kDoubleNA)n2k_sources_publish(DataMetric::Depth,msg.Source,255,255,depth,HeadingReference::Unknown,offset!=N2kDoubleNA,offset);

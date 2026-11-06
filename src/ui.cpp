@@ -21,6 +21,7 @@
 #include "tile_number_fit.hpp"
 #include "depth_display.hpp"
 #include "graph_history.hpp"
+#include "trip_log.hpp"
 #include "tile_labels.hpp"
 #include "ui_keyboard.hpp"
 #include "psram_object.hpp"
@@ -193,6 +194,25 @@ void ota_feedback(const char *text) {
 void update_wifi_scan();
 void update_ota_status();
 void update_shunt_picker();
+
+TripLog g_trip_log;
+
+InstrumentValue field_value(const DataFieldSelection &field, uint8_t field_id) {
+    if (field.metric != DataMetric::LocalTripDistance) return instrument_data_get(field, field_id);
+    InstrumentValue value{};
+    value.valid = true;
+    value.stale = false;
+    value.value = g_trip_log.metres();
+    return value;
+}
+
+const char *field_source_name(const DataFieldSelection &field, const AppSettings &settings, uint8_t field_id) {
+    if (field.metric != DataMetric::LocalTripDistance) return instrument_source_name(field, settings, field_id);
+    const auto config = g_trip_log.config();
+    if (!config.enabled) return "Trip Log: paused";
+    if (!g_trip_log.receiving()) return "Trip Log: waiting";
+    return config.source == TripSpeed::Stw ? "Trip Log: STW" : "Trip Log: GPS SOG";
+}
 
 struct MetricList { std::array<DataMetric,static_cast<size_t>(DataMetric::Count)> values{}; size_t count=0; };
 const MetricList NMEA_METRICS=[] {
@@ -402,7 +422,7 @@ void sample_graph_pages() {
                 buffer=new(memory) GraphBuffer{};
                 ESP_LOGI(TAG,"Graph history: %u bytes in PSRAM, page %u panel %u",unsigned(sizeof(GraphBuffer)),unsigned(page+1),unsigned(panel+1));
             }
-            const auto value=instrument_data_get(selection,static_cast<uint8_t>(page*MAX_DATA_FIELDS_PER_PAGE+panel));
+            const auto value=field_value(selection,static_cast<uint8_t>(page*MAX_DATA_FIELDS_PER_PAGE+panel));
             char text[80],unit[16];instrument_format_value(selection,g_settings.units,value,text,sizeof(text),unit,sizeof(unit));
             char *end=nullptr;const double number=std::strtod(text,&end);
             const bool valid=metric_graphable(selection.metric)&&value.valid&&!value.stale&&end!=text&&*end=='\0'&&std::isfinite(number);
@@ -448,7 +468,7 @@ void render_graph(size_t panel,const DataFieldSelection &selection,const Instrum
     }
     lv_obj_set_width(g_tile_units[panel],w);lv_obj_set_style_text_align(g_tile_units[panel],LV_TEXT_ALIGN_LEFT,0);
     lv_obj_align(g_tile_units[panel],LV_ALIGN_BOTTOM_LEFT,2,-18);
-    char footer[100];std::snprintf(footer,sizeof(footer),"%s | %s",GraphHistory::window_name(config.window),instrument_source_name(selection,g_settings,static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+panel)));
+    char footer[100];std::snprintf(footer,sizeof(footer),"%s | %s",GraphHistory::window_name(config.window),field_source_name(selection,g_settings,static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+panel)));
     lv_label_set_text(g_tile_sources[panel],footer);lv_obj_remove_flag(g_tile_sources[panel],LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -476,12 +496,12 @@ void render_active_page()
         if(i<2 && g_graph_charts[i])lv_obj_add_flag(g_graph_charts[i],LV_OBJ_FLAG_HIDDEN);
         const auto &sel=active.fields[i];lv_label_set_text(g_tile_titles[i],instrument_field_name(sel));
         const auto field_id=static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+i);
-        const InstrumentValue v=depth_display[field_id].apply(sel,g_settings.units.depth,instrument_data_get(sel,field_id));
+        const InstrumentValue v=depth_display[field_id].apply(sel,g_settings.units.depth,field_value(sel,field_id));
         const char *custom=g_tile_labels?g_tile_labels->get(field_id):"";
         if(custom[0])lv_label_set_text(g_tile_titles[i],custom);
         if(graph){render_graph(i,sel,v);continue;}
         if(sel.source==DataSourceType::SmartShunt){
-            lv_label_set_text(g_tile_sources[i],instrument_source_name(sel,g_settings,static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+i)));
+            lv_label_set_text(g_tile_sources[i],field_source_name(sel,g_settings,static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+i)));
             lv_obj_remove_flag(g_tile_sources[i],LV_OBJ_FLAG_HIDDEN);
         }else if(sel.metric==DataMetric::TankLevel || sel.metric==DataMetric::TankCapacity){
             const char *fluid[]={"Fuel","Water","Grey water","Live well","Oil","Sewage","Gasoline"};
@@ -521,6 +541,7 @@ void render_active_page()
     }
 }
 
+#include "ui_trip_log.inc"
 #include "ui_wifi_status.inc"
 void show_startup_notice() {
     const uint32_t flags=g_startup_notices.exchange(0);
@@ -533,7 +554,7 @@ void show_startup_notice() {
     auto *close=make_button(panel,"DISMISS",[](lv_event_t *e){lv_obj_delete(static_cast<lv_obj_t *>(lv_event_get_user_data(e)));},200,48,panel);
     lv_obj_align(close,LV_ALIGN_BOTTOM_MID,0,0);
 }
-void refresh_cb(lv_timer_t *){show_startup_notice();++g_ui_refreshes;g_ui_last_refresh_ms=static_cast<uint32_t>(esp_timer_get_time()/1000);render_active_page();update_wifi_status();update_wifi_scan();update_ota_status();update_input_status();if(lv_screen_active()==g_shunt_picker_screen)update_shunt_picker();}
+void refresh_cb(lv_timer_t *){sample_trip_log();show_startup_notice();++g_ui_refreshes;g_ui_last_refresh_ms=static_cast<uint32_t>(esp_timer_get_time()/1000);render_active_page();update_wifi_status();update_wifi_scan();update_ota_status();update_input_status();if(lv_screen_active()==g_shunt_picker_screen)update_shunt_picker();}
 void previous_page_cb(lv_event_t *){g_active_page=next_enabled_page(g_active_page,-1);render_active_page();}
 void next_page_cb(lv_event_t *){g_active_page=next_enabled_page(g_active_page,+1);render_active_page();}
 void data_screen_cb(lv_event_t *){render_active_page();lv_screen_load(g_data_screen);}
@@ -567,7 +588,7 @@ void update_page_setup()
     if(graph.panels)lv_obj_remove_flag(g_graph_window_button,LV_OBJ_FLAG_HIDDEN);else lv_obj_add_flag(g_graph_window_button,LV_OBJ_FLAG_HIDDEN);
     lv_label_set_text(button_label(g_graph_window_button),GraphHistory::window_name(graph.window));
     const size_t count=g_settings.graphs[g_edit_page].panels?g_settings.graphs[g_edit_page].panels:layout_count(p.layout);
-    for(size_t i=0;i<MAX_DATA_FIELDS_PER_PAGE;++i){if(i>=count){lv_obj_add_flag(g_field_buttons[i],LV_OBJ_FLAG_HIDDEN);continue;}lv_obj_remove_flag(g_field_buttons[i],LV_OBJ_FLAG_HIDDEN);const auto &f=p.fields[i];const char *label=g_tile_labels?g_tile_labels->get(g_edit_page*MAX_DATA_FIELDS_PER_PAGE+i):"";std::snprintf(b,sizeof(b),"%u. %s\n%s",static_cast<unsigned>(i+1),label[0]?label:instrument_field_name(f),instrument_source_name(f,g_settings,static_cast<uint8_t>(g_edit_page*MAX_DATA_FIELDS_PER_PAGE+i)));lv_label_set_text(g_field_button_labels[i],b);}
+    for(size_t i=0;i<MAX_DATA_FIELDS_PER_PAGE;++i){if(i>=count){lv_obj_add_flag(g_field_buttons[i],LV_OBJ_FLAG_HIDDEN);continue;}lv_obj_remove_flag(g_field_buttons[i],LV_OBJ_FLAG_HIDDEN);const auto &f=p.fields[i];const char *label=g_tile_labels?g_tile_labels->get(g_edit_page*MAX_DATA_FIELDS_PER_PAGE+i):"";std::snprintf(b,sizeof(b),"%u. %s\n%s",static_cast<unsigned>(i+1),label[0]?label:instrument_field_name(f),field_source_name(f,g_settings,static_cast<uint8_t>(g_edit_page*MAX_DATA_FIELDS_PER_PAGE+i)));lv_label_set_text(g_field_button_labels[i],b);}
 }
 void page_setup_screen_cb(lv_event_t *){update_page_setup();lv_screen_load(g_page_setup_screen);}
 void edit_prev_page_cb(lv_event_t *){g_edit_page=(g_edit_page+MAX_DATA_PAGES-1)%MAX_DATA_PAGES;update_page_setup();}
@@ -594,7 +615,7 @@ void update_field_editor()
     g_editor_keyboard.hide(g_field_editor_screen);
     auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];lv_label_set_text(g_field_source_label,f.source==DataSourceType::Nmea2000?"NMEA 2000":"VICTRON BLE");lv_label_set_text(g_field_metric_label,instrument_field_name(f));
     lv_obj_remove_flag(g_field_device_button,LV_OBJ_FLAG_HIDDEN);
-    lv_label_set_text(g_field_device_label,instrument_source_name(f,g_settings,editing_field_id()));
+    lv_label_set_text(g_field_device_label,f.metric==DataMetric::LocalTripDistance ? "Trip Log setup" : field_source_name(f,g_settings,editing_field_id()));
 }
 void open_field_editor_cb(lv_event_t *e){g_edit_field=static_cast<size_t>(reinterpret_cast<uintptr_t>(lv_event_get_user_data(e)));update_field_editor();lv_screen_load(g_field_editor_screen);}
 void field_source_cb(lv_event_t *){if(!n2k_sources_save_choice(editing_field_id(),N2kSourceChoice{}))return;auto &f=g_settings.pages[g_edit_page].fields[g_edit_field];f.source=f.source==DataSourceType::Nmea2000?DataSourceType::SmartShunt:DataSourceType::Nmea2000;f.metric=f.source==DataSourceType::Nmea2000?DataMetric::Depth:DataMetric::BatteryVoltage;persist();update_field_editor();}
@@ -615,6 +636,7 @@ void field_shunt_choice_cb(lv_event_t *event)
 void field_device_cb(lv_event_t *)
 {
     const auto &field=g_settings.pages[g_edit_page].fields[g_edit_field];
+    if(field.metric==DataMetric::LocalTripDistance){trip_log_screen_cb(nullptr);return;}
     if(field.source==DataSourceType::Nmea2000){g_source_depth_picker=false;n2k_bridge_request_sources();source_picker_cb(nullptr);return;}
     lv_obj_clean(g_shunt_source_list);
     size_t row=0;
@@ -812,6 +834,9 @@ void input_save_cb(lv_event_t *) {
         }
     }
     const bool source_changed=candidate.n2k_input.mode!=g_settings.n2k_input.mode;
+    if(source_changed && !g_trip_log.checkpoint(esp_timer_get_time(), true)) {
+        g_input_feedback=true;lv_label_set_text(g_input_status,"Could not save trip distance; please retry");return;
+    }
     if(!settings_save(candidate)) {
         g_input_feedback=true;lv_label_set_text(g_input_status,"Could not save NMEA source; please retry");return;
     }
@@ -1043,8 +1068,10 @@ void create_settings_screen()
     lv_obj_align(b,LV_ALIGN_TOP_LEFT,30,116);
     b=make_button(g_settings_screen,"Depth Setup",depth_screen_cb,200,48);
     lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-30,116);
-    b=make_button(g_settings_screen,"Wi-Fi",wifi_screen_cb,260,48);
-    lv_obj_align(b,LV_ALIGN_TOP_MID,0,170);
+    b=make_button(g_settings_screen,"Wi-Fi",wifi_screen_cb,200,48);
+    lv_obj_align(b,LV_ALIGN_TOP_LEFT,30,170);
+    b=make_button(g_settings_screen,"Trip Log",trip_log_screen_cb,200,48);
+    lv_obj_align(b,LV_ALIGN_TOP_RIGHT,-30,170);
     b=make_button(g_settings_screen,"Victron BLE",shunts_screen_cb,260,48);
     lv_obj_align(b,LV_ALIGN_TOP_MID,0,224);
 
@@ -1353,6 +1380,7 @@ void create_shunt_edit_screen()
 void ui_start(const AppSettings &initial_settings)
 {
     g_settings = initial_settings;
+    if (!g_trip_log.restore(esp_timer_get_time())) ESP_LOGW(TAG, "Could not restore trip log; logging disabled");
     ensure_picker_tables();
     if(void *memory=heap_caps_malloc(sizeof(TileLabels),MALLOC_CAP_SPIRAM|MALLOC_CAP_8BIT)){
         g_tile_labels=new(memory) TileLabels{};g_tile_labels_writable=g_tile_labels->load();

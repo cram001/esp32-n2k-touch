@@ -131,6 +131,7 @@ const char *instrument_metric_name(DataMetric metric)
     case DataMetric::AirTemperature: return "Air temp";
     case DataMetric::DistanceToWaypoint: return "To waypoint";
     case DataMetric::TripDistance: return "Trip";
+    case DataMetric::LocalTripDistance: return "Trip Log";
     case DataMetric::SolarVoltage: return "Solar V";
     case DataMetric::SolarCurrent: return "Solar A";
     case DataMetric::SolarPower: return "Solar W";
@@ -365,6 +366,10 @@ void instrument_format_value(const DataFieldSelection &selection,
         const double c = v.value - 273.15;
         if (units.temperature == TemperatureUnit::Fahrenheit) { std::snprintf(value_out, value_out_size, "%.1f", c * 9.0 / 5.0 + 32.0); std::snprintf(unit_out, unit_out_size, "F"); }
         else { std::snprintf(value_out, value_out_size, "%.1f", c); std::snprintf(unit_out, unit_out_size, "C"); }
+    } else if (metric == DataMetric::LocalTripDistance) {
+        const bool km = units.distance == DistanceUnit::Kilometres;
+        std::snprintf(value_out,value_out_size,"%.2f",v.value * (km ? M_TO_KM : M_TO_NM));
+        std::snprintf(unit_out,unit_out_size,"%s",km ? "km" : "NM");
     } else if (is_distance(metric)) {
         const double nm = v.value * M_TO_NM;
         if (nm < units.short_distance_threshold_nm) {
