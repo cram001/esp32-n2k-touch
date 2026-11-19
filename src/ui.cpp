@@ -392,6 +392,8 @@ void render_rudder_graphic(size_t index,const InstrumentValue &value)
     const double degrees=value.value*RAD_TO_DEG;
     char text[24];std::snprintf(text,sizeof(text),"%+.0f deg",degrees);
     lv_label_set_text(g_rudder_values[index],text);
+    lv_obj_set_style_text_color(g_rudder_values[index],
+        degrees<0?lv_color_hex(0xFF3B30):(degrees>0?lv_color_hex(0x34C759):ui_text()),0);
 
     // Visual scale is +/-45 degrees. Only the marker is clamped; the numeric
     // value always shows the actual PGN 127245 rudder position.
@@ -400,7 +402,8 @@ void render_rudder_graphic(size_t index,const InstrumentValue &value)
     const int x=track_x+static_cast<int>(std::lround((clamped+45.0)/90.0*(track_w-marker_w)));
     lv_obj_set_size(g_rudder_markers[index],marker_w,24);
     lv_obj_set_pos(g_rudder_markers[index],x,track_y-9);
-    lv_obj_set_style_bg_color(g_rudder_markers[index],degrees<0?lv_color_hex(0xFF3B30):(degrees>0?lv_color_hex(0x34C759):ui_text()),0);
+    // Keep the moving pointer white so it remains obvious against either side.
+    lv_obj_set_style_bg_color(g_rudder_markers[index],ui_text(),0);
     lv_obj_set_style_bg_opa(g_rudder_markers[index],LV_OPA_COVER,0);
     lv_obj_remove_flag(g_rudder_markers[index],LV_OBJ_FLAG_HIDDEN);
 }
