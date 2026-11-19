@@ -108,6 +108,7 @@ enum class DataMetric : uint8_t {
     PortTrimTab,
     StarboardTrimTab,
     UtcTime,
+    RudderGraphic,
     Count,
 };
 
