@@ -92,6 +92,11 @@ InstrumentValue smartshunt_value(const DataFieldSelection &selection)
 
 void instrument_data_reset_nmea(){n2k_sources_reset();}
 
+DataMetric instrument_source_metric(DataMetric metric)
+{
+    return metric == DataMetric::RudderGraphic ? DataMetric::RudderAngle : metric;
+}
+
 InstrumentValue instrument_data_get(const DataFieldSelection &selection, uint8_t field_id)
 {
     if (selection.source == DataSourceType::SmartShunt) return smartshunt_value(selection);
@@ -111,7 +116,7 @@ InstrumentValue instrument_data_get(const DataFieldSelection &selection, uint8_t
         return out;
     }
     InstrumentValue out{};
-    n2k_sources_get(selection.metric,field_id,out);
+    n2k_sources_get(instrument_source_metric(selection.metric),field_id,out);
     return out;
 }
 
@@ -174,6 +179,7 @@ const char *instrument_metric_name(DataMetric metric)
     case DataMetric::Humidity: return "Humidity";
     case DataMetric::MagneticVariation: return "Mag variation";
     case DataMetric::RudderAngle: return "Rudder angle";
+    case DataMetric::RudderGraphic: return "Rudder graphic";
     case DataMetric::RateOfTurn: return "Rate of turn";
     case DataMetric::Yaw: return "Yaw";
     case DataMetric::Pitch: return "Pitch";
@@ -203,7 +209,7 @@ const char *instrument_source_name(const DataFieldSelection &selection, const Ap
 {
     if (selection.source == DataSourceType::Nmea2000) {
         // Called only by the LVGL task; live source data is copied under its own lock.
-        static char label[80];n2k_sources_label(selection.metric,field_id,label,sizeof(label));return label;
+        static char label[80];n2k_sources_label(instrument_source_metric(selection.metric),field_id,label,sizeof(label));return label;
     }
     if (selection.source_index >= settings.smartshunts.size()) return "SmartShunt";
     const auto &cfg = settings.smartshunts[selection.source_index];
@@ -290,7 +296,7 @@ void instrument_format_value(const DataFieldSelection &selection,
         std::snprintf(value_out,value_out_size,"%02u:%02u:%02u",seconds/3600,(seconds/60)%60,seconds%60);std::snprintf(unit_out,unit_out_size,"UTC");
     } else if(metric==DataMetric::RateOfTurn) {
         std::snprintf(value_out,value_out_size,"%+.1f",v.value*RAD_TO_DEG*60);std::snprintf(unit_out,unit_out_size,"deg/min");
-    } else if(metric==DataMetric::RudderAngle || metric==DataMetric::Yaw || metric==DataMetric::Pitch || metric==DataMetric::Roll || metric==DataMetric::Leeway) {
+    } else if(metric==DataMetric::RudderAngle || metric==DataMetric::RudderGraphic || metric==DataMetric::Yaw || metric==DataMetric::Pitch || metric==DataMetric::Roll || metric==DataMetric::Leeway) {
         std::snprintf(value_out,value_out_size,"%+.1f",v.value*RAD_TO_DEG);std::snprintf(unit_out,unit_out_size,"deg");
     } else if(metric==DataMetric::EngineTrim || metric==DataMetric::PortTrimTab || metric==DataMetric::StarboardTrimTab || metric==DataMetric::DcStateOfHealth) {
         std::snprintf(value_out,value_out_size,"%.1f",v.value);std::snprintf(unit_out,unit_out_size,"%%");
