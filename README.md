@@ -67,8 +67,7 @@ not started. One confirmed cause is selecting **Erase entire flash before writin
 and then flashing only `firmware.bin`. Rebuilding or reflashing the application
 alone cannot restore the erased bootloader.
 
-Recover with **`esp32-n2k-touch-full.bin` at `0x0`**, then check the startup version
-and reconfigure saved settings as needed. The full merged image spans NVS and
+Recover with **`esp32-n2k-touch-full.bin` at `0x0`**. The full merged image spans NVS and
 contains erased (`0xFF`) bytes there: a normal write clears saved settings even
 with full-chip erase disabled. Whole-chip erase additionally removes the other
 OTA slot and storage, so it is not required for a routine full-image write.
