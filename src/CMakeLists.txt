@@ -16,6 +16,7 @@ idf_component_register(
         "ota.cpp"
         "ui.cpp"
         "tile_labels.cpp"
+        "trip_log.cpp"
     INCLUDE_DIRS "."
     REQUIRES nvs_flash bt mbedtls esp_wifi esp_netif esp_event driver esp_driver_twai esp_https_ota esp_http_client esp_http_server app_update bootloader_support
 )

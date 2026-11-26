@@ -21,7 +21,7 @@ inline MetricGroup metric_group(DataMetric m) {
     case DataMetric::Depth:case DataMetric::DepthTransducer:case DataMetric::DepthBelowKeel:
     case DataMetric::DepthWaterline:case DataMetric::DepthSensorOffset:return MetricGroup::Depth;
     case DataMetric::BoatSpeed:case DataMetric::SpeedOverGround:case DataMetric::WaypointVmg:
-    case DataMetric::TripDistance:return MetricGroup::Speed;
+    case DataMetric::TripDistance:case DataMetric::LocalTripDistance:return MetricGroup::Speed;
     case DataMetric::ApparentWindSpeed:case DataMetric::ApparentWindAngle:case DataMetric::TrueWindSpeed:case DataMetric::TrueWindAngle:return MetricGroup::Wind;
     case DataMetric::TankLevel:case DataMetric::TankCapacity:return MetricGroup::Tanks;
     case DataMetric::WaterTemperature:case DataMetric::AirTemperature:case DataMetric::CabinTemperature:
@@ -38,5 +38,5 @@ inline MetricGroup metric_group(DataMetric m) {
 inline bool metric_graphable(DataMetric m) {
     return m!=DataMetric::None && m!=DataMetric::Latitude && m!=DataMetric::Longitude &&
         m!=DataMetric::Position && m!=DataMetric::WaypointName && m!=DataMetric::TransmissionGear &&
-        m!=DataMetric::UtcTime && m!=DataMetric::BatteryTimeToGo && m<DataMetric::Count;
+        m!=DataMetric::LocalTripDistance && m!=DataMetric::UtcTime && m!=DataMetric::BatteryTimeToGo && m<DataMetric::Count;
 }

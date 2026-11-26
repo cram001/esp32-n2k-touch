@@ -23,6 +23,11 @@ int main(){
     assert(std::strcmp(instrument_metric_name(DataMetric::BoatSpeed),"STW (through water)")==0);
     assert(std::strcmp(instrument_metric_name(DataMetric::SpeedOverGround),"SOG")==0);
     UnitsSettings distance{};
+    expect(DataMetric::LocalTripDistance,0,distance,"0.00","NM");
+    expect(DataMetric::LocalTripDistance,1852,distance,"1.00","NM");
+    UnitsSettings trip_km{};
+    trip_km.distance=DistanceUnit::Kilometres;
+    expect(DataMetric::LocalTripDistance,1852,trip_km,"1.85","km");
     expect(DataMetric::RateOfTurn,0.01,distance,"+34.4","deg/min");
     expect(DataMetric::RudderAngle,-0.2,distance,"-11.5","deg");
     expect(DataMetric::TransmissionOilPressure,250000,distance,"2.50","bar");
