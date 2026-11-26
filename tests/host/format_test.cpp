@@ -30,6 +30,7 @@ int main(){
     expect(DataMetric::LocalTripDistance,1852,trip_km,"1.85","km");
     expect(DataMetric::RateOfTurn,0.01,distance,"+34.4","deg/min");
     expect(DataMetric::RudderAngle,-0.2,distance,"-11.5","deg");
+    expect(DataMetric::RudderGraphic,-0.2,distance,"-11.5","deg");
     expect(DataMetric::TransmissionOilPressure,250000,distance,"2.50","bar");
     expect(DataMetric::TransmissionOilTemperature,300,distance,"26.9","C");
     expect(DataMetric::DcCapacity,360000,distance,"100.0","Ah");

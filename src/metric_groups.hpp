@@ -38,5 +38,5 @@ inline MetricGroup metric_group(DataMetric m) {
 inline bool metric_graphable(DataMetric m) {
     return m!=DataMetric::None && m!=DataMetric::Latitude && m!=DataMetric::Longitude &&
         m!=DataMetric::Position && m!=DataMetric::WaypointName && m!=DataMetric::TransmissionGear &&
-        m!=DataMetric::LocalTripDistance && m!=DataMetric::UtcTime && m!=DataMetric::BatteryTimeToGo && m<DataMetric::Count;
+        m!=DataMetric::LocalTripDistance && m!=DataMetric::UtcTime && m!=DataMetric::BatteryTimeToGo && m!=DataMetric::RudderGraphic && m<DataMetric::Count;
 }

@@ -34,6 +34,8 @@ const char *instrument_field_name(const DataFieldSelection &selection);
 const char *instrument_metric_name(DataMetric metric);
 const char *instrument_source_name(const DataFieldSelection &selection, const AppSettings &settings, uint8_t field_id = 255);
 bool instrument_metric_supported(DataSourceType source, DataMetric metric);
+// UI-only metrics can reuse the same live NMEA 2000 source metric.
+DataMetric instrument_source_metric(DataMetric metric);
 
 // Formats a value and unit independently so the UI can size them differently.
 void instrument_format_value(const DataFieldSelection &selection,

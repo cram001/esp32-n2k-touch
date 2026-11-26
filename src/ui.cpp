@@ -128,6 +128,13 @@ std::array<lv_obj_t *, MAX_DATA_FIELDS_PER_PAGE> g_tile_titles{};
 std::array<lv_obj_t *, MAX_DATA_FIELDS_PER_PAGE> g_tile_values{};
 std::array<lv_obj_t *, MAX_DATA_FIELDS_PER_PAGE> g_tile_units{};
 std::array<lv_obj_t *, MAX_DATA_FIELDS_PER_PAGE> g_tile_sources{};
+std::array<lv_obj_t *, MAX_DATA_FIELDS_PER_PAGE> g_rudder_gauges{};
+std::array<lv_obj_t *, MAX_DATA_FIELDS_PER_PAGE> g_rudder_tracks{};
+std::array<lv_obj_t *, MAX_DATA_FIELDS_PER_PAGE> g_rudder_markers{};
+std::array<lv_obj_t *, MAX_DATA_FIELDS_PER_PAGE> g_rudder_centers{};
+std::array<lv_obj_t *, MAX_DATA_FIELDS_PER_PAGE> g_rudder_values{};
+std::array<lv_obj_t *, MAX_DATA_FIELDS_PER_PAGE> g_rudder_ports{};
+std::array<lv_obj_t *, MAX_DATA_FIELDS_PER_PAGE> g_rudder_starboards{};
 std::array<lv_obj_t *, MAX_DATA_PAGES> g_page_dots{};
 
 lv_obj_t *g_page_setup_title = nullptr;
@@ -362,6 +369,65 @@ void position_tile(size_t index, PageLayout layout)
     lv_obj_align(g_tile_sources[index],LV_ALIGN_BOTTOM_RIGHT,-2,0);
 }
 
+void render_rudder_graphic(size_t index,const InstrumentValue &value)
+{
+    auto *gauge=g_rudder_gauges[index];
+    if(!gauge)return;
+    lv_obj_remove_flag(gauge,LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(g_tile_values[index],LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(g_tile_units[index],LV_OBJ_FLAG_HIDDEN);
+
+    const int width=lv_obj_get_width(g_tile_boxes[index])-20;
+    const int height=lv_obj_get_height(g_tile_boxes[index])>170?120:72;
+    lv_obj_set_size(gauge,width,height);
+    lv_obj_align(gauge,LV_ALIGN_CENTER,0,6);
+
+    const int track_x=20;
+    const int track_w=width-40;
+    const int track_y=height/2;
+    lv_obj_set_pos(g_rudder_tracks[index],track_x,track_y);
+    lv_obj_set_size(g_rudder_tracks[index],track_w,6);
+    lv_obj_set_style_bg_color(g_rudder_tracks[index],ui_muted(),0);
+    lv_obj_set_style_bg_opa(g_rudder_tracks[index],LV_OPA_COVER,0);
+
+    lv_obj_set_size(g_rudder_centers[index],2,18);
+    lv_obj_set_pos(g_rudder_centers[index],width/2-1,track_y-6);
+    lv_obj_set_style_bg_color(g_rudder_centers[index],ui_text(),0);
+    lv_obj_set_style_bg_opa(g_rudder_centers[index],LV_OPA_COVER,0);
+
+    lv_obj_set_style_text_color(g_rudder_values[index],ui_text(),0);
+    lv_obj_set_style_text_color(g_rudder_ports[index],lv_color_hex(0xFF3B30),0);
+    lv_obj_set_style_text_color(g_rudder_starboards[index],lv_color_hex(0x34C759),0);
+    lv_obj_align(g_rudder_values[index],LV_ALIGN_TOP_MID,0,0);
+    lv_obj_align(g_rudder_ports[index],LV_ALIGN_BOTTOM_LEFT,0,0);
+    lv_obj_align(g_rudder_starboards[index],LV_ALIGN_BOTTOM_RIGHT,0,0);
+
+    if(!value.valid || value.stale || !std::isfinite(value.value)){
+        lv_label_set_text(g_rudder_values[index],"--");
+        lv_obj_add_flag(g_rudder_markers[index],LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+
+    constexpr double RAD_TO_DEG=57.29577951308232;
+    const double degrees=value.value*RAD_TO_DEG;
+    char text[24];std::snprintf(text,sizeof(text),"%+.0f deg",degrees);
+    lv_label_set_text(g_rudder_values[index],text);
+    lv_obj_set_style_text_color(g_rudder_values[index],
+        degrees<0?lv_color_hex(0xFF3B30):(degrees>0?lv_color_hex(0x34C759):ui_text()),0);
+
+    // Visual scale is +/-45 degrees. Only the marker is clamped; the numeric
+    // value always shows the actual PGN 127245 rudder position.
+    const double clamped=degrees<-45.0?-45.0:(degrees>45.0?45.0:degrees);
+    const int marker_w=10;
+    const int x=track_x+static_cast<int>(std::lround((clamped+45.0)/90.0*(track_w-marker_w)));
+    lv_obj_set_size(g_rudder_markers[index],marker_w,24);
+    lv_obj_set_pos(g_rudder_markers[index],x,track_y-9);
+    // Keep the moving pointer white so it remains obvious against either side.
+    lv_obj_set_style_bg_color(g_rudder_markers[index],ui_text(),0);
+    lv_obj_set_style_bg_opa(g_rudder_markers[index],LV_OPA_COVER,0);
+    lv_obj_remove_flag(g_rudder_markers[index],LV_OBJ_FLAG_HIDDEN);
+}
+
 void fit_numeric_tile(size_t index,size_t count,const char *text,const char *unit)
 {
     auto *value=g_tile_values[index];
@@ -495,6 +561,8 @@ void render_active_page()
         lv_obj_set_style_text_align(g_tile_values[i],LV_TEXT_ALIGN_LEFT,0);
         if(i<2 && g_graph_charts[i])lv_obj_add_flag(g_graph_charts[i],LV_OBJ_FLAG_HIDDEN);
         const auto &sel=active.fields[i];lv_label_set_text(g_tile_titles[i],instrument_field_name(sel));
+        if(g_rudder_gauges[i])lv_obj_add_flag(g_rudder_gauges[i],LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(g_tile_values[i],LV_OBJ_FLAG_HIDDEN);lv_obj_remove_flag(g_tile_units[i],LV_OBJ_FLAG_HIDDEN);
         const auto field_id=static_cast<uint8_t>(g_active_page*MAX_DATA_FIELDS_PER_PAGE+i);
         const InstrumentValue v=depth_display[field_id].apply(sel,g_settings.units.depth,field_value(sel,field_id));
         const char *custom=g_tile_labels?g_tile_labels->get(field_id):"";
@@ -510,6 +578,7 @@ void render_active_page()
         }else{
             lv_obj_add_flag(g_tile_sources[i],LV_OBJ_FLAG_HIDDEN);
         }
+        if(sel.metric==DataMetric::RudderGraphic){render_rudder_graphic(i,v);continue;}
         if(sel.metric==DataMetric::Depth && !custom[0]){
             const char *depth_titles[]={"Depth (transducer)","Depth (sensor)","Depth (keel)","Depth (surface)"};
             lv_label_set_text(g_tile_titles[i],depth_titles[v.depth_reference<4?v.depth_reference:0]);
@@ -872,7 +941,7 @@ void source_refresh_cb(lv_event_t *) {n2k_bridge_request_sources();source_picker
 void source_picker_cb(lv_event_t *) {
     const auto &field=g_settings.pages[g_edit_page].fields[g_edit_field];
     lv_obj_clean(g_source_list);
-    const DataMetric metric=g_source_depth_picker?DataMetric::Depth:field.metric;
+    const DataMetric metric=instrument_source_metric(g_source_depth_picker?DataMetric::Depth:field.metric);
     const bool memory_ready=ensure_picker_tables();
     g_source_count=memory_ready?n2k_sources_options(metric,g_picker_tables.get()->sources.data(),g_picker_tables.get()->sources.size()):0;
     lv_label_set_text(g_source_status,g_source_depth_picker?"Select the transducer for these installation distances":n2k_sources_is_gps(metric)?"One GPS for position, altitude, speed and course":"Selection stays locked; missing data shows --");
@@ -1039,6 +1108,28 @@ void create_data_screen()
         lv_obj_set_style_text_font(g_tile_units[i],&lv_font_montserrat_20,0);
         g_tile_sources[i]=lv_label_create(g_tile_boxes[i]);
         lv_obj_set_style_text_font(g_tile_sources[i],&lv_font_montserrat_14,0);
+
+        g_rudder_gauges[i]=lv_obj_create(g_tile_boxes[i]);
+        lv_obj_remove_flag(g_rudder_gauges[i],LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_style_bg_opa(g_rudder_gauges[i],LV_OPA_TRANSP,0);
+        lv_obj_set_style_border_width(g_rudder_gauges[i],0,0);
+        lv_obj_set_style_pad_all(g_rudder_gauges[i],0,0);
+        g_rudder_tracks[i]=lv_obj_create(g_rudder_gauges[i]);
+        g_rudder_markers[i]=lv_obj_create(g_rudder_gauges[i]);
+        g_rudder_centers[i]=lv_obj_create(g_rudder_gauges[i]);
+        for(auto *o:{g_rudder_tracks[i],g_rudder_markers[i],g_rudder_centers[i]}){
+            lv_obj_remove_flag(o,LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_set_style_border_width(o,0,0);
+            lv_obj_set_style_radius(o,0,0);
+            lv_obj_set_style_pad_all(o,0,0);
+        }
+        g_rudder_values[i]=lv_label_create(g_rudder_gauges[i]);
+        lv_obj_set_style_text_font(g_rudder_values[i],&lv_font_montserrat_20,0);
+        g_rudder_ports[i]=lv_label_create(g_rudder_gauges[i]);lv_label_set_text(g_rudder_ports[i],"PORT");
+        g_rudder_starboards[i]=lv_label_create(g_rudder_gauges[i]);lv_label_set_text(g_rudder_starboards[i],"STBD");
+        lv_obj_set_style_text_font(g_rudder_ports[i],&lv_font_montserrat_14,0);
+        lv_obj_set_style_text_font(g_rudder_starboards[i],&lv_font_montserrat_14,0);
+        lv_obj_add_flag(g_rudder_gauges[i],LV_OBJ_FLAG_HIDDEN);
     }
 
     for(size_t i=0;i<MAX_DATA_PAGES;++i){

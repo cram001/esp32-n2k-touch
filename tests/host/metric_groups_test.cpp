@@ -21,6 +21,8 @@ int main() {
                 DataMetric::CabinTemperature,DataMetric::EngineRoomTemperature,
                 DataMetric::EnvironmentalTemperature,DataMetric::AtmosphericPressure,DataMetric::Humidity})
         assert(metric_group(m)==MetricGroup::Environment);
+    assert(metric_group(DataMetric::RudderGraphic)==MetricGroup::Navigation);
+    assert(!metric_graphable(DataMetric::RudderGraphic));
     for(unsigned i=0;i<unsigned(DataMetric::Count);++i) {
         const auto m=DataMetric(i);
         if((m>=DataMetric::EngineRpm && m<=DataMetric::EngineExhaustTemperature) ||
