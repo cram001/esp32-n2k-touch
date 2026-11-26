@@ -94,6 +94,8 @@ jobs:
           /tmp/graph_history_test
           g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -I src tests/host/metric_groups_test.cpp -o /tmp/metric_groups_test
           /tmp/metric_groups_test
+          g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/host -I src src/trip_log.cpp tests/host/nvs_fake.cpp tests/host/trip_log_test.cpp -o /tmp/trip_log_test
+          /tmp/trip_log_test
           g++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -I tests/host -I src src/tile_labels.cpp tests/host/nvs_fake.cpp tests/host/tile_labels_test.cpp -o /tmp/tile_labels_test
           /tmp/tile_labels_test
 
